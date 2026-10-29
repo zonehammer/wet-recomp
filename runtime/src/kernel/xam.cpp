@@ -229,3 +229,30 @@ GUEST_IMPORT(XNotifyGetNext)
 }
 
 GUEST_IMPORT(XNotifyPositionUI) {}
+
+// XexGetModuleSection(module, const char* name, void** data, u32* size)
+// Looks up an XEX resource (RESOURCE_INFO header: be32 size, then 16-byte entries
+// { char name[8]; be32 address; be32 size; }).
+GUEST_IMPORT(XexGetModuleSection)
+{
+    std::string want = ReadCString(Arg(ctx, 1), 8);
+    uint32_t info = XexHeaderField(g_module.guestHeader, 0x000002FF);
+    if (info)
+    {
+        uint32_t count = (Ld32(info) - 4) / 16;
+        for (uint32_t i = 0; i < count; i++)
+        {
+            uint32_t e = info + 4 + i * 16;
+            std::string name = ReadCString(e, 8);
+            if (name == want)
+            {
+                if (Arg(ctx, 2)) St32(Arg(ctx, 2), Ld32(e + 8));
+                if (Arg(ctx, 3)) St32(Arg(ctx, 3), Ld32(e + 12));
+                Log("XexGetModuleSection(\"%s\") -> 0x%08X, 0x%X bytes", name.c_str(), Ld32(e + 8), Ld32(e + 12));
+                return Ret(ctx, STATUS_SUCCESS);
+            }
+        }
+    }
+    Log("XexGetModuleSection(\"%s\"): no such resource", want.c_str());
+    Ret(ctx, 0xC0000225); // STATUS_NOT_FOUND
+}
