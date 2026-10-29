@@ -315,12 +315,29 @@ namespace wet
             LogFatal("  (not on a guest thread)");
             return;
         }
-        LogFatal("  guest thread %u, last import: %s", t->id, t->currentImport ? t->currentImport : "(none)");
+        LogFatal("  guest thread %u (%s), last import: %s", t->id, t->name.c_str(), t->currentImport ? t->currentImport : "(none)");
         if (t->ctx)
         {
             auto& c = *t->ctx;
             LogFatal("  lr=0x%08llX r1=0x%08X r3=0x%08X r4=0x%08X r5=0x%08X r31=0x%08X",
                      (unsigned long long)c.lr, c.r1.u32, c.r3.u32, c.r4.u32, c.r5.u32, c.r31.u32);
+            // Guest call stack from the back chain: each frame's first word points to
+            // the caller's frame, below which (at -8) the function saved its LR.
+            std::string chain;
+            uint32_t sp = c.r1.u32;
+            for (int i = 0; i < 24; i++)
+            {
+                if (sp < t->stackLimit || sp + 4 > t->stackBase)
+                    break;
+                uint32_t back = Ld32(sp);
+                if (back <= sp || back > t->stackBase)
+                    break;
+                char b[16];
+                std::snprintf(b, sizeof(b), " %08X", Ld32(back - 8));
+                chain += b;
+                sp = back;
+            }
+            LogFatal("  guest call stack (return addresses):%s", chain.empty() ? " (none)" : chain.c_str());
         }
     }
 
