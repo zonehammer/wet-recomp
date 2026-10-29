@@ -44,6 +44,21 @@ def run(cmd, **kw):
         sys.exit(f"\nFAILED (exit code {r.returncode}): {' '.join(cmd)}")
 
 
+def find_llvm_mingw():
+    """Locate an unzipped llvm-mingw when clang++ isn't on PATH (Windows)."""
+    import glob
+    roots = [os.environ.get("SystemDrive", "C:") + "\\", os.path.expanduser("~"),
+             os.path.join(os.path.expanduser("~"), "Downloads"), os.path.join(os.path.expanduser("~"), "Desktop"),
+             os.path.dirname(REPO), REPO]
+    roots += [f"{d}:\\" for d in "CDEFGH"]
+    for root in roots:
+        for pattern in ("llvm-mingw*/bin/clang++.exe", "llvm-mingw*/llvm-mingw*/bin/clang++.exe"):
+            hits = sorted(glob.glob(os.path.join(root, pattern)))
+            if hits:
+                return os.path.dirname(hits[-1])
+    return None
+
+
 def need(tool, hint):
     if not shutil.which(tool):
         sys.exit(f"\n'{tool}' was not found on PATH.\n{hint}")
@@ -76,8 +91,14 @@ def main():
         need("clang-cl", "Run this from an 'x64 Native Tools Command Prompt for VS 2022' with the Clang component installed.")
     else:
         cc, cxx = "clang", "clang++"
+        if not shutil.which("clang++") and os.name == "nt":
+            found = find_llvm_mingw()
+            if found:
+                print(f"   clang++ not on PATH; using llvm-mingw found at {found}")
+                os.environ["PATH"] = found + os.pathsep + os.environ["PATH"]
         need("clang++", "Install a Clang toolchain. On Windows without Visual Studio: unzip llvm-mingw\n"
-                        "(https://github.com/mstorsjo/llvm-mingw/releases, *-ucrt-x86_64.zip) and add its bin folder to PATH.")
+                        "(https://github.com/mstorsjo/llvm-mingw/releases, *-ucrt-x86_64.zip) to C:\\ (e.g. C:\\llvm-mingw)\n"
+                        "and build.py will find it, or add its bin folder (the one containing clang++.exe) to PATH.")
     subprocess.run([cxx, "--version"])
 
     step("XenonRecomp submodule")
