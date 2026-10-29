@@ -2,6 +2,7 @@
 #include "objects.h"
 
 #include <atomic>
+#include <deque>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -34,6 +35,11 @@ namespace wet
         uint32_t affinity = 0x3F;
 
         PPCContext* ctx = nullptr;
+
+        // User-mode APCs (NtQueueApcThread), run when the thread waits alertably.
+        // Guarded by the dispatcher lock.
+        struct Apc { uint32_t routine, context, arg1, arg2; };
+        std::deque<Apc> apcs;
         const char* currentImport = nullptr;
 
         // Diagnostics (see StartStallMonitor)
@@ -57,6 +63,10 @@ namespace wet
     std::shared_ptr<GuestThread> StartMainThread(uint32_t entryPoint, uint32_t stackSize);
 
     [[noreturn]] void ExitGuestThread(uint32_t exitCode);
+
+    // Runs the calling thread's queued APCs (call without the dispatcher lock held).
+    // Returns true if any ran.
+    bool DeliverApcs();
 
     // Gives the calling host thread its own guest stack/PCR/TLS so it can call guest
     // code (used for interrupt delivery). Returns the thread's context.

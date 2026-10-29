@@ -428,6 +428,13 @@ GUEST_IMPORT(KeDelayExecutionThread)
     uint32_t intervalPtr = Arg(ctx, 2);
     int64_t v = intervalPtr ? int64_t(Ld64(intervalPtr)) : 0;
     int64_t ns = v < 0 ? -v * 100 : (v > 0 ? (v - int64_t(CurrentFileTime())) * 100 : 0);
+    if (Arg(ctx, 1))
+    {
+        // Alertable (SleepEx(..., TRUE)): queued APCs end the sleep.
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::nanoseconds(ns > 0 ? ns : 0);
+        uint32_t r = WaitForObjects({}, false, deadline, true);
+        return Ret(ctx, r == STATUS_USER_APC ? STATUS_USER_APC : STATUS_SUCCESS);
+    }
     if (ns <= 0)
         os::YieldThread();
     else
@@ -435,6 +442,58 @@ GUEST_IMPORT(KeDelayExecutionThread)
         WaitScope ws("sleep " + std::to_string(ns / 1000000) + " ms");
         os::SleepNs(uint64_t(ns));
     }
+    Ret(ctx, STATUS_SUCCESS);
+}
+
+namespace wet
+{
+    bool DeliverApcs()
+    {
+        GuestThread* self = CurrentThread();
+        if (!self || !self->ctx)
+            return false;
+        bool any = false;
+        for (;;)
+        {
+            GuestThread::Apc apc;
+            {
+                std::lock_guard lock(DispatchLock());
+                if (self->apcs.empty())
+                    break;
+                apc = self->apcs.front();
+                self->apcs.pop_front();
+            }
+            any = true;
+            // NormalRoutine(NormalContext, SystemArgument1, SystemArgument2), run on a
+            // copy of the registers so the interrupted import returns normally.
+            PPCContext& ctx = *self->ctx;
+            PPCContext saved = ctx;
+            ctx.r1.u64 = (saved.r1.u32 - 0x100) & ~0xFull;
+            ctx.r3.u64 = apc.context;
+            ctx.r4.u64 = apc.arg1;
+            ctx.r5.u64 = apc.arg2;
+            const char* import = self->currentImport;
+            CallGuest(ctx, apc.routine);
+            self->currentImport = import;
+            ctx = saved;
+        }
+        return any;
+    }
+}
+
+// NtQueueApcThread(thread_handle, apc_routine, apc_routine_context, arg1, arg2)
+GUEST_IMPORT(NtQueueApcThread)
+{
+    auto t = LookupHandleAs<GuestThread>(Arg(ctx, 0), ObjType::Thread);
+    if (!t)
+        return Ret(ctx, STATUS_INVALID_HANDLE);
+    {
+        std::lock_guard lock(DispatchLock());
+        if (t->exited)
+            return Ret(ctx, STATUS_UNSUCCESSFUL);
+        t->apcs.push_back({ Arg(ctx, 1), Arg(ctx, 2), Arg(ctx, 3), Arg(ctx, 4) });
+    }
+    DispatchNotify();
     Ret(ctx, STATUS_SUCCESS);
 }
 

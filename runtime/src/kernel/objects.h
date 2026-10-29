@@ -121,8 +121,11 @@ namespace wet
     std::optional<std::chrono::steady_clock::time_point> DeadlineFromTimeout(uint32_t timeoutPtr);
 
     // Returns STATUS_WAIT_0 + index, STATUS_TIMEOUT, or (waitAll) STATUS_SUCCESS.
+    // An alertable wait returns STATUS_USER_APC after running queued APCs. With no
+    // objects it is a plain (possibly alertable) sleep that ends in STATUS_TIMEOUT.
     uint32_t WaitForObjects(const std::vector<ObjectPtr>& objects, bool waitAll,
-                            std::optional<std::chrono::steady_clock::time_point> deadline);
+                            std::optional<std::chrono::steady_clock::time_point> deadline,
+                            bool alertable = false);
 
     // ---- Handles ----
     constexpr uint32_t kCurrentThreadHandle = 0xFFFFFFFE;

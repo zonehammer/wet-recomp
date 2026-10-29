@@ -85,6 +85,11 @@ def evaluate(img, ranges, cmp_addr, idx_reg):
     idx_live = False    # the index is only defined from the bounds check onwards
     for a in (x for lo, hi in ranges for x in range(lo, hi, 4)):
         if a == cmp_addr:
+            # Copies of the index taken before the bounds check (`mr r4,r3; cmplwi r3,N`)
+            # hold the same value.
+            for r, v in list(regs.items()):
+                if v == ("m", idx_reg):
+                    regs[r] = ("i", 1)
             regs[idx_reg] = ("i", 1)
             idx_live = True
         w = img.u32(a)
@@ -133,7 +138,8 @@ def evaluate(img, ranges, cmp_addr, idx_reg):
             if xo == 467 and (((w >> 16) & 31) | (((w >> 11) & 31) << 5)) == 9:   # mtctr
                 target = g(rD)
             elif xo == 444 and rD == rB:        # mr rA, rS
-                if g(rD): regs[rA] = g(rD)
+                if g(rD) and g(rD)[0] != "m": regs[rA] = g(rD)
+                elif not idx_live: regs[rA] = ("m", rD)
                 else: kill(rA)
             elif xo == 266:                     # add rD, rA, rB
                 x, y = g(rA), g(rB)

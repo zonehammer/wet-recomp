@@ -80,7 +80,8 @@ namespace wet
     }
 
     uint32_t WaitForObjects(const std::vector<ObjectPtr>& objects, bool waitAll,
-                            std::optional<std::chrono::steady_clock::time_point> deadline)
+                            std::optional<std::chrono::steady_clock::time_point> deadline,
+                            bool alertable)
     {
         GuestThread* self = CurrentThread();
         std::optional<WaitScope> scope;
@@ -114,6 +115,13 @@ namespace wet
                 }
             }
 
+            if (alertable && self && !self->apcs.empty())
+            {
+                lock.unlock();
+                DeliverApcs();
+                return STATUS_USER_APC;
+            }
+
             auto now = std::chrono::steady_clock::now();
             if (deadline && now >= *deadline)
                 return STATUS_TIMEOUT;
@@ -121,7 +129,7 @@ namespace wet
             if (first)
             {
                 static const char* kNames[] = { "event", "semaphore", "mutant", "thread", "iocompletion", "file", "notify", "object" };
-                std::string what = waitAll ? "all of " : (objects.size() > 1 ? "any of " : "");
+                std::string what = objects.empty() ? "alertable sleep" : waitAll ? "all of " : (objects.size() > 1 ? "any of " : "");
                 for (size_t i = 0; i < objects.size() && i < 4; i++)
                 {
                     char buf[48];

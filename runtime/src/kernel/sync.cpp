@@ -11,11 +11,11 @@
 using namespace wet;
 
 // Result of a wait on a single object, mapped back to NTSTATUS.
-static uint32_t WaitOne(const ObjectPtr& obj, uint32_t timeoutPtr)
+static uint32_t WaitOne(const ObjectPtr& obj, uint32_t timeoutPtr, bool alertable)
 {
     if (!obj)
         return STATUS_INVALID_HANDLE;
-    return WaitForObjects({ obj }, false, DeadlineFromTimeout(timeoutPtr)); // 0 == STATUS_WAIT_0
+    return WaitForObjects({ obj }, false, DeadlineFromTimeout(timeoutPtr), alertable); // 0 == STATUS_WAIT_0
 }
 
 // ---------------------------------------------------------------------------
@@ -175,7 +175,7 @@ GUEST_IMPORT(NtReleaseMutant)
 // NtWaitForSingleObjectEx(handle, wait_mode, alertable, timeout*)
 GUEST_IMPORT(NtWaitForSingleObjectEx)
 {
-    Ret(ctx, WaitOne(LookupHandle(Arg(ctx, 0)), Arg(ctx, 3)));
+    Ret(ctx, WaitOne(LookupHandle(Arg(ctx, 0)), Arg(ctx, 3), Arg(ctx, 2) != 0));
 }
 
 // NtWaitForMultipleObjectsEx(count, handles*, wait_type, wait_mode, alertable, timeout*)
@@ -190,13 +190,13 @@ GUEST_IMPORT(NtWaitForMultipleObjectsEx)
             return Ret(ctx, STATUS_INVALID_HANDLE);
         objs.push_back(o);
     }
-    Ret(ctx, WaitForObjects(objs, Arg(ctx, 2) == 0 /* WaitAll */, DeadlineFromTimeout(Arg(ctx, 5))));
+    Ret(ctx, WaitForObjects(objs, Arg(ctx, 2) == 0 /* WaitAll */, DeadlineFromTimeout(Arg(ctx, 5)), Arg(ctx, 4) != 0));
 }
 
 // KeWaitForSingleObject(object*, wait_reason, processor_mode, alertable, timeout*)
 GUEST_IMPORT(KeWaitForSingleObject)
 {
-    Ret(ctx, WaitOne(ObjectFromGuest(Arg(ctx, 0)), Arg(ctx, 4)));
+    Ret(ctx, WaitOne(ObjectFromGuest(Arg(ctx, 0)), Arg(ctx, 4), Arg(ctx, 3) != 0));
 }
 
 // KeWaitForMultipleObjects(count, objects**, wait_type, reason, mode, alertable, timeout*, wait_blocks*)
@@ -211,7 +211,7 @@ GUEST_IMPORT(KeWaitForMultipleObjects)
             return Ret(ctx, STATUS_INVALID_PARAMETER);
         objs.push_back(o);
     }
-    Ret(ctx, WaitForObjects(objs, Arg(ctx, 2) == 0, DeadlineFromTimeout(Arg(ctx, 6))));
+    Ret(ctx, WaitForObjects(objs, Arg(ctx, 2) == 0, DeadlineFromTimeout(Arg(ctx, 6)), Arg(ctx, 5) != 0));
 }
 
 // ---------------------------------------------------------------------------
