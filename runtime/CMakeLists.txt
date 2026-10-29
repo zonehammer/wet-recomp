@@ -46,11 +46,23 @@ add_custom_command(
     DEPENDS ${WET_ROOT}/tools/gen_import_stubs.py ${WET_GENERATED_DIR}/ppc_recomp_shared.h ${WET_KERNEL_SOURCES}
     COMMENT "Generating import stubs")
 
+# The renderer bridge is compiled with Xenia's settings (C++17, its include paths).
+list(FILTER WET_RUNTIME_SOURCES EXCLUDE REGEX "/src/gpu/xenia_bridge\\.cpp$")
+if(WET_RENDERER)
+    add_library(WetRenderer STATIC ${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/xenia_bridge.cpp)
+    xe_target(WetRenderer)
+    target_include_directories(WetRenderer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(WetRenderer PUBLIC xe_gpu)
+else()
+    add_library(WetRenderer STATIC ${CMAKE_CURRENT_SOURCE_DIR}/renderer_stub/renderer_stub.cpp)
+    target_include_directories(WetRenderer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+endif()
+
 add_executable(WetRecomp ${WET_RUNTIME_SOURCES} ${WET_STUBS_CPP})
 # XenonUtils headers come via the XenonUtils link (after WetPPC, so the generated
 # ppc_context.h wins over the template of the same name).
 target_include_directories(WetRecomp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${XR_DIR}/thirdparty/TinySHA1)
-target_link_libraries(WetRecomp PRIVATE WetPPC XenonUtils Threads::Threads)
+target_link_libraries(WetRecomp PRIVATE WetPPC WetRenderer XenonUtils Threads::Threads)
 
 if(WIN32)
     target_compile_definitions(WetRecomp PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)

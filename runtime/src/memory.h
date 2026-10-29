@@ -97,4 +97,13 @@ namespace wet
     constexpr uint32_t kMmioBase = 0x7FC80000;
     constexpr uint32_t kMmioSize = 0x80000000 - kMmioBase;
     constexpr uint32_t kGpuRegisterBase = 0x7FC80000;
+
+    // ---- Physical-page write watches (the renderer's cache invalidation) ----
+    // A watched page is read-only in all guest views of physical memory; the first
+    // write to it calls the callback (physical start, length) and unwatches it.
+    using PhysicalWriteCallback = void (*)(uint32_t physStart, uint32_t length);
+    void SetPhysicalWriteCallback(PhysicalWriteCallback callback);
+    void WatchPhysical(uint32_t physStart, uint32_t length);
+    // A mapping of physical memory that is never watched (index = physical address).
+    uint8_t* PhysicalHostView();
 }

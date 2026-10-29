@@ -45,6 +45,9 @@ namespace wet::os
 #define MEM_PRESERVE_PLACEHOLDER 0x00000002
 #endif
 
+    static HANDLE s_physicalSection = nullptr;
+    static WriteFaultHandler s_writeFaultHandler = nullptr;
+
     // Placeholder APIs (Windows 10 1803+), loaded at run time so older headers work.
     using VirtualAlloc2Fn = PVOID(WINAPI*)(HANDLE, PVOID, SIZE_T, ULONG, ULONG, void*, ULONG);
     using MapViewOfFile3Fn = PVOID(WINAPI*)(HANDLE, HANDLE, PVOID, ULONG64, SIZE_T, ULONG, ULONG, void*, ULONG);
@@ -111,7 +114,10 @@ namespace wet::os
                 *failureReason = segs[i].view ? "MapViewOfFile3 failed (alignment?)" : "VirtualAlloc2 replace failed";
             }
         }
-        CloseHandle(section); // views keep the section alive
+        if (ok)
+            s_physicalSection = section; // kept for MapPhysicalAgain
+        else
+            CloseHandle(section);
         if (!ok)
         {
             // Best effort cleanup; the caller may retry with a different layout.
@@ -127,6 +133,35 @@ namespace wet::os
     }
 
     void Release(uint8_t* base, uint64_t total) { VirtualFree(base, 0, MEM_RELEASE); }
+
+    uint8_t* MapPhysicalAgain(uint64_t size)
+    {
+        if (!s_physicalSection)
+            return nullptr;
+        return static_cast<uint8_t*>(MapViewOfFile(s_physicalSection, FILE_MAP_ALL_ACCESS, 0, 0, SIZE_T(size)));
+    }
+    bool ProtectReadOnly(void* p, size_t size)
+    {
+        DWORD old;
+        return VirtualProtect(p, size, PAGE_READONLY, &old) != 0;
+    }
+    bool ProtectReadWrite(void* p, size_t size)
+    {
+        DWORD old;
+        return VirtualProtect(p, size, PAGE_READWRITE, &old) != 0;
+    }
+    void SetWriteFaultHandler(WriteFaultHandler handler) { s_writeFaultHandler = handler; }
+
+    // First in line for every exception: resolves write-watch faults.
+    static LONG WINAPI WatchVectoredHandler(PEXCEPTION_POINTERS info)
+    {
+        auto* rec = info->ExceptionRecord;
+        if (rec->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && rec->NumberParameters >= 2 &&
+            rec->ExceptionInformation[0] == 1 && s_writeFaultHandler &&
+            s_writeFaultHandler(uintptr_t(rec->ExceptionInformation[1])))
+            return EXCEPTION_CONTINUE_EXECUTION;
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
     bool Commit(void* p, size_t size) { return VirtualAlloc(p, size, MEM_COMMIT, PAGE_READWRITE) != nullptr; }
     void Decommit(void* p, size_t size) { VirtualFree(p, size, MEM_DECOMMIT); }
 
@@ -190,6 +225,7 @@ namespace wet::os
         s_guestBase = guestBase;
         s_guestSize = guestSize;
         SetUnhandledExceptionFilter(UnhandledFilter);
+        AddVectoredExceptionHandler(1, WatchVectoredHandler);
     }
 #else
     void* Reserve(size_t size)
@@ -197,6 +233,9 @@ namespace wet::os
         void* p = mmap(nullptr, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
         return p == MAP_FAILED ? nullptr : p;
     }
+    static int s_physicalFd = -1;
+    static WriteFaultHandler s_writeFaultHandler = nullptr;
+
     uint8_t* ReserveWithAliases(uint64_t total, const AliasView* views, int viewCount, uint64_t physicalSize,
                                 const char** failureReason)
     {
@@ -225,9 +264,20 @@ namespace wet::os
                 return nullptr;
             }
         }
-        close(fd);
+        s_physicalFd = fd; // kept for MapPhysicalAgain
         return base;
     }
+
+    uint8_t* MapPhysicalAgain(uint64_t size)
+    {
+        if (s_physicalFd < 0)
+            return nullptr;
+        void* p = mmap(nullptr, size_t(size), PROT_READ | PROT_WRITE, MAP_SHARED, s_physicalFd, 0);
+        return p == MAP_FAILED ? nullptr : static_cast<uint8_t*>(p);
+    }
+    bool ProtectReadOnly(void* p, size_t size) { return mprotect(p, size, PROT_READ) == 0; }
+    bool ProtectReadWrite(void* p, size_t size) { return mprotect(p, size, PROT_READ | PROT_WRITE) == 0; }
+    void SetWriteFaultHandler(WriteFaultHandler handler) { s_writeFaultHandler = handler; }
 
     void Release(uint8_t* base, uint64_t total) { munmap(base, size_t(total)); }
 
@@ -266,7 +316,12 @@ namespace wet::os
     {
         switch (sig)
         {
-        case SIGSEGV: ReportFault("Access violation", uintptr_t(info->si_addr)); break;
+        case SIGSEGV:
+            // Write-watched pages are read-only, so any fault on them is a write.
+            if (s_writeFaultHandler && s_writeFaultHandler(uintptr_t(info->si_addr)))
+                return;
+            ReportFault("Access violation", uintptr_t(info->si_addr));
+            break;
         case SIGBUS:  ReportFault("Bus error", uintptr_t(info->si_addr)); break;
         case SIGILL:
         case SIGTRAP: LogFatal("Trap/illegal instruction at host %p", info->si_addr); LogCrashContext(); break;

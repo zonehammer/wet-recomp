@@ -1,3 +1,6 @@
 [submodule "thirdparty/XenonRecomp"]
 	path = thirdparty/XenonRecomp
 	url = https://github.com/hedge-dev/XenonRecomp
+[submodule "thirdparty/xenia"]
+	path = thirdparty/xenia
+	url = https://github.com/xenia-project/xenia

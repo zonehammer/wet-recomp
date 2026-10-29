@@ -3,6 +3,8 @@
 #include "os.h"
 
 #include <iterator>
+#include <mutex>
+#include <vector>
 #include <cstring>
 
 namespace wet
@@ -274,5 +276,111 @@ namespace wet
         if (phys >= it->first + it->second.first)
             return 0;
         return PhysicalToView(phys, it->second.second);
+    }
+
+    // ------------------------------------------------------------------
+    // Write watches
+    // ------------------------------------------------------------------
+    static constexpr uint32_t kPhysPages = 0x20000000 / kHostPage;
+    static std::mutex s_watchLock;
+    static std::vector<uint8_t> s_watched;          // one byte per 4 KB physical page
+    static PhysicalWriteCallback s_watchCallback = nullptr;
+    static uint8_t* s_physHostView = nullptr;
+
+    // Host addresses of a physical page in the three guest views (nullptr if absent).
+    static void PageViews(uint32_t page, uint8_t* out[3])
+    {
+        uint32_t phys = page * kHostPage;
+        out[0] = g_mem.base + 0xA0000000u + phys;
+        out[1] = phys < 0x1FFFF000u || g_mem.eViewOffset == 0 ? g_mem.base + 0xC0000000u + phys : nullptr;
+        out[2] = g_mem.base + (0xE0000000u - g_mem.eViewOffset) + phys;
+    }
+
+    static void SetRangeProtection(uint32_t firstPage, uint32_t count, bool readOnly)
+    {
+        uint8_t* views[3];
+        PageViews(firstPage, views);
+        size_t size = size_t(count) * kHostPage;
+        for (int i = 0; i < 3; i++)
+        {
+            if (!views[i])
+                continue;
+            size_t n = size;
+            // The exact-layout 0xC0000000 view lacks the last physical page.
+            if (i == 1 && g_mem.eViewOffset && (firstPage + count) * uint64_t(kHostPage) > 0x1FFFF000u)
+                n = 0x1FFFF000u - firstPage * kHostPage;
+            if (n)
+                readOnly ? os::ProtectReadOnly(views[i], n) : os::ProtectReadWrite(views[i], n);
+        }
+    }
+    static void SetPageProtection(uint32_t page, bool readOnly) { SetRangeProtection(page, 1, readOnly); }
+
+    static bool OnWriteFault(uintptr_t host)
+    {
+        uintptr_t base = uintptr_t(g_mem.base);
+        if (host < base + 0xA0000000u || host >= base + 0x100000000ull)
+            return false;
+        uint32_t guest = uint32_t(host - base);
+        uint32_t page = ViewToPhysical(guest) / kHostPage;
+        if (page >= kPhysPages)
+            return false;
+        {
+            std::lock_guard lock(s_watchLock);
+            if (s_watched.empty())
+                return false;
+            if (!s_watched[page])
+                return true; // another thread got here first and unprotected it: retry
+            SetPageProtection(page, false);
+            s_watched[page] = 0;
+        }
+        // Outside the lock: the callback takes the renderer's own locks, and the
+        // renderer may be adding watches meanwhile.
+        if (s_watchCallback)
+            s_watchCallback(page * kHostPage, kHostPage);
+        return true;
+    }
+
+    void SetPhysicalWriteCallback(PhysicalWriteCallback callback)
+    {
+        std::lock_guard lock(s_watchLock);
+        s_watchCallback = callback;
+        if (s_watched.empty())
+        {
+            s_watched.assign(kPhysPages, 0);
+            os::SetWriteFaultHandler(OnWriteFault);
+        }
+    }
+
+    void WatchPhysical(uint32_t physStart, uint32_t length)
+    {
+        if (!length)
+            return;
+        uint32_t first = (physStart & 0x1FFFFFFF) / kHostPage;
+        uint64_t end = (uint64_t(physStart & 0x1FFFFFFF) + length + kHostPage - 1) / kHostPage;
+        if (end > kPhysPages)
+            end = kPhysPages;
+        std::lock_guard lock(s_watchLock);
+        if (s_watched.empty())
+            return;
+        for (uint32_t p = first; p < end;)
+        {
+            if (s_watched[p]) { p++; continue; }
+            uint32_t run = p;
+            while (run < end && !s_watched[run])
+                s_watched[run++] = 1;
+            SetRangeProtection(p, run - p, true);
+            p = run;
+        }
+    }
+
+    uint8_t* PhysicalHostView()
+    {
+        static std::once_flag once;
+        std::call_once(once, [] {
+            s_physHostView = os::MapPhysicalAgain(0x20000000);
+            if (!s_physHostView)
+                LogFatal("Could not map physical memory a second time for the renderer");
+        });
+        return s_physHostView;
     }
 }

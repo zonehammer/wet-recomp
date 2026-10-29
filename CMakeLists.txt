@@ -75,6 +75,14 @@ add_custom_target(recompile
     VERBATIM)
 
 # ---------------------------------------------------------------------------
+# Renderer: Xenia's GPU emulation (Vulkan)
+# ---------------------------------------------------------------------------
+option(WET_RENDERER "Build the Vulkan renderer (Xenia's GPU emulation)" ON)
+if(WET_RENDERER)
+    include(cmake/xenia.cmake)
+endif()
+
+# ---------------------------------------------------------------------------
 # Runtime (only once the generated code exists)
 # ---------------------------------------------------------------------------
 if(EXISTS ${WET_GENERATED_DIR}/ppc_func_mapping.cpp)

@@ -16,8 +16,12 @@
 // VdInitializeScalerCommandBuffer reports the length of the buffer it fills: both
 // end up inside the command stream, so getting them wrong desynchronises the CP.
 //
-// TODO (real GPU work): execute draws and state, translate rendering to D3D12/Vulkan.
+// With the renderer (gpu/xenia_bridge.cpp, the default when built in), Xenia's
+// command processor executes the ring instead: this file then only forwards the
+// Vd* calls and polls the GPU registers the title writes through MMIO.
 #include "kernel.h"
+#include "module.h"
+#include "gpu/renderer.h"
 #include "os.h"
 #include "threads.h"
 
@@ -588,6 +592,41 @@ namespace
         SetReg(0x0F00, 0x08100748);   // RB_EDRAM_TIMING
         SetReg(0x0F01, 0x0000200E);   // RB_BC_CONTROL
 
+        if (renderer::Running())
+        {
+            // Xenia's command processor and vsync threads do the real work. MMIO is
+            // plain memory, so pass the title's register writes on: CP_RB_WPTR kicks
+            // the CP, the rest (scratch registers, ...) go into its register file.
+            constexpr uint32_t kMirror = 0x2000;
+            std::vector<uint32_t> seen(kMirror);
+            for (uint32_t i = 0; i < kMirror; i++)
+                seen[i] = Reg(i);
+            for (uint64_t tick = 0;; tick++)
+            {
+                os::SleepNs(250000);
+                uint32_t wptr = Reg(kRegCpRbWptr);
+                if (wptr != seen[kRegCpRbWptr])
+                {
+                    seen[kRegCpRbWptr] = wptr;
+                    renderer::UpdateWritePointer(wptr);
+                }
+                if ((tick & 3) == 0)
+                    for (uint32_t i = 0; i < kMirror; i++)
+                    {
+                        uint32_t v = Reg(i);
+                        if (v != seen[i] && i != kRegCpRbWptr)
+                        {
+                            seen[i] = v;
+                            renderer::WriteRegister(i, v);
+                        }
+                    }
+                // Display registers the title polls.
+                SetReg(0x1951, 1);
+                SetReg(0x194C, 0x000002D0);
+                SetReg(kRegCpRbRptr, renderer::ReadRegister(kRegCpRbRptr));
+            }
+        }
+
         s_nextVblank = os::MonotonicNs() + kVblankNs;
         uint32_t rptr = 0;
         uint32_t reported = 0;
@@ -684,6 +723,8 @@ namespace
     void EnsureGpu()
     {
         std::call_once(s_gpuStarted, [] {
+            if (renderer::Enabled())
+                renderer::Start(g_mem.base, g_module.titleId);
             if (!os::StartThread(GpuThreadMain, nullptr, 16 << 20))
                 LogFatal("Could not start the GPU thread");
         });
@@ -697,6 +738,7 @@ GUEST_IMPORT(VdSetGraphicsInterruptCallback)
     s_interruptUser = Arg(ctx, 1);
     Log("VdSetGraphicsInterruptCallback(0x%08X, 0x%08X)", Arg(ctx, 0), Arg(ctx, 1));
     EnsureGpu();
+    renderer::SetInterruptCallback(Arg(ctx, 0), Arg(ctx, 1));
 }
 
 // VdInitializeRingBuffer(physical_address, size_log2)
@@ -707,6 +749,7 @@ GUEST_IMPORT(VdInitializeRingBuffer)
     Log("VdInitializeRingBuffer(0x%08X -> guest 0x%08X, %u bytes)", Arg(ctx, 0), PhysicalToGuest(Arg(ctx, 0)),
         1u << (Arg(ctx, 1) + 3));
     EnsureGpu();
+    renderer::InitializeRingBuffer(Arg(ctx, 0), Arg(ctx, 1));
 }
 
 // VdEnableRingBufferRPtrWriteBack(physical_address, block_size_log2)
@@ -714,6 +757,8 @@ GUEST_IMPORT(VdEnableRingBufferRPtrWriteBack)
 {
     s_rptrWriteBack = Arg(ctx, 0);
     Log("VdEnableRingBufferRPtrWriteBack(0x%08X -> guest 0x%08X)", Arg(ctx, 0), PhysicalToGuest(Arg(ctx, 0)));
+    EnsureGpu();
+    renderer::EnableReadPointerWriteBack(Arg(ctx, 0), Arg(ctx, 1));
 }
 
 GUEST_IMPORT(VdSetSystemCommandBufferGpuIdentifierAddress)
@@ -723,24 +768,39 @@ GUEST_IMPORT(VdSetSystemCommandBufferGpuIdentifierAddress)
 
 // VdSwap(buffer, fetch, unk2, unk3, unk4, frontbuffer*, format*, color_space*, width*, height*)
 // The title reserves 64 dwords in its command buffer at `buffer` for the swap
-// commands. They must be filled: we write one 64-dword type-3 packet carrying the
-// front buffer and size (as Xenia does), which the command processor skips.
+// commands. As in Xenia: the front buffer's texture fetch constant (address made
+// physical) into fetch constant 0, then an XE_SWAP packet with the front buffer
+// and size, then type-2 no-ops.
 constexpr uint32_t kPm4XeSwap = 0x64;
 
 GUEST_IMPORT(VdSwap)
 {
-    uint32_t buffer = Arg(ctx, 0);
+    uint32_t buffer = Arg(ctx, 0), fetch = Arg(ctx, 1);
     uint32_t frontPtr = Arg(ctx, 5), widthPtr = Arg(ctx, 8), heightPtr = Arg(ctx, 9);
     uint32_t front = frontPtr ? Ld32(frontPtr) : 0;
     uint32_t width = widthPtr ? Ld32(widthPtr) : 0, height = heightPtr ? Ld32(heightPtr) : 0;
+    uint32_t frontPhys = ViewToPhysical(front);
     if (buffer)
     {
-        Zero(buffer, 64 * 4);
-        St32(buffer + 0, (3u << 30) | ((63u - 1) << 16) | (kPm4XeSwap << 8));
-        St32(buffer + 4, 0x53574150); // 'SWAP'
-        St32(buffer + 8, front & 0x1FFFFFFF);
-        St32(buffer + 12, width);
-        St32(buffer + 16, height);
+        uint32_t o = buffer;
+        if (fetch)
+        {
+            St32(o, (0u << 30) | ((6u - 1) << 16) | 0x4800); o += 4;  // type 0: SHADER_CONSTANT_FETCH_00_0..5
+            for (uint32_t i = 0; i < 6; i++, o += 4)
+            {
+                uint32_t v = Ld32(fetch + i * 4);
+                if (i == 1)
+                    v = (v & 0xFFF) | (ViewToPhysical(v & ~0xFFFu) & ~0xFFFu);   // base address -> physical
+                St32(o, v);
+            }
+        }
+        St32(o, (3u << 30) | ((4u - 1) << 16) | (kPm4XeSwap << 8)); o += 4;
+        St32(o, 0x53574150); o += 4; // 'SWAP'
+        St32(o, frontPhys); o += 4;
+        St32(o, width); o += 4;
+        St32(o, height); o += 4;
+        for (; o < buffer + 64 * 4; o += 4)
+            St32(o, 0x80000000);    // type-2 no-op
     }
     uint64_t n = ++s_swaps;
     if (n <= 3 || (n & (n - 1)) == 0)

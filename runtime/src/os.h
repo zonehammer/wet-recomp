@@ -16,6 +16,17 @@ namespace wet::os
     uint8_t* ReserveWithAliases(uint64_t total, const AliasView* views, int viewCount, uint64_t physicalSize,
                                 const char** failureReason);
     void Release(uint8_t* base, uint64_t total);
+    // One more mapping of the shared physical memory set up by ReserveWithAliases,
+    // anywhere in the address space (never protected; the renderer's own access path).
+    uint8_t* MapPhysicalAgain(uint64_t size);
+    // Page protection on committed or mapped memory.
+    bool ProtectReadOnly(void* p, size_t size);
+    bool ProtectReadWrite(void* p, size_t size);
+
+    // Called on a write fault at `hostAddress` before the crash handler; returns true
+    // if it made the access valid (the faulting instruction is then retried).
+    using WriteFaultHandler = bool (*)(uintptr_t hostAddress);
+    void SetWriteFaultHandler(WriteFaultHandler handler);
     bool Commit(void* p, size_t size);          // make read/write, zero-filled when fresh
     void Decommit(void* p, size_t size);        // back to no-access, contents discarded
 

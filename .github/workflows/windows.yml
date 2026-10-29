@@ -19,8 +19,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
+
+      - name: Fetch submodules
+        run: python tools/fetch_deps.py
 
       - name: Install Ninja
         run: choco install ninja -y --no-progress

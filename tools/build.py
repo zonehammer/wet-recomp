@@ -6,7 +6,7 @@
 
 Steps (each skipped when already done):
   1. check the toolchain (Clang, CMake, Ninja, Git)
-  2. fetch the XenonRecomp submodule
+  2. fetch the submodules (XenonRecomp; Xenia's GPU code for the renderer)
   3. extract the disc into game/extracted
   4. configure CMake
   5. recompile default.xex into generated/ppc (again whenever config/ changes)
@@ -101,9 +101,11 @@ def main():
                         "and build.py will find it, or add its bin folder (the one containing clang++.exe) to PATH.")
     subprocess.run([cxx, "--version"])
 
-    step("XenonRecomp submodule")
-    if not os.path.exists(os.path.join(REPO, "thirdparty", "XenonRecomp", "thirdparty", "simde", "x86", "sse.h")):
-        run(["git", "submodule", "update", "--init", "--recursive"])
+    step("Submodules (XenonRecomp, Xenia's GPU code and its libraries)")
+    have = os.path.exists(os.path.join(REPO, "thirdparty", "XenonRecomp", "thirdparty", "simde", "x86", "sse.h")) and \
+        os.path.exists(os.path.join(REPO, "thirdparty", "xenia", "third_party", "cxxopts", "include"))
+    if not have:
+        run([sys.executable, os.path.join(REPO, "tools", "fetch_deps.py")])
     else:
         print("   present")
 
