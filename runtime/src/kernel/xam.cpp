@@ -201,11 +201,29 @@ GUEST_IMPORT(XamInputGetKeystrokeEx) { Ret(ctx, ERROR_EMPTY); }
 // Notifications
 // ---------------------------------------------------------------------------
 
+static std::vector<std::weak_ptr<KNotifyListener>> s_listeners; // dispatcher lock
+
+void wet::BroadcastNotification(uint32_t id, uint32_t param)
+{
+    uint64_t bit = 1ull << ((id >> 25) & 0x3F);
+    {
+        std::lock_guard lock(DispatchLock());
+        for (auto& w : s_listeners)
+            if (auto l = w.lock(); l && (l->mask & bit))
+                l->queue.push_back({ id, param });
+    }
+    DispatchNotify();
+}
+
 // XamNotifyCreateListener(u64 mask, max_version) -> handle
 GUEST_IMPORT(XamNotifyCreateListener)
 {
     auto l = std::make_shared<KNotifyListener>(ctx.r3.u64);
     uint32_t h = CreateHandle(l);
+    {
+        std::lock_guard lock(DispatchLock());
+        s_listeners.push_back(l);
+    }
     Log("XamNotifyCreateListener(mask 0x%llX) -> 0x%X", (unsigned long long)ctx.r3.u64, h);
     Ret(ctx, h);
 }

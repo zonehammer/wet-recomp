@@ -53,6 +53,12 @@ static uint32_t SetEventState(const std::shared_ptr<KEvent>& e, int op /* 0 clea
     return prev;
 }
 
+void wet::SignalEventHandle(uint32_t handle)
+{
+    if (auto e = LookupHandleAs<KEvent>(handle, ObjType::Event))
+        SetEventState(e, 1);
+}
+
 // NtSetEvent(handle, previous_state*)
 GUEST_IMPORT(NtSetEvent)
 {

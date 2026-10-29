@@ -42,6 +42,7 @@ namespace
     std::vector<Device> s_devices;
     std::map<std::string, std::string> s_symlinks; // "game:" -> "\device\cdrom0"
     uint64_t s_fixedFileTime = 0;
+    fs::path s_hddDir;
 
     std::string Lower(std::string s)
     {
@@ -345,6 +346,7 @@ namespace wet
         std::error_code ec;
         fs::create_directories(hddDir / "cache", ec);
         s_fixedFileTime = CurrentFileTime();
+        s_hddDir = hddDir;
         std::lock_guard lock(s_vfsLock);
         s_devices = {
             { "\\device\\cdrom0", gameDir, false, "GDFX" },
@@ -388,6 +390,35 @@ namespace wet
             }
             Log("VFS: game:\\%s = %s (disc layers merged)", stem.c_str(), names.c_str());
         }
+    }
+
+    fs::path HddRoot() { return s_hddDir; }
+
+    void MountHostFolder(const std::string& root, const fs::path& host, bool writable)
+    {
+        std::string r = Lower(root);
+        if (!r.empty() && r.back() == ':')
+            r.pop_back();
+        std::string prefix = "\\device\\content\\" + r;
+        std::lock_guard lock(s_vfsLock);
+        s_devices.erase(std::remove_if(s_devices.begin(), s_devices.end(),
+                                       [&](const Device& d) { return d.prefix == prefix; }), s_devices.end());
+        s_devices.push_back({ prefix, host, writable, "FATX" });
+        s_symlinks[r + ":"] = prefix;
+        Log("VFS: %s: -> %s", r.c_str(), host.string().c_str());
+    }
+
+    bool UnmountHostFolder(const std::string& root)
+    {
+        std::string r = Lower(root);
+        if (!r.empty() && r.back() == ':')
+            r.pop_back();
+        std::string prefix = "\\device\\content\\" + r;
+        std::lock_guard lock(s_vfsLock);
+        bool found = s_symlinks.erase(r + ":") != 0;
+        s_devices.erase(std::remove_if(s_devices.begin(), s_devices.end(),
+                                       [&](const Device& d) { return d.prefix == prefix; }), s_devices.end());
+        return found;
     }
 }
 

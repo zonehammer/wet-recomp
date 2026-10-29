@@ -110,6 +110,18 @@ namespace wet
         bool IsSignaled(GuestThread*) override { return !queue.empty(); }
     };
 
+    // Fixed-size records handed out by XamEnumerate (content, achievements, ...).
+    struct KEnumerator : KObject
+    {
+        KEnumerator(uint32_t size, uint32_t perCall) : KObject(ObjType::Other), itemSize(size), itemsPerCall(perCall) {}
+        uint32_t itemSize, itemsPerCall;
+        std::vector<std::vector<uint8_t>> items;
+        size_t next = 0;
+    };
+
+    // Queues a notification (XN_SYS_UI, ...) for every listener whose mask covers it.
+    void BroadcastNotification(uint32_t id, uint32_t param);
+
     using ObjectPtr = std::shared_ptr<KObject>;
 
     // ---- Dispatcher ----
@@ -126,6 +138,9 @@ namespace wet
     uint32_t WaitForObjects(const std::vector<ObjectPtr>& objects, bool waitAll,
                             std::optional<std::chrono::steady_clock::time_point> deadline,
                             bool alertable = false);
+
+    // Sets the event behind a handle (XOVERLAPPED completion etc.); ignores other handles.
+    void SignalEventHandle(uint32_t handle);
 
     // ---- Handles ----
     constexpr uint32_t kCurrentThreadHandle = 0xFFFFFFFE;

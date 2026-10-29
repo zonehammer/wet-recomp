@@ -41,6 +41,14 @@ namespace
     std::atomic<uint32_t> s_interruptCallback{ 0 }, s_interruptUser{ 0 };
     std::atomic<uint32_t> s_ringBase{ 0 }, s_ringSizeLog2{ 0 }, s_rptrWriteBack{ 0 };
     std::atomic<uint64_t> s_vblanks{ 0 }, s_swaps{ 0 };
+    // Swaps the command processor has executed (Xenia's counter_). EVENT_WRITE_SHD
+    // reports this; the title uses it as a fence to recycle command and vertex
+    // memory, so it must not run ahead of the CP the way VdSwap calls do.
+    std::atomic<uint64_t> s_cpSwaps{ 0 };
+    // Timing of the CP's work, for the overrun report.
+    uint64_t s_lastWaitNs = 0, s_lastWaitEndNs = 0, s_batchStartNs = 0;
+    uint32_t s_batchFrom = 0, s_batchTo = 0, s_lastWaitAt = 0, s_curRingPos = 0, s_lastWaitRingPos = 0;
+    uint32_t s_lastWaitArgs[4] = {}, s_lastWaitStartV = 0, s_lastWaitEndV = 0;
     std::once_flag s_gpuStarted;
 
     uint32_t Reg(uint32_t index) { return Ld32(kGpuRegisterBase + index * 4); }
@@ -114,6 +122,9 @@ namespace
         return h;
     }
     uint32_t s_ringScanPos = 0;   // ring dword index scanned so far (absolute, may exceed size)
+    // Always on (cheap): the first dwords of each IB when the scanner first saw it.
+    struct IbSeen { uint32_t first[4]; uint64_t ns; uint32_t ringPos; };
+    std::unordered_map<uint32_t, IbSeen> s_ibSeen;
     void ScanRingAhead();
 
     bool Compare(uint32_t func, uint32_t value, uint32_t ref)
@@ -140,6 +151,10 @@ namespace
         bool warnedUnmapped = false;
 
         uint32_t scratchSeen[8] = {};
+        // Tiled-rendering predication (SET_BIN_MASK/SELECT): a type-3 packet with
+        // bit 0 of its header set only runs if (bin_select & bin_mask) != 0.
+        uint64_t binMask = ~0ull, binSelect = ~0ull;
+        uint64_t predicatedSkipped = 0;
 
         void ScratchWriteBack(uint32_t n, uint32_t value)
         {
@@ -222,11 +237,21 @@ namespace
         uint32_t curPacket = 0, curBase = 0, curStart = 0, curEnd = 0;
         int curDepth = 0;
 
+        struct Hist { uint32_t addr, header; int depth; };
+        Hist hist[16] = {};
+        uint32_t histN = 0;
+        bool dumped = false;
+        struct IbHist { uint32_t from, guest, size; int depth; };
+        IbHist ibHist[8] = {};
+        uint32_t ibHistN = 0;
+
         void Execute(Reader& r, uint32_t endPos, int depth)
         {
             while (r.pos < endPos)
             {
                 curPacket = r.base + (r.pos % r.sizeDwords) * 4;
+                if (depth == 0)
+                    s_curRingPos = r.pos;
                 curBase = r.base; curEnd = endPos; curDepth = depth;
                 uint32_t header = r.Read();
                 switch (header >> 30)
@@ -258,6 +283,30 @@ namespace
             {
                 Log("GPU: a packet ran %u dwords past the end of its %s (depth %d)", r.pos - endPos,
                     depth ? "indirect buffer" : "ring segment", depth);
+                if (overruns == 1)
+                {
+                    uint64_t now = os::MonotonicNs();
+                    Log("GPU: batch ring %X..%X started %.2f ms ago; last blocking WAIT at %08X lasted %.2f ms, ended %.2f ms ago",
+                        s_batchFrom, s_batchTo, (now - s_batchStartNs) / 1e6, s_lastWaitAt, s_lastWaitNs / 1e6,
+                        s_lastWaitEndNs ? (now - s_lastWaitEndNs) / 1e6 : -1.0);
+                    Log("GPU: that WAIT was called from ring +%X: info %08X poll %08X ref %08X mask %08X, value %08X -> %08X; this IB from ring +%X",
+                        s_lastWaitRingPos, s_lastWaitArgs[0], s_lastWaitArgs[1], s_lastWaitArgs[2], s_lastWaitArgs[3],
+                        s_lastWaitStartV, s_lastWaitEndV, s_curRingPos);
+                    if (auto it = s_ibSeen.find(r.base); it != s_ibSeen.end())
+                        Log("GPU: this buffer was seen in the ring at +%X %.2f ms ago; it began %08X %08X %08X %08X then",
+                            it->second.ringPos, (now - it->second.ns) / 1e6, it->second.first[0], it->second.first[1],
+                            it->second.first[2], it->second.first[3]);
+                    else
+                        Log("GPU: this buffer was not seen by the ring scanner beforehand");
+                    Log("GPU: buffer %08X (%u dwords); last packets (guest address, header, depth):", r.base, endPos);
+                    for (uint32_t i = histN > 16 ? histN - 16 : 0; i < histN; i++)
+                        Log("   %08X  %08X  d%d", hist[i % 16].addr, hist[i % 16].header, hist[i % 16].depth);
+                    Log("GPU: last indirect buffers (from, start, dwords, depth):");
+                    for (uint32_t i = ibHistN > 8 ? ibHistN - 8 : 0; i < ibHistN; i++)
+                        Log("   %08X -> %08X  %5u  d%d", ibHist[i % 8].from, ibHist[i % 8].guest, ibHist[i % 8].size, ibHist[i % 8].depth);
+                    for (uint32_t k = 0; k < 24 && k < endPos; k += 4)
+                        Log("   +%03X: %08X %08X %08X %08X", k, r.Peek(k), r.Peek(k + 1), r.Peek(k + 2), r.Peek(k + 3));
+                }
                 if (depth && std::getenv("WET_GPU_TRACE"))
                 {
                     // Re-walk the buffer printing each packet header.
@@ -283,13 +332,6 @@ namespace
             }
         }
 
-        struct Hist { uint32_t addr, header; int depth; };
-        Hist hist[16] = {};
-        uint32_t histN = 0;
-        bool dumped = false;
-        struct IbHist { uint32_t from, guest, size; int depth; };
-        IbHist ibHist[8] = {};
-        uint32_t ibHistN = 0;
 
         void ExecuteType3(Reader& r, uint32_t header, int depth)
         {
@@ -311,6 +353,14 @@ namespace
             }
             if (packetsSeen[opcode]++ == 0)
                 Log("GPU: first PM4 packet 0x%02X (%u dwords)", opcode, count);
+
+            if ((header & 1) && ((binSelect & binMask) == 0 || opcode == 0x64))
+            {
+                if (predicatedSkipped++ == 0)
+                    Log("GPU: skipping predicated packets whose bin is not selected (first: 0x%02X)", opcode);
+                r.pos = start + count;
+                return;
+            }
 
             switch (opcode)
             {
@@ -378,7 +428,7 @@ namespace
             case 0x58: // EVENT_WRITE_SHD: initiator, address, value
             {
                 uint32_t initiator = r.Read(), addr = r.Read(), value = r.Read();
-                uint32_t data = (initiator >> 31) & 1 ? uint32_t(s_swaps.load()) : value;
+                uint32_t data = (initiator >> 31) & 1 ? uint32_t(s_cpSwaps.load()) : value;
                 if (uint32_t g = GpuAddr(addr & ~3u))
                     GpuStore(g, data, addr & 3);
                 break;
@@ -422,6 +472,15 @@ namespace
                     uint32_t v = (info & 0x10) ? GpuLoad(mem, poll & 3) : Reg(poll & 0xFFFF);
                     if (Compare(info, v & mask, ref))
                     {
+                        if (!Compare(info, v0 & mask, ref))
+                        {
+                            s_lastWaitEndNs = os::MonotonicNs();
+                            s_lastWaitNs = s_lastWaitEndNs - startNs;
+                            s_lastWaitAt = here;
+                            s_lastWaitRingPos = s_curRingPos;
+                            s_lastWaitArgs[0] = info; s_lastWaitArgs[1] = poll; s_lastWaitArgs[2] = ref; s_lastWaitArgs[3] = mask;
+                            s_lastWaitStartV = v0; s_lastWaitEndV = v;
+                        }
                         if (trace && !Compare(info, v0 & mask, ref))
                             Log("GPU TRACE: WAIT at %08X released after %.1f ms; CPU write ptr %08X; packet now %08X %08X %08X %08X %08X %08X | %08X %08X",
                                 here, double(os::MonotonicNs() - startNs) / 1e6, dev ? Ld32(dev + 48) : 0,
@@ -477,8 +536,7 @@ namespace
                     }
                     ServiceVblank();
                     SyncScratchFromCpu();
-                    if (std::getenv("WET_GPU_TRACE"))
-                        ScanRingAhead();
+                    ScanRingAhead();
                     os::SleepNs(50000);
                 }
                 break;
@@ -497,6 +555,16 @@ namespace
                         DeliverInterrupt(1, cpu);
                 break;
             }
+            case 0x60: binMask = (binMask & 0xFFFFFFFF00000000ull) | r.Read(); break;                 // SET_BIN_MASK_LO
+            case 0x61: binMask = (binMask & 0xFFFFFFFFull) | (uint64_t(r.Read()) << 32); break;        // SET_BIN_MASK_HI
+            case 0x62: binSelect = (binSelect & 0xFFFFFFFF00000000ull) | r.Read(); break;             // SET_BIN_SELECT_LO
+            case 0x63: binSelect = (binSelect & 0xFFFFFFFFull) | (uint64_t(r.Read()) << 32); break;    // SET_BIN_SELECT_HI
+            case 0x50: { uint64_t hi = r.Read(); binMask = (hi << 32) | r.Read(); break; }             // SET_BIN_MASK
+            case 0x51: { uint64_t hi = r.Read(); binSelect = (hi << 32) | r.Read(); break; }           // SET_BIN_SELECT
+            case 0x64: // XE_SWAP (written by VdSwap): 'SWAP', front buffer, width, height
+                if (count >= 1 && r.Peek(start) == 0x53574150)
+                    s_cpSwaps++;
+                break;
             default:
                 break;  // draws, state, waits: skipped
             }
@@ -540,13 +608,15 @@ namespace
                 uint32_t end = wptr;
                 if (end < rptr)
                     end += sizeDwords;      // wrapped
+                s_batchStartNs = os::MonotonicNs();
+                s_batchFrom = rptr;
+                s_batchTo = wptr;
                 s_cp.Execute(rd, end, 0);
                 rptr = wptr;
-                if (std::getenv("WET_GPU_TRACE"))
-                {
-                    // Anything the scanner had not reached is executed now: forget stale entries.
-                    s_ringScanPos = rptr;
-                }
+                // Anything the scanner had not reached is executed now: forget stale entries.
+                s_ringScanPos = rptr;
+                if (s_ibSeen.size() > 4096)
+                    s_ibSeen.clear();
                 SetReg(kRegCpRbRptr, rptr);
                 if (uint32_t wb = s_rptrWriteBack.load())
                     if (uint32_t g = GpuAddr(wb))
@@ -579,7 +649,11 @@ namespace
             {
                 uint32_t addr = Ld32(ring + ((pos + 1) % sizeDwords) * 4), size = Ld32(ring + ((pos + 2) % sizeDwords) * 4) & 0xFFFFF;
                 if (uint32_t g = GpuAddr(addr))
-                    s_ibPrint.emplace((uint64_t(g) << 32) | size, HashIb(g, size));
+                {
+                    if (std::getenv("WET_GPU_TRACE"))
+                        s_ibPrint.emplace((uint64_t(g) << 32) | size, HashIb(g, size));
+                    s_ibSeen[g] = { { Ld32(g), Ld32(g + 4), Ld32(g + 8), Ld32(g + 12) }, os::MonotonicNs(), pos };
+                }
             }
             pos = (pos + 1 + n) % sizeDwords;
         }
