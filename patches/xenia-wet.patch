@@ -380,6 +380,23 @@ index 7df306c12..987c0046b 100644
    return true;
  }
  
+diff --git a/src/xenia/ui/d3d12/d3d12_api.h b/src/xenia/ui/d3d12/d3d12_api.h
+index 98eb495da..3803cb13d 100644
+--- a/src/xenia/ui/d3d12/d3d12_api.h
++++ b/src/xenia/ui/d3d12/d3d12_api.h
+@@ -31,6 +31,12 @@
+ #include "third_party/DirectXShaderCompiler/include/dxc/dxcapi.h"
+ #include "third_party/DirectXShaderCompiler/projects/dxilconv/include/DxbcConverter.h"
+ 
++#if defined(__MINGW32__)
++// WET: MinGW's __uuidof needs the interface IDs declared with __CRT_UUID_DECL.
++#include "third_party/DirectX-Headers/include/dxguids/dxguids.h"
++#include "xe_dxc_uuids.h"
++#endif
++
+ #define XELOGD3D XELOGI
+ 
+ #endif  // XENIA_UI_D3D12_D3D12_API_H_
 diff --git a/src/xenia/ui/window_win.cc b/src/xenia/ui/window_win.cc
 index f2458b69d..dda682882 100644
 --- a/src/xenia/ui/window_win.cc
