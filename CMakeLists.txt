@@ -31,6 +31,9 @@ endif()
 # executables run without extra DLLs next to them.
 if(MINGW)
     add_link_options(-static)
+    # The fmt bundled with XenonRecomp uses malloc/free without including
+    # <cstdlib>; libc++ (llvm-mingw) doesn't provide them transitively.
+    add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include cstdlib>")
 endif()
 
 # ---------------------------------------------------------------------------
