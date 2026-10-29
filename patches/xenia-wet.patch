@@ -1,3 +1,17 @@
+diff --git a/src/xenia/base/clock_x64.cc b/src/xenia/base/clock_x64.cc
+index 14155303a..538db134b 100644
+--- a/src/xenia/base/clock_x64.cc
++++ b/src/xenia/base/clock_x64.cc
+@@ -16,7 +16,8 @@
+ 
+ // Wrap all these different cpu compiler intrinsics.
+ // So no inline assembler here and the compiler will remove the clutter.
+-#if XE_COMPILER_MSVC
++#if XE_COMPILER_MSVC || XE_PLATFORM_WIN32
++#include <intrin.h>
+ #define xe_cpu_cpuid(level, eax, ebx, ecx, edx)              \
+   {                                                          \
+     int __xe_cpuid_registers_[4];                            \
 diff --git a/src/xenia/base/mapped_memory_win.cc b/src/xenia/base/mapped_memory_win.cc
 index f0af5ee7b..023f6fea7 100644
 --- a/src/xenia/base/mapped_memory_win.cc
