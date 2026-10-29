@@ -5,6 +5,8 @@
 #include "input.h"
 #include "os.h"
 
+#include <algorithm>
+
 using namespace wet;
 
 // ---------------------------------------------------------------------------

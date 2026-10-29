@@ -2,6 +2,7 @@
 #include "log.h"
 #include "os.h"
 
+#include <iterator>
 #include <cstring>
 
 namespace wet

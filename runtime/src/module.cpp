@@ -1,6 +1,7 @@
 #include "module.h"
 #include "kernel/kernel.h"
 
+#include <iterator>
 #include <fstream>
 #include <image.h>
 #include <xex.h>

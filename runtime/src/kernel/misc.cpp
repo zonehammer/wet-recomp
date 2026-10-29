@@ -1,6 +1,7 @@
 // Video (Vd*), audio (XAudio/XMA), network (NetDll) and crypto (XeCrypt/XeKeys) imports.
 #include "kernel.h"
 
+#include <algorithm>
 #include <TinySHA1.hpp>
 #include <atomic>
 

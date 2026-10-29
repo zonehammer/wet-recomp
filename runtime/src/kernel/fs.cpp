@@ -10,6 +10,7 @@
 #include "kernel.h"
 #include "objects.h"
 
+#include <cctype>
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>

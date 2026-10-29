@@ -2,6 +2,7 @@
 // vswprintf, _vscwprintf (plus the engine used by DbgPrint).
 #include "printf.h"
 
+#include <algorithm>
 #include <cstdio>
 
 namespace wet

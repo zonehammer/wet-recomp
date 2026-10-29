@@ -5,6 +5,8 @@
 #include "printf.h"
 #include "threads.h"
 
+#include <cctype>
+#include <algorithm>
 #include <atomic>
 #include <ctime>
 #include <mutex>
