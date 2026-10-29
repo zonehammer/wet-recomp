@@ -57,9 +57,14 @@ jobs:
           cmake --build build --target XenonAnalyse XenonRecomp WetRecomp -- -k 0 2>&1 | Tee-Object -FilePath build.log
           if ($LASTEXITCODE -ne 0) {
             # Surface compiler/linker errors as annotations (readable without downloading logs).
-            Select-String -Path build.log -Pattern 'error|FAILED|undefined' |
-              Select-Object -First 60 |
-              ForEach-Object { Write-Output ("::error::" + $_.Line.Trim()) }
+            # GitHub keeps only 10 annotations per step, so pack the unique ones into a few.
+            $lines = Select-String -Path build.log -Pattern 'error:|error\(|FAILED:|undefined' |
+              ForEach-Object { ($_.Line.Trim() -replace '^.*?[\\/]Claudtest1[\\/]Claudtest1[\\/]', '') } |
+              Select-Object -Unique -First 400
+            for ($i = 0; $i -lt $lines.Count; $i += 40) {
+              $chunk = ($lines[$i..([Math]::Min($i + 39, $lines.Count - 1))] -join '%0A')
+              Write-Output ("::error::" + $chunk)
+            }
             exit 1
           }
 
