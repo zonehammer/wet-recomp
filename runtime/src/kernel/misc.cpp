@@ -1,6 +1,7 @@
 // Video (Vd*), audio (XAudio/XMA), network (NetDll) and crypto (XeCrypt/XeKeys) imports.
 #include "kernel.h"
 #include "threads.h"
+#include "xma.h"
 #include "os.h"
 
 #include <algorithm>
@@ -170,14 +171,15 @@ GUEST_IMPORT(XAudioSubmitRenderDriverFrame) { Ret(ctx, ERROR_SUCCESS); }
 // XMACreateContext(u32* context)
 GUEST_IMPORT(XMACreateContext)
 {
-    St32(Arg(ctx, 0), SystemAlloc(0x40));
-    Ret(ctx, ERROR_SUCCESS);
+    uint32_t c = XmaAllocateContext();
+    St32(Arg(ctx, 0), c);
+    Ret(ctx, c ? ERROR_SUCCESS : 0xC0000017 /* STATUS_NO_MEMORY */);
 }
 
 GUEST_IMPORT(XMAReleaseContext)
 {
-    SystemFree(Arg(ctx, 0));
-    Ret(ctx, ERROR_SUCCESS);
+    XmaReleaseContext(Arg(ctx, 0));
+    Ret(ctx, 0);
 }
 
 // ---------------------------------------------------------------------------

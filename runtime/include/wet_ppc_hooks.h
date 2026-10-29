@@ -23,3 +23,8 @@ uint64_t WetQueryTimebase();
             WetIndirectCallMiss(ctx, base, wetTarget__);                \
         wetFn__(ctx, base);                                             \
     } while (0)
+
+// Stores the recompiler marks as MMIO (preceded by eieio): the XMA decoder's
+// registers and the GPU's. Performs the store, then lets the runtime react.
+void WetMmioStore32(uint32_t address, uint32_t value);
+#define PPC_MM_STORE_U32(x, y) WetMmioStore32(uint32_t(x), uint32_t(y))

@@ -12,6 +12,7 @@
 #include "kernel/threads.h"
 #include "log.h"
 #include "profiler.h"
+#include "kernel/xma.h"
 #include "memory.h"
 #include "module.h"
 #include "os.h"
@@ -87,6 +88,7 @@ int main(int argc, char** argv)
 
     InitThreading(g_module.tlsSlotCount, g_module.tlsRawAddr, g_module.tlsDataSize, g_module.tlsRawSize);
     InitKernelVariables();
+    InitXma();
     InitFileSystem(gameDir, hddDir);
 
     if (!StartMainThread(g_module.entryPoint, g_module.stackSize))
