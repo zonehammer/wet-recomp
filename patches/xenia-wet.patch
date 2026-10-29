@@ -47,3 +47,94 @@ index 3ed4dc3ab..8cb95f239 100644
    _aligned_free(ptr);
  #else
    free(ptr);
+diff --git a/src/xenia/base/threading_win.cc b/src/xenia/base/threading_win.cc
+index 8f6087b05..47c87eec0 100644
+--- a/src/xenia/base/threading_win.cc
++++ b/src/xenia/base/threading_win.cc
+@@ -15,7 +15,7 @@
+ #include "xenia/base/threading_timer_queue.h"
+ 
+ #define LOG_LASTERROR() \
+-  { XELOGI("Win32 Error 0x{:08X} in " __FUNCTION__ "(...)", GetLastError()); }
++  { XELOGI("Win32 Error 0x{:08X} in {}(...)", GetLastError(), __func__); }
+ 
+ typedef HANDLE (*SetThreadDescriptionFn)(HANDLE hThread,
+                                          PCWSTR lpThreadDescription);
+@@ -55,11 +55,13 @@ void raise_thread_name_exception(HANDLE thread, const std::string& name) {
+   info.szName = name.c_str();
+   info.dwThreadID = ::GetThreadId(thread);
+   info.dwFlags = 0;
++#if defined(_MSC_VER)  // SEH: MSVC and clang-cl only
+   __try {
+     RaiseException(0x406D1388, 0, sizeof(info) / sizeof(ULONG_PTR),
+                    reinterpret_cast<ULONG_PTR*>(&info));
+   } __except (EXCEPTION_EXECUTE_HANDLER) {  // NOLINT
+   }
++#endif
+ }
+ 
+ static void set_name(HANDLE thread, const std::string_view name) {
+diff --git a/src/xenia/ui/window_win.cc b/src/xenia/ui/window_win.cc
+index f2458b69d..dda682882 100644
+--- a/src/xenia/ui/window_win.cc
++++ b/src/xenia/ui/window_win.cc
+@@ -1047,7 +1047,8 @@ LRESULT Win32Window::WndProc(HWND hWnd, UINT message, WPARAM wParam,
+     } break;
+ 
+     case WM_MOVE: {
+-      OnMonitorUpdate(MonitorUpdateEvent(this, false));
++      MonitorUpdateEvent monitor_update_event(this, false);
++      OnMonitorUpdate(monitor_update_event);
+     } break;
+ 
+     case WM_SIZE: {
+@@ -1084,7 +1085,8 @@ LRESULT Win32Window::WndProc(HWND hWnd, UINT message, WPARAM wParam,
+     } break;
+ 
+     case WM_DISPLAYCHANGE: {
+-      OnMonitorUpdate(MonitorUpdateEvent(this, true));
++      MonitorUpdateEvent monitor_update_event(this, true);
++      OnMonitorUpdate(monitor_update_event);
+     } break;
+ 
+     case WM_DPICHANGED: {
+diff --git a/src/xenia/ui/windowed_app_context_win.cc b/src/xenia/ui/windowed_app_context_win.cc
+index afee1a44f..cfd35d661 100644
+--- a/src/xenia/ui/windowed_app_context_win.cc
++++ b/src/xenia/ui/windowed_app_context_win.cc
+@@ -39,30 +39,25 @@ bool Win32WindowedAppContext::Initialize() {
+     per_monitor_dpi_v1_api_available_ = true;
+     per_monitor_dpi_v1_api_available_ &=
+         (*reinterpret_cast<void**>(
+-             &per_monitor_dpi_v1_api_.get_dpi_for_monitor) =
+-             GetProcAddress(shcore_module_, "GetDpiForMonitor")) != nullptr;
++             &per_monitor_dpi_v1_api_.get_dpi_for_monitor) = (void*)GetProcAddress(shcore_module_, "GetDpiForMonitor")) != nullptr;
+   }
+   user32_module_ = LoadLibraryW(L"user32.dll");
+   if (user32_module_) {
+     per_monitor_dpi_v2_api_available_ = true;
+     per_monitor_dpi_v2_api_available_ &=
+         (*reinterpret_cast<void**>(
+-             &per_monitor_dpi_v2_api_.adjust_window_rect_ex_for_dpi) =
+-             GetProcAddress(user32_module_, "AdjustWindowRectExForDpi")) !=
++             &per_monitor_dpi_v2_api_.adjust_window_rect_ex_for_dpi) = (void*)GetProcAddress(user32_module_, "AdjustWindowRectExForDpi")) !=
+         nullptr;
+     per_monitor_dpi_v2_api_available_ &=
+         (*reinterpret_cast<void**>(
+-             &per_monitor_dpi_v2_api_.enable_non_client_dpi_scaling) =
+-             GetProcAddress(user32_module_, "EnableNonClientDpiScaling")) !=
++             &per_monitor_dpi_v2_api_.enable_non_client_dpi_scaling) = (void*)GetProcAddress(user32_module_, "EnableNonClientDpiScaling")) !=
+         nullptr;
+     per_monitor_dpi_v2_api_available_ &=
+         (*reinterpret_cast<void**>(
+-             &per_monitor_dpi_v2_api_.get_dpi_for_system) =
+-             GetProcAddress(user32_module_, "GetDpiForSystem")) != nullptr;
++             &per_monitor_dpi_v2_api_.get_dpi_for_system) = (void*)GetProcAddress(user32_module_, "GetDpiForSystem")) != nullptr;
+     per_monitor_dpi_v2_api_available_ &=
+         (*reinterpret_cast<void**>(
+-             &per_monitor_dpi_v2_api_.get_dpi_for_window) =
+-             GetProcAddress(user32_module_, "GetDpiForWindow")) != nullptr;
++             &per_monitor_dpi_v2_api_.get_dpi_for_window) = (void*)GetProcAddress(user32_module_, "GetDpiForWindow")) != nullptr;
+   }
+ 
+   // Create the message-only window for executing pending functions - using a

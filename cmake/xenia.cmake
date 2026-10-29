@@ -15,7 +15,7 @@ set(XE_TP ${XE_ROOT}/third_party)
 wet_apply_patch(${XE_ROOT} xenia-wet.patch)
 set(XE_COMPAT_HEADER ${WET_ROOT}/runtime/xenia_shim/compat/xe_compat.h)
 
-foreach(dep fmt glslang Vulkan-Headers VulkanMemoryAllocator xxhash snappy utfcpp xbyak disruptorplus cpptoml date cxxopts DirectX-Headers)
+foreach(dep fmt glslang Vulkan-Headers VulkanMemoryAllocator xxhash snappy utfcpp xbyak disruptorplus cpptoml date cxxopts DirectX-Headers SPIRV-Tools)
     if(NOT EXISTS ${XE_TP}/${dep}/.git)
         message(FATAL_ERROR "Xenia dependency third_party/${dep} is missing. Run:\n  python tools/build.py\n"
                             "(or: python tools/fetch_deps.py)")
