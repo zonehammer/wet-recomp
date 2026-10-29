@@ -51,7 +51,16 @@ jobs:
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_C_COMPILER=$cc" "-DCMAKE_CXX_COMPILER=$cxx" -DWET_CI_STUB=ON
 
       - name: Build
-        run: cmake --build build --target XenonAnalyse XenonRecomp WetRecomp
+        shell: pwsh
+        run: |
+          cmake --build build --target XenonAnalyse XenonRecomp WetRecomp 2>&1 | Tee-Object -FilePath build.log
+          if ($LASTEXITCODE -ne 0) {
+            # Surface compiler/linker errors as annotations (readable without downloading logs).
+            Select-String -Path build.log -Pattern 'error|FAILED|undefined' |
+              Select-Object -First 40 |
+              ForEach-Object { Write-Output ("::error::" + $_.Line.Trim()) }
+            exit 1
+          }
 
       - name: Smoke test
         shell: pwsh
