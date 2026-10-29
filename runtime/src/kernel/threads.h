@@ -58,7 +58,7 @@ namespace wet
 
     // Creates guest memory for a thread and starts it on a new host thread.
     std::shared_ptr<GuestThread> StartGuestThread(uint32_t stackSize, uint32_t startAddress, uint32_t startContext,
-                                                  uint32_t xapiStartup, bool suspended);
+                                                  uint32_t xapiStartup, bool suspended, uint32_t cpuMask = 0);
 
     // Runs the title's entry point on a new host thread; returns its object.
     std::shared_ptr<GuestThread> StartMainThread(uint32_t entryPoint, uint32_t stackSize);

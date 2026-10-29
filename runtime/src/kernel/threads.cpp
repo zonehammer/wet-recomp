@@ -1,5 +1,6 @@
 // Guest threads, PCR/TLS setup and thread-related imports.
 #include "threads.h"
+#include <atomic>
 #include "kernel.h"
 #include "os.h"
 
@@ -160,10 +161,33 @@ namespace wet
         return t;
     }
 
+    // Processor a thread runs on, from an affinity mask (Xenia's GetFakeCpuNumber):
+    // the single set bit, or round robin for 0. Titles index per-CPU state with
+    // KeGetCurrentProcessorNumber, so it has to follow XSetThreadProcessor.
+    static uint32_t FakeCpuNumber(uint32_t mask)
+    {
+        static std::atomic<uint32_t> next{ 0 };
+        mask &= 0x3F;
+        if (!mask)
+            return next.fetch_add(1) % 6;
+        uint32_t cpu = 0;
+        while (mask >>= 1)
+            cpu++;
+        return cpu;
+    }
+
+    static void SetGuestThreadCpu(GuestThread& t, uint32_t cpu)
+    {
+        St8(t.pcr + 0x10C, uint8_t(cpu));       // KPCR current_cpu
+        St8(t.kthread + 0xBF, uint8_t(cpu));    // KTHREAD current_cpu
+        t.affinity = 1u << cpu;
+    }
+
     std::shared_ptr<GuestThread> StartGuestThread(uint32_t stackSize, uint32_t startAddress, uint32_t startContext,
-                                                  uint32_t xapiStartup, bool suspended)
+                                                  uint32_t xapiStartup, bool suspended, uint32_t cpuMask)
     {
         auto t = NewThread(stackSize);
+        SetGuestThreadCpu(*t, FakeCpuNumber(cpuMask));
         t->startAddress = startAddress;
         t->startContext = startContext;
         t->xapiStartup = xapiStartup;
@@ -192,6 +216,7 @@ namespace wet
     std::shared_ptr<GuestThread> StartMainThread(uint32_t entryPoint, uint32_t stackSize)
     {
         auto t = NewThread(stackSize);
+        SetGuestThreadCpu(*t, 0);
         t->startAddress = entryPoint;
         if (!os::StartThread(MainThreadEntry, new std::shared_ptr<GuestThread>(t), kHostMainStackSize))
         {
@@ -371,7 +396,7 @@ GUEST_IMPORT(ExCreateThread)
     uint32_t handlePtr = Arg(ctx, 0), stackSize = Arg(ctx, 1), idPtr = Arg(ctx, 2);
     uint32_t xapi = Arg(ctx, 3), start = Arg(ctx, 4), param = Arg(ctx, 5), flags = Arg(ctx, 6);
 
-    auto t = StartGuestThread(stackSize ? stackSize : 0x10000, start, param, xapi, (flags & 1) != 0);
+    auto t = StartGuestThread(stackSize ? stackSize : 0x10000, start, param, xapi, (flags & 1) != 0, flags >> 24);
     if (!t)
         return Ret(ctx, STATUS_NO_MEMORY);
     if (handlePtr)
@@ -430,9 +455,12 @@ GUEST_IMPORT(NtSuspendThread)
 GUEST_IMPORT(KeSetAffinityThread)
 {
     auto t = ThreadFromGuest(Arg(ctx, 0));
+    uint32_t affinity = Arg(ctx, 1);
+    if (!affinity)
+        return Ret(ctx, STATUS_INVALID_PARAMETER);
     uint32_t prev = t ? t->affinity : 0x3F;
     if (t)
-        t->affinity = Arg(ctx, 1);
+        SetGuestThreadCpu(*t, FakeCpuNumber(affinity));
     if (Arg(ctx, 2))
         St32(Arg(ctx, 2), prev);
     Ret(ctx, STATUS_SUCCESS);
