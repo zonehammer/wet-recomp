@@ -47,4 +47,6 @@ namespace wet::renderer_host
     // Routes write-watch hits to `callback` (the renderer's invalidation).
     void SetPhysicalWriteCallback(void (*callback)(uint32_t physStart, uint32_t length));
     void UnwatchPhysical(uint32_t physStart, uint32_t length);
+    // Asks the GPU thread to mirror the title's register writes into the renderer now.
+    void RequestRegisterSync();
 }

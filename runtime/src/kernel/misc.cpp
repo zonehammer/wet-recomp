@@ -1,9 +1,12 @@
 // Video (Vd*), audio (XAudio/XMA), network (NetDll) and crypto (XeCrypt/XeKeys) imports.
 #include "kernel.h"
+#include "threads.h"
+#include "os.h"
 
 #include <algorithm>
 #include <TinySHA1.hpp>
 #include <atomic>
+#include <mutex>
 
 using namespace wet;
 
@@ -78,17 +81,90 @@ GUEST_IMPORT(XAudioGetVoiceCategoryVolume)
     Ret(ctx, ERROR_SUCCESS);
 }
 
+// The audio "driver": the title's XAudio2 mixes in a callback the system calls
+// once per 256-sample frame (48 kHz, 5.33 ms) and hands the result back with
+// XAudioSubmitRenderDriverFrame. Nothing is played yet, but the callback has to
+// run at the real rate - without it XAudio2 never processes its voices, so
+// sounds never finish and the title's heap fills with them.
+namespace
+{
+    struct AudioClient { uint32_t callback = 0, argPtr = 0; bool active = false; };
+    constexpr int kMaxAudioClients = 8;
+    AudioClient s_audioClients[kMaxAudioClients];
+    std::mutex s_audioLock;
+    std::once_flag s_audioThreadOnce;
+
+    void AudioThreadMain(void*)
+    {
+        PPCContext& ctx = AdoptHostThread(0x10000);
+        SetThreadName(0xFFFFFFFF, "Audio driver (host)");
+        constexpr uint64_t kFrameNs = 256ull * 1000000000ull / 48000ull;
+        uint64_t next = os::MonotonicNs();
+        for (;;)
+        {
+            uint64_t now = os::MonotonicNs();
+            if (now < next)
+            {
+                os::SleepNs(next - now);
+                continue;
+            }
+            // Catch up at most a few frames after a stall, then resynchronise.
+            next = (now - next > 8 * kFrameNs) ? now + kFrameNs : next + kFrameNs;
+            for (int i = 0; i < kMaxAudioClients; i++)
+            {
+                AudioClient c;
+                {
+                    std::lock_guard lock(s_audioLock);
+                    c = s_audioClients[i];
+                }
+                if (!c.active)
+                    continue;
+                ctx.r3.u64 = c.argPtr;
+                CallGuest(ctx, c.callback);
+            }
+        }
+    }
+}
+
 // XAudioRegisterRenderDriverClient(callback_info*, driver*)
 GUEST_IMPORT(XAudioRegisterRenderDriverClient)
 {
     uint32_t info = Arg(ctx, 0);
-    Log("XAudioRegisterRenderDriverClient(callback 0x%08X, arg 0x%08X) - audio output not implemented yet",
-        info ? Ld32(info) : 0, info ? Ld32(info + 4) : 0);
-    St32(Arg(ctx, 1), 0x41550000);
+    uint32_t callback = info ? Ld32(info) : 0, arg = info ? Ld32(info + 4) : 0;
+    int index = -1;
+    {
+        std::lock_guard lock(s_audioLock);
+        for (int i = 0; i < kMaxAudioClients && index < 0; i++)
+            if (!s_audioClients[i].active)
+                index = i;
+        if (index >= 0)
+        {
+            // Like Xenia, the callback gets a pointer to a word holding its argument.
+            uint32_t argPtr = s_audioClients[index].argPtr ? s_audioClients[index].argPtr : SystemAlloc(4);
+            St32(argPtr, arg);
+            s_audioClients[index] = { callback, argPtr, true };
+        }
+    }
+    if (index < 0)
+        return Ret(ctx, 0xC0000017);    // STATUS_NO_MEMORY
+    Log("XAudioRegisterRenderDriverClient(callback 0x%08X, arg 0x%08X) -> client %d (callbacks at 48 kHz/256, no sound output yet)",
+        callback, arg, index);
+    St32(Arg(ctx, 1), 0x41550000u | uint32_t(index));
+    std::call_once(s_audioThreadOnce, [] { os::StartThread(AudioThreadMain, nullptr, 1 << 20); });
     Ret(ctx, ERROR_SUCCESS);
 }
 
-GUEST_IMPORT(XAudioUnregisterRenderDriverClient) { Ret(ctx, ERROR_SUCCESS); }
+// XAudioUnregisterRenderDriverClient(driver)
+GUEST_IMPORT(XAudioUnregisterRenderDriverClient)
+{
+    uint32_t index = Arg(ctx, 0) & 0xFFFF;
+    if (index < kMaxAudioClients)
+    {
+        std::lock_guard lock(s_audioLock);
+        s_audioClients[index].active = false;
+    }
+    Ret(ctx, ERROR_SUCCESS);
+}
 GUEST_IMPORT(XAudioSubmitRenderDriverFrame) { Ret(ctx, ERROR_SUCCESS); }
 
 // XMACreateContext(u32* context)

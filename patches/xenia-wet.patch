@@ -88,15 +88,26 @@ index 8f6087b05..47c87eec0 100644
  
  static void set_name(HANDLE thread, const std::string_view name) {
 diff --git a/src/xenia/gpu/command_processor.cc b/src/xenia/gpu/command_processor.cc
-index ce08d19bd..253a386c6 100644
+index ce08d19bd..bed102990 100644
 --- a/src/xenia/gpu/command_processor.cc
 +++ b/src/xenia/gpu/command_processor.cc
-@@ -32,6 +32,86 @@
+@@ -9,6 +9,9 @@
+ 
+ #include "xenia/gpu/command_processor.h"
+ 
++#include <map>
++#include <tuple>
++
+ #include <algorithm>
+ #include <cinttypes>
+ #include <cmath>
+@@ -32,6 +35,87 @@
  namespace xe {
  namespace gpu {
  
 +#if XE_WET_RUNTIME
 +int wet_draw_trace_frames = 0;
++void (*wet_register_sync_hook)() = nullptr;
 +
 +void WetTraceDraw(const RegisterFile& regs, const Memory& memory,
 +                  const Shader& vertex_shader, const Shader* pixel_shader,
@@ -178,7 +189,7 @@ index ce08d19bd..253a386c6 100644
  using namespace xe::gpu::xenos;
  
  CommandProcessor::CommandProcessor(GraphicsSystem* graphics_system,
-@@ -932,11 +1012,43 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(RingBuffer* reader,
+@@ -932,11 +1016,43 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(RingBuffer* reader,
    uint32_t frontbuffer_ptr = reader->ReadAndSwap<uint32_t>();
    uint32_t frontbuffer_width = reader->ReadAndSwap<uint32_t>();
    uint32_t frontbuffer_height = reader->ReadAndSwap<uint32_t>();
@@ -223,11 +234,83 @@ index ce08d19bd..253a386c6 100644
    return true;
  }
  
+@@ -974,7 +1090,21 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+                 : register_file_->values[poll_reg_addr];
+ 
+   bool matched = false;
++#if XE_WET_RUNTIME
++  // WET diagnostics: which waits the title issues and how long they take.
++  static int wet_wait_logged = 0;
++  uint64_t wet_wait_start = Clock::QueryHostTickCount();
++  uint32_t wet_wait_loops = 0;
++#endif
+   do {
++#if XE_WET_RUNTIME
++    // Registers the title writes through MMIO reach the register file via the
++    // runtime's GPU thread; ask it to look now.
++    if (!is_memory && (wet_wait_loops & 63) == 1 && wet_register_sync_hook) {
++      wet_register_sync_hook();
++    }
++    ++wet_wait_loops;
++#endif
+     uint32_t value = value_ref;
+     if (is_memory) {
+       trace_writer_.WriteMemoryRead(CpuToGpu(poll_reg_addr & ~uint32_t(0x3)),
+@@ -1017,12 +1147,19 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+       // Wait.
+       if (wait >= 0x100) {
+         PrepareForWait();
++#if XE_WET_RUNTIME
++        // WET: yield instead of sleeping whole milliseconds - the value usually
++        // changes within microseconds (another thread of the title, or an
++        // interrupt), and a millisecond sleep per wait cost whole frames.
++        xe::threading::MaybeYield();
++#else
+         if (!cvars::vsync) {
+           // User wants it fast and dangerous.
+           xe::threading::MaybeYield();
+         } else {
+           xe::threading::Sleep(std::chrono::milliseconds(wait / 0x100));
+         }
++#endif
+         xe::threading::SyncMemory();
+         ReturnFromWait();
+ 
+@@ -1036,6 +1173,29 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+     }
+   } while (!matched);
+ 
++#if XE_WET_RUNTIME
++  {
++    struct Stat { uint64_t count = 0, ticks = 0, loops = 0; };
++    static std::map<std::tuple<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t>, Stat> stats;
++    static uint64_t total = 0, last_dump = Clock::QueryHostTickCount();
++    auto& st = stats[{wait_info, poll_reg_addr, ref, mask, wait}];
++    st.count++;
++    st.loops += wet_wait_loops;
++    uint64_t now = Clock::QueryHostTickCount();
++    st.ticks += now - wet_wait_start;
++    double freq = double(Clock::host_tick_frequency_platform());
++    if (double(now - last_dump) / freq > 10.0) {
++      last_dump = now;
++      for (auto& [k, v] : stats) {
++        XELOGW("WAITREGMEM: info {:X} {} {:08X} ref {:08X} mask {:08X} wait {:X}: {} waits, {:.1f} ms total, {} loops",
++               std::get<0>(k), (std::get<0>(k) & 0x10) ? "mem" : "reg", std::get<1>(k), std::get<2>(k),
++               std::get<3>(k), std::get<4>(k), v.count, double(v.ticks) * 1000.0 / freq, v.loops);
++      }
++      stats.clear();
++    }
++  }
++#endif
++
+   return true;
+ }
+ 
 diff --git a/src/xenia/gpu/command_processor.h b/src/xenia/gpu/command_processor.h
-index ffc8eeffa..2a6dd226a 100644
+index ffc8eeffa..78dc2ee85 100644
 --- a/src/xenia/gpu/command_processor.h
 +++ b/src/xenia/gpu/command_processor.h
-@@ -35,9 +35,22 @@ class ByteStream;
+@@ -35,9 +35,24 @@ class ByteStream;
  
  namespace gpu {
  
@@ -238,6 +321,8 @@ index ffc8eeffa..2a6dd226a 100644
 +#if XE_WET_RUNTIME
 +// WET: >0 while draws are being traced (diagnostics, F9 / WET_DRAW_TRACE_AT).
 +extern int wet_draw_trace_frames;
++// Called while WAIT_REG_MEM polls a register (set by the runtime).
++extern void (*wet_register_sync_hook)();
 +// Draw trace helpers shared by the backends.
 +void WetTraceDraw(const RegisterFile& regs, const Memory& memory,
 +                  const Shader& vertex_shader, const Shader* pixel_shader,

@@ -402,6 +402,7 @@ namespace wet::renderer
             return false;
         s_memory = std::make_unique<xe::Memory>(membase, physical);
         renderer_host::SetPhysicalWriteCallback(OnPhysicalWrite);
+        xe::gpu::wet_register_sync_hook = [] { renderer_host::RequestRegisterSync(); };
         s_processor = std::make_unique<xe::cpu::Processor>(s_memory.get());
         s_kernel = std::make_unique<xe::kernel::KernelState>(titleId);
         xe::ui::WindowedAppContext* appContext = nullptr;

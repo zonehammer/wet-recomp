@@ -55,6 +55,9 @@ namespace
     uint32_t s_lastWaitArgs[4] = {}, s_lastWaitStartV = 0, s_lastWaitEndV = 0;
     std::once_flag s_gpuStarted;
 
+    // Wakes the GPU thread's register mirroring (ring buffer kicks, WAIT_REG_MEM).
+    os::WakeEvent* s_kick = os::CreateWakeEvent();
+
     uint32_t Reg(uint32_t index) { return Ld32(kGpuRegisterBase + index * 4); }
     void SetReg(uint32_t index, uint32_t v) { St32(kGpuRegisterBase + index * 4, v); }
 
@@ -605,7 +608,6 @@ namespace
             // once (write trap); otherwise it looks every millisecond. Polling alone
             // made every ring buffer kick wait for the next poll, and the game blocks
             // on GPU fences several times a frame.
-            static os::WakeEvent* s_kick = os::CreateWakeEvent();
             SetMmioWriteTrap(kGpuRegisterBase + kRegCpRbWptr * 4, [] { os::SignalWake(s_kick); });
             for (;;)
             {
@@ -865,4 +867,10 @@ GUEST_IMPORT(VdInitializeScalerCommandBuffer)
     for (uint32_t i = 0; i < count; i++)
         St32(dest + i * 4, 0x80000000);
     Ret(ctx, count);
+}
+
+namespace wet::renderer_host
+{
+    // WAIT_REG_MEM on a register: mirror the title's MMIO writes now.
+    void RequestRegisterSync() { os::SignalWake(s_kick); }
 }

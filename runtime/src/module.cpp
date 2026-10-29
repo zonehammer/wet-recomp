@@ -1,3 +1,5 @@
+#include <cstdlib>
+#include <cstdio>
 #include "module.h"
 #include "kernel/kernel.h"
 
@@ -203,6 +205,15 @@ namespace wet
             xexPath.filename().string().c_str(), g_module.titleId, g_module.version, g_module.discNumber,
             g_module.discCount, g_module.imageBase, g_module.imageSize, g_module.entryPoint, mapped,
             g_module.imports.size(), g_module.stackSize);
+        // WET_DUMP_IMAGE=<file>: the loaded image, for looking up strings and data
+        // at guest addresses while debugging.
+        if (const char* dump = std::getenv("WET_DUMP_IMAGE"))
+            if (FILE* f = std::fopen(dump, "wb"))
+            {
+                std::fwrite(HostPtr(g_module.imageBase), 1, g_module.imageSize, f);
+                std::fclose(f);
+                Log("Wrote the loaded image to %s", dump);
+            }
         return true;
     }
 }
