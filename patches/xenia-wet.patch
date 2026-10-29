@@ -47,6 +47,19 @@ index 3ed4dc3ab..8cb95f239 100644
    _aligned_free(ptr);
  #else
    free(ptr);
+diff --git a/src/xenia/base/profiling.h b/src/xenia/base/profiling.h
+index 24b875967..b6a02cb62 100644
+--- a/src/xenia/base/profiling.h
++++ b/src/xenia/base/profiling.h
+@@ -20,7 +20,7 @@
+ #include "xenia/ui/virtual_key.h"
+ #include "xenia/ui/window_listener.h"
+ 
+-#if XE_PLATFORM_WIN32
++#if XE_PLATFORM_WIN32 && !XE_WET_RUNTIME  // WET: no MicroProfile
+ #define XE_OPTION_PROFILING 1
+ #define XE_OPTION_PROFILING_UI 1
+ #else
 diff --git a/src/xenia/base/threading_win.cc b/src/xenia/base/threading_win.cc
 index 8f6087b05..47c87eec0 100644
 --- a/src/xenia/base/threading_win.cc

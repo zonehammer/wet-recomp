@@ -105,6 +105,9 @@ xe_platform_files(XE_UI_VULKAN_FN_SOURCES ${XE_SRC}/ui/vulkan/functions)
 add_library(xe_ui STATIC ${XE_UI_SOURCES} ${XE_UI_VULKAN_SOURCES} ${XE_UI_VULKAN_FN_SOURCES})
 xe_target(xe_ui)
 target_link_libraries(xe_ui PUBLIC xe_base)
+if(WIN32)
+    target_link_libraries(xe_ui PUBLIC dwmapi dxgi)
+endif()
 
 # ---- xenia-gpu (Vulkan) ----
 xe_platform_files(XE_GPU_SOURCES ${XE_SRC}/gpu)
