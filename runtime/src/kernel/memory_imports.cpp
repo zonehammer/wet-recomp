@@ -168,6 +168,7 @@ GUEST_IMPORT(MmAllocatePhysicalMemoryEx)
     uint32_t addr = PhysicalToView(phys, viewBase);
     g_mem.Commit(addr, size);
     Zero(addr, size);
+    RegisterPhysicalAllocation(phys, size, viewBase);
     Ret(ctx, addr);
 }
 
@@ -176,7 +177,10 @@ GUEST_IMPORT(MmFreePhysicalMemory)
 {
     uint32_t addr = Arg(ctx, 1), size = 0;
     if (g_mem.physical.Free(ViewToPhysical(addr), &size))
+    {
+        UnregisterPhysicalAllocation(ViewToPhysical(addr));
         g_mem.Decommit(addr, size);
+    }
 }
 
 GUEST_IMPORT(MmGetPhysicalAddress)

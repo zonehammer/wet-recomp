@@ -3,7 +3,9 @@
 // Layout (mirrors the Xbox 360 where it matters):
 //   0x10000000-0x3FFFFFFF  virtual heap, 4 KB pages     (NtAllocateVirtualMemory)
 //   0x40000000-0x6FFFFFFF  virtual heap, 64 KB pages    (NtAllocateVirtualMemory, MEM_LARGE_PAGES)
-//   0x70000000-0x7FFFFFFF  system heap                  (kernel objects, stacks, PCR/TLS, pools)
+//   0x70000000-0x7EFFFFFF  system heap                  (kernel objects, stacks, PCR/TLS, pools)
+//   0x7FC80000-0x7FFFFFFF  hardware registers (GPU at 0x7FC80000, audio/XMA at 0x7FEA0000, ...),
+//                          plain memory for now
 //   0x82000000-...         the XEX image, then XenonRecomp's function table
 //   0xA0000000/0xC0000000/0xE0000000  physical memory views (64 KB / 16 MB / 4 KB pages)
 //
@@ -60,7 +62,7 @@ namespace wet
 
         RangeAllocator virt4k  { "virtual4k",  0x10000000, 0x40000000, 0x1000,  CommitMode::DecommitOnFree };
         RangeAllocator virt64k { "virtual64k", 0x40000000, 0x70000000, 0x10000, CommitMode::DecommitOnFree };
-        RangeAllocator system  { "system",     0x70000000, 0x80000000, 0x10,    CommitMode::ZeroOnAlloc };
+        RangeAllocator system  { "system",     0x70000000, 0x7F000000, 0x10,    CommitMode::ZeroOnAlloc };
         RangeAllocator physical{ "physical",   0x00010000, 0x20000000, 0x1000,  CommitMode::None };
 
         bool Init();
@@ -83,4 +85,14 @@ namespace wet
     uint32_t PhysicalToView(uint32_t phys, uint32_t viewBase);
     uint32_t ViewToPhysical(uint32_t guest);
     bool IsPhysicalView(uint32_t guest);
+
+    // Remember which view a physical allocation was handed out through, so physical
+    // addresses the game passes to the GPU can be turned back into guest addresses.
+    void RegisterPhysicalAllocation(uint32_t physBase, uint32_t size, uint32_t viewBase);
+    void UnregisterPhysicalAllocation(uint32_t physBase);
+    uint32_t PhysicalToGuest(uint32_t phys);    // 0 if not allocated
+
+    constexpr uint32_t kMmioBase = 0x7FC80000;
+    constexpr uint32_t kMmioSize = 0x80000000 - kMmioBase;
+    constexpr uint32_t kGpuRegisterBase = 0x7FC80000;
 }

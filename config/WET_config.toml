@@ -31,12 +31,12 @@ longjmp_address = 0x831C2E20
 # Leaf functions with no .pdata entry whose jump-table targets run past the
 # analyzer's size estimate. Bounds = start .. next .pdata function (padding trimmed).
 functions = [
-    { address = 0x82EDB3E0, size = 0x268 },
+    { address = 0x82EDB3E0, size = 0x240 },
     { address = 0x82EE8418, size = 0x154 },
-    { address = 0x82EED770, size = 0x404 },
+    { address = 0x82EED770, size = 0x3F8 },
     { address = 0x82EEE578, size = 0x19C },
     { address = 0x82F08D98, size = 0x64 },
-    { address = 0x82F14B50, size = 0x308 },
+    { address = 0x82F14B50, size = 0x2B0 },
     { address = 0x831F7758, size = 0x1E8 },
     { address = 0x831FB950, size = 0xF4 },
     # Found via tools/find_jump_tables.py (switch targets beyond the analyzer's size guess).
@@ -48,11 +48,12 @@ functions = [
     { address = 0x82D5F2A0, size = 0x1A8 },
     { address = 0x82D5F378, size = 0xD0 },
     { address = 0x82D97390, size = 0x188 },
-    { address = 0x830C0B98, size = 0x188 },
+    { address = 0x830C0B98, size = 0x114 },
     { address = 0x8310F180, size = 0x110 },
     { address = 0x8331E888, size = 0x434 },
     { address = 0x8331E8F0, size = 0x3CC },
     { address = 0x8331E958, size = 0x364 },
     { address = 0x8331E9B8, size = 0x304 },
     { address = 0x8331EB50, size = 0x16C },
+    { address = 0x8322E068, size = 0x80 },
 ]

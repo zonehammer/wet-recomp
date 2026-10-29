@@ -48,5 +48,9 @@ namespace wet
 
     [[noreturn]] void ExitGuestThread(uint32_t exitCode);
 
+    // Gives the calling host thread its own guest stack/PCR/TLS so it can call guest
+    // code (used for interrupt delivery). Returns the thread's context.
+    PPCContext& AdoptHostThread(uint32_t stackSize);
+
     void InitThreading(uint32_t tlsSlotCount, uint32_t tlsRawAddr, uint32_t tlsDataSize, uint32_t tlsRawSize);
 }

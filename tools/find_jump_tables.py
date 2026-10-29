@@ -78,16 +78,18 @@ class Image:
 def evaluate(img, ranges, cmp_addr, idx_reg):
     regs = {}
     target = None
+    idx_live = False    # the index is only defined from the bounds check onwards
     for a in (x for lo, hi in ranges for x in range(lo, hi, 4)):
         if a == cmp_addr:
             regs[idx_reg] = ("i", 1)
+            idx_live = True
         w = img.u32(a)
         op = w >> 26
         rD, rA, rB = (w >> 21) & 31, (w >> 16) & 31, (w >> 11) & 31
         g = regs.get
 
         def kill(r):
-            if r == idx_reg and idx_reg in regs:
+            if r == idx_reg and idx_live:
                 raise ValueError("index register overwritten")
             regs.pop(r, None)
 

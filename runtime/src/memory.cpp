@@ -144,6 +144,7 @@ namespace wet
             return false;
         }
         Log("Guest memory reserved at host %p", (void*)base);
+        Commit(kMmioBase, kMmioSize);
         return true;
     }
 
@@ -203,4 +204,32 @@ namespace wet
     }
 
     bool IsPhysicalView(uint32_t guest) { return guest >= 0xA0000000; }
+
+    static std::mutex s_physMapLock;
+    static std::map<uint32_t, std::pair<uint32_t, uint32_t>> s_physMap; // phys base -> (size, view)
+
+    void RegisterPhysicalAllocation(uint32_t physBase, uint32_t size, uint32_t viewBase)
+    {
+        std::lock_guard lock(s_physMapLock);
+        s_physMap[physBase] = { size, viewBase };
+    }
+
+    void UnregisterPhysicalAllocation(uint32_t physBase)
+    {
+        std::lock_guard lock(s_physMapLock);
+        s_physMap.erase(physBase);
+    }
+
+    uint32_t PhysicalToGuest(uint32_t phys)
+    {
+        phys &= 0x1FFFFFFF;
+        std::lock_guard lock(s_physMapLock);
+        auto it = s_physMap.upper_bound(phys);
+        if (it == s_physMap.begin())
+            return 0;
+        --it;
+        if (phys >= it->first + it->second.first)
+            return 0;
+        return PhysicalToView(phys, it->second.second);
+    }
 }

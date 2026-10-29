@@ -187,6 +187,12 @@ namespace wet
         return t;
     }
 
+    PPCContext& AdoptHostThread(uint32_t stackSize)
+    {
+        t_current = NewThread(stackSize);
+        return *t_current->ctx;
+    }
+
     void LogCrashContext()
     {
         GuestThread* t = CurrentThread();

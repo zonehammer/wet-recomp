@@ -9,11 +9,8 @@ using namespace wet;
 
 // ---------------------------------------------------------------------------
 // Video. Mode: 1280x720p60 widescreen.
-// The ring buffer / interrupt / swap entry points are where the GPU work starts;
-// they only log for now.
+// The GPU-facing entry points (ring buffer, interrupts, swap) live in gpu.cpp.
 // ---------------------------------------------------------------------------
-static uint32_t s_gfxInterruptCallback = 0, s_gfxInterruptUser = 0;
-
 // VdQueryVideoMode(X_VIDEO_MODE*)
 GUEST_IMPORT(VdQueryVideoMode)
 {
@@ -61,42 +58,6 @@ GUEST_IMPORT(VdIsHSIOTrainingSucceeded) { Ret(ctx, 1); }
 GUEST_IMPORT(VdRetrainEDRAM) { Ret(ctx, 0); }
 GUEST_IMPORT(VdRetrainEDRAMWorker) { Ret(ctx, 0); }
 GUEST_IMPORT(VdEnableDisableClockGating) { Ret(ctx, 0); }
-
-// VdSetGraphicsInterruptCallback(callback, user_data)
-GUEST_IMPORT(VdSetGraphicsInterruptCallback)
-{
-    s_gfxInterruptCallback = Arg(ctx, 0);
-    s_gfxInterruptUser = Arg(ctx, 1);
-    Log("VdSetGraphicsInterruptCallback(0x%08X, 0x%08X) - GPU interrupts not emulated yet",
-        s_gfxInterruptCallback, s_gfxInterruptUser);
-}
-
-// VdInitializeRingBuffer(ptr, size_log2)
-GUEST_IMPORT(VdInitializeRingBuffer)
-{
-    Log("VdInitializeRingBuffer(0x%08X, log2 size %u) - GPU command processor not implemented yet", Arg(ctx, 0), Arg(ctx, 1));
-}
-
-// VdEnableRingBufferRPtrWriteBack(ptr, block_log2)
-GUEST_IMPORT(VdEnableRingBufferRPtrWriteBack)
-{
-    Log("VdEnableRingBufferRPtrWriteBack(0x%08X, %u)", Arg(ctx, 0), Arg(ctx, 1));
-}
-
-GUEST_IMPORT(VdSetSystemCommandBufferGpuIdentifierAddress)
-{
-    Log("VdSetSystemCommandBufferGpuIdentifierAddress(0x%08X)", Arg(ctx, 0));
-}
-
-// VdSwap(...) - the title presented a frame.
-GUEST_IMPORT(VdSwap)
-{
-    static std::atomic<uint32_t> frames{ 0 };
-    uint32_t n = ++frames;
-    if (n <= 3 || (n & (n - 1)) == 0)
-        Log("VdSwap: frame %u (buffer 0x%08X)", n, Arg(ctx, 0));
-    Ret(ctx, 0);
-}
 
 // ---------------------------------------------------------------------------
 // Audio

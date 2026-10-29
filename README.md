@@ -3,10 +3,11 @@
 A static recompilation of **WET** (Xbox 360, 2009) to native Windows code, built on
 [XenonRecomp](https://github.com/hedge-dev/XenonRecomp).
 
-> **Status: first boot, no graphics yet.** The game's executable is fully recompiled to C++
-> and boots into its own initialisation code under a host runtime that implements the
-> Xbox 360 kernel/XAM functions it needs. There is no GPU, audio or video playback yet,
-> so nothing appears on screen. See [Roadmap](#roadmap).
+> **Status: boots into its frame loop, no graphics yet.** The game's executable is fully
+> recompiled to C++ and runs under a host runtime that implements the Xbox 360 kernel/XAM
+> functions it needs. It starts its threads, loads its configuration, submits GPU commands
+> to a stand-in GPU, receives 60 Hz vertical-blank interrupts and presents frames, but
+> nothing is drawn yet: there is no real GPU, audio or video playback. See [Roadmap](#roadmap).
 
 **This repository contains no game data.** You need your own copy of WET; the build
 extracts it and generates the C++ from it locally. Nothing under `game/` or
@@ -118,8 +119,8 @@ table it detects identically; it added 163 more.
 
 ## Roadmap
 
-1. **Kernel bring-up** — implement stubs as the log shows the game needs them, until it
-   submits its first GPU commands. *(in progress)*
+1. **Kernel bring-up** — implement stubs as the log shows the game needs them. *(done up to
+   the frame loop: the game submits GPU commands and presents frames)*
 2. **GPU** — Xenos command processor, EDRAM, and shader translation to D3D12/Vulkan.
    This is the largest piece of work.
 3. **Audio** — XMA decoding, the XAudio render driver callback.
