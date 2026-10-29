@@ -768,9 +768,10 @@ GUEST_IMPORT(VdSetSystemCommandBufferGpuIdentifierAddress)
 
 // VdSwap(buffer, fetch, unk2, unk3, unk4, frontbuffer*, format*, color_space*, width*, height*)
 // The title reserves 64 dwords in its command buffer at `buffer` for the swap
-// commands. As in Xenia: the front buffer's texture fetch constant (address made
-// physical) into fetch constant 0, then an XE_SWAP packet with the front buffer
-// and size, then type-2 no-ops.
+// commands: an XE_SWAP packet { 'SWAP', front buffer, width, height, the front
+// buffer's texture fetch constant (address made physical) } then type-2 no-ops.
+// (Xenia writes the fetch constant into fetch constant 0 instead, which clobbers
+// textures the title keeps bound there; the patched XE_SWAP handler restores it.)
 constexpr uint32_t kPm4XeSwap = 0x64;
 
 GUEST_IMPORT(VdSwap)
@@ -783,9 +784,13 @@ GUEST_IMPORT(VdSwap)
     if (buffer)
     {
         uint32_t o = buffer;
+        uint32_t count = fetch ? 10 : 4;
+        St32(o, (3u << 30) | ((count - 1) << 16) | (kPm4XeSwap << 8)); o += 4;
+        St32(o, 0x53574150); o += 4; // 'SWAP'
+        St32(o, frontPhys); o += 4;
+        St32(o, width); o += 4;
+        St32(o, height); o += 4;
         if (fetch)
-        {
-            St32(o, (0u << 30) | ((6u - 1) << 16) | 0x4800); o += 4;  // type 0: SHADER_CONSTANT_FETCH_00_0..5
             for (uint32_t i = 0; i < 6; i++, o += 4)
             {
                 uint32_t v = Ld32(fetch + i * 4);
@@ -793,12 +798,6 @@ GUEST_IMPORT(VdSwap)
                     v = (v & 0xFFF) | (ViewToPhysical(v & ~0xFFFu) & ~0xFFFu);   // base address -> physical
                 St32(o, v);
             }
-        }
-        St32(o, (3u << 30) | ((4u - 1) << 16) | (kPm4XeSwap << 8)); o += 4;
-        St32(o, 0x53574150); o += 4; // 'SWAP'
-        St32(o, frontPhys); o += 4;
-        St32(o, width); o += 4;
-        St32(o, height); o += 4;
         for (; o < buffer + 64 * 4; o += 4)
             St32(o, 0x80000000);    // type-2 no-op
     }

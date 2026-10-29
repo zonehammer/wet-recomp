@@ -45,6 +45,7 @@
 DECLARE_bool(log_to_stdout);
 DECLARE_bool(host_present_from_non_ui_thread);
 DECLARE_int32(log_level);
+DECLARE_path(dump_shaders);
 DECLARE_path(log_file);
 
 // ---------------------------------------------------------------------------
@@ -283,6 +284,57 @@ namespace
             }
             if (f)
                 std::fclose(f);
+            if (const char* probe = std::getenv("WET_PROBE_PHYS"))  // "addr:len,addr:len" (hex)
+            {
+                std::string spec(probe);
+                for (size_t p = 0; p < spec.size();)
+                {
+                    size_t e = spec.find(',', p);
+                    if (e == std::string::npos) e = spec.size();
+                    unsigned a = 0, l = 0;
+                    std::sscanf(spec.substr(p, e - p).c_str(), "%x:%x", &a, &l);
+                    uint64_t t = 0; unsigned nz = 0;
+                    for (unsigned i = 0; i < l; i++) { uint8_t b = s_memory->TranslatePhysical(a)[i]; t += b; nz += b != 0; }
+                    if (std::getenv("WET_PROBE_SAVE"))
+                    {
+                        char fn[64];
+                        std::snprintf(fn, sizeof(fn), "probe_%08X_%d.bin", a, n);
+                        if (FILE* pf = std::fopen((dir / fn).string().c_str(), "wb"))
+                        {
+                            std::fwrite(s_memory->TranslatePhysical(a), 1, l, pf);
+                            std::fclose(pf);
+                        }
+                    }
+                    char line[160];
+                    std::snprintf(line, sizeof(line), "Renderer: probe %08X+%X: sum %llu, nonzero bytes %u", a, l, (unsigned long long)t, nz);
+                    wet::renderer_host::Log(line);
+                    p = e + 1;
+                }
+            }
+            if (std::getenv("WET_PROBE_FETCH"))
+            {
+                auto& r = s_graphics->register_file()->values;
+                char line[200];
+                std::snprintf(line, sizeof(line), "Renderer: RB_COLOR_MASK %08X RB_COLOR_INFO %08X RB_BLENDCONTROL0 %08X RB_COLORCONTROL %08X RB_MODECONTROL %08X SQ_PS_CONST %08X",
+                              r[0x2104], r[0x2001], r[0x2201], r[0x2202], r[0x2208], r[0x2181]);
+                wet::renderer_host::Log(line);
+            }
+            if (std::getenv("WET_PROBE_FETCH"))
+                for (uint32_t c : { 0u, 1u, 2u, 3u, 254u, 255u })
+                {
+                    const float* v = reinterpret_cast<const float*>(&s_graphics->register_file()->values[0x4000 + (256 + c) * 4]);
+                    char line[160];
+                    std::snprintf(line, sizeof(line), "Renderer: ps c%u = %g %g %g %g", c, v[0], v[1], v[2], v[3]);
+                    wet::renderer_host::Log(line);
+                }
+            if (std::getenv("WET_PROBE_FETCH"))
+                for (uint32_t t = 0; t < 4; t++)
+                {
+                    const uint32_t* v = &s_graphics->register_file()->values[0x4800 + t * 6];
+                    char line[160];
+                    std::snprintf(line, sizeof(line), "Renderer: tf%u = %08X %08X %08X %08X %08X %08X", t, v[0], v[1], v[2], v[3], v[4], v[5]);
+                    wet::renderer_host::Log(line);
+                }
             char text[160];
             std::snprintf(text, sizeof(text), "Renderer: snapshot %d: %ux%u guest output, average brightness %.1f/255 (%s)", n,
                           image.width, image.height, double(sum) / (3.0 * image.width * image.height),
@@ -310,6 +362,8 @@ namespace wet::renderer
         cvars::log_file = "xenia_gpu.log";
         // Present from the window's thread on WM_PAINT (Xenia's most conservative mode).
         cvars::host_present_from_non_ui_thread = false;
+        if (const char* dir = std::getenv("WET_DUMP_SHADERS"))
+            cvars::dump_shaders = dir;
         if (const char* level = std::getenv("WET_GPU_LOG_LEVEL"))
             cvars::log_level = std::atoi(level);
         xe::InitializeLogging("xenia_gpu");
@@ -377,6 +431,8 @@ namespace wet::renderer
     {
         if (s_graphics)
         {
+            if (std::getenv("WET_GPU_INVALIDATE_ALL"))   // diagnostic: bypass write watches
+                OnPhysicalWrite(0, 0x20000000);
             s_graphics->command_processor()->UpdateWritePointer(value);
         }
     }
