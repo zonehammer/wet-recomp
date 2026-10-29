@@ -144,10 +144,55 @@ namespace wet::profiler
             uint64_t faults0, protects0;
             WatchStats(faults0, protects0);
             uint64_t t0 = os::MonotonicNs(), lastList = 0;
+            // Written every few seconds as well as at the end, so a crash or hang
+            // doesn't lose the data.
+            auto write = [&]() {
+                double elapsed = double(os::MonotonicNs() - t0) / 1e9;
+                uint64_t faults1, protects1;
+                WatchStats(faults1, protects1);
+                FILE* f = std::fopen("profile.txt", "w");
+                if (f)
+                {
+                    std::fprintf(f, "# WET profile: %.1f s, %llu rounds (%.0f/s), %llu samples\n", elapsed,
+                                 (unsigned long long)rounds, rounds / elapsed, (unsigned long long)samples);
+                    std::fprintf(f, "# write-watch faults %.0f/s, watch calls %.0f/s\n",
+                                 (faults1 - faults0) / elapsed, (protects1 - protects0) / elapsed);
+                    std::fprintf(f, "# threads: samples tid name\n");
+                    for (auto& [tid, n] : perThread)
+                        std::fprintf(f, "T %llu %u %s\n", (unsigned long long)n, tid, names[tid].c_str());
+                    std::vector<std::pair<uint32_t, const Chain*>> sorted;
+                    for (auto& [c, n] : chains)
+                        sorted.push_back({ n, &c });
+                    std::sort(sorted.begin(), sorted.end(), [](auto& a, auto& b) { return a.first > b.first; });
+                    std::fprintf(f, "# chains: count tid frame0 (innermost) ... frame%d\n", kFrames - 1);
+                    std::map<uint64_t, std::string> described;
+                    size_t limit = std::min<size_t>(sorted.size(), 20000);
+                    for (size_t i = 0; i < limit; i++)
+                    {
+                        std::fprintf(f, "C %u %u", sorted[i].first, sorted[i].second->tid);
+                        for (uint64_t pc : sorted[i].second->pc)
+                        {
+                            auto it = described.find(pc);
+                            if (it == described.end())
+                                it = described.emplace(pc, Describe(pc)).first;
+                            std::fprintf(f, " %s", it->second.c_str());
+                        }
+                        std::fprintf(f, "\n");
+                    }
+                    std::fclose(f);
+                }
+                return elapsed;
+            };
             timeBeginPeriod(1);
+            uint64_t lastWrite = t0;
             while (s_running.load())
             {
                 uint64_t now = os::MonotonicNs();
+                if (now - lastWrite > 5'000'000'000ull)
+                {
+                    lastWrite = now;
+                    write();
+                }
                 if (seconds > 0 && double(now - t0) / 1e9 >= seconds)
                     break;
                 if (now - lastList > 500'000'000ull)
@@ -192,44 +237,10 @@ namespace wet::profiler
                     samples++;
                 }
                 rounds++;
-                Sleep(1);
+                Sleep(2);   // a few hundred rounds a second
             }
             timeEndPeriod(1);
-            double elapsed = double(os::MonotonicNs() - t0) / 1e9;
-            uint64_t faults1, protects1;
-            WatchStats(faults1, protects1);
-
-            FILE* f = std::fopen("profile.txt", "w");
-            if (f)
-            {
-                std::fprintf(f, "# WET profile: %.1f s, %llu rounds (%.0f/s), %llu samples\n", elapsed,
-                             (unsigned long long)rounds, rounds / elapsed, (unsigned long long)samples);
-                std::fprintf(f, "# write-watch faults %.0f/s, watch calls %.0f/s\n",
-                             (faults1 - faults0) / elapsed, (protects1 - protects0) / elapsed);
-                std::fprintf(f, "# threads: samples tid name\n");
-                for (auto& [tid, n] : perThread)
-                    std::fprintf(f, "T %llu %u %s\n", (unsigned long long)n, tid, names[tid].c_str());
-                std::vector<std::pair<uint32_t, const Chain*>> sorted;
-                for (auto& [c, n] : chains)
-                    sorted.push_back({ n, &c });
-                std::sort(sorted.begin(), sorted.end(), [](auto& a, auto& b) { return a.first > b.first; });
-                std::fprintf(f, "# chains: count tid frame0 (innermost) ... frame%d\n", kFrames - 1);
-                std::map<uint64_t, std::string> described;
-                size_t limit = std::min<size_t>(sorted.size(), 20000);
-                for (size_t i = 0; i < limit; i++)
-                {
-                    std::fprintf(f, "C %u %u", sorted[i].first, sorted[i].second->tid);
-                    for (uint64_t pc : sorted[i].second->pc)
-                    {
-                        auto it = described.find(pc);
-                        if (it == described.end())
-                            it = described.emplace(pc, Describe(pc)).first;
-                        std::fprintf(f, " %s", it->second.c_str());
-                    }
-                    std::fprintf(f, "\n");
-                }
-                std::fclose(f);
-            }
+            double elapsed = write();
             for (auto& [tid, h] : threads)
                 ::CloseHandle(h);
             Log("Profiler: stopped after %.1f s, %llu samples; wrote profile.txt", elapsed, (unsigned long long)samples);
