@@ -281,3 +281,20 @@ index 31a86cd..c6c0d13 100644
  union alignas(0x10) PPCVRegister
  {
      int8_t s8[16];
+diff --git a/XenonUtils/xex.cpp b/XenonUtils/xex.cpp
+index 4e79042..377622f 100644
+--- a/XenonUtils/xex.cpp
++++ b/XenonUtils/xex.cpp
+@@ -180,6 +180,12 @@ Image Xex2LoadImage(const uint8_t* data, size_t dataSize)
+                 imageSize += blocks[i].dataSize + blocks[i].zeroSize;
+             }
+ 
++            // WET: the blocks can cover less than the image the header declares, and
++            // image.size is set to security->imageSize below. Allocate the full image
++            // (zero-filled tail) so consumers don't read past the buffer.
++            if (imageSize < security->imageSize)
++                imageSize = security->imageSize;
++
+             result = std::make_unique<uint8_t[]>(imageSize);
+             auto* destData = result.get();
+ 

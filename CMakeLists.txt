@@ -49,6 +49,10 @@ execute_process(
     COMMAND ${GIT_EXECUTABLE} apply --reverse --check ${WET_PATCH}
     WORKING_DIRECTORY ${XR_DIR} RESULT_VARIABLE WET_PATCH_PRESENT OUTPUT_QUIET ERROR_QUIET)
 if(NOT WET_PATCH_PRESENT EQUAL 0)
+    # Not applied, or an older version of the patch set is: start from a clean submodule.
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} checkout -- .
+        WORKING_DIRECTORY ${XR_DIR} OUTPUT_QUIET ERROR_QUIET)
     execute_process(
         COMMAND ${GIT_EXECUTABLE} apply --whitespace=nowarn ${WET_PATCH}
         WORKING_DIRECTORY ${XR_DIR} RESULT_VARIABLE WET_PATCH_RESULT)
