@@ -1,6 +1,7 @@
 // NtAllocateVirtualMemory & friends, physical memory, pools.
 #include "kernel.h"
 
+#include <cstdlib>
 #include <mutex>
 #include <unordered_map>
 
@@ -60,7 +61,19 @@ GUEST_IMPORT(NtAllocateVirtualMemory)
         uint32_t b, s;
         if (QueryAny(want, &b, &s))
         {
-            St32(basePtr, want);
+            // Report the range rounded out to whole pages, as the kernel does; heaps
+            // track their committed extent from these values. (Large-page regions
+            // commit in 64 KB pages.)
+            uint32_t page = g_mem.virt64k.Contains(want) ? 0x10000 : 0x1000;
+            uint32_t start = want & ~(page - 1);
+            uint64_t end = (uint64_t(want) + size + page - 1) & ~uint64_t(page - 1);
+            if (end > uint64_t(b) + s)
+                end = uint64_t(b) + s;
+            if (std::getenv("WET_TRACE_VM"))
+                Log("NtAllocateVirtualMemory(commit %08X, size %X, type %X) inside %08X+%X -> %08X+%X lr=%08X", want, size,
+                    type, b, s, start, uint32_t(end - start), uint32_t(ctx.lr));
+            St32(basePtr, start);
+            St32(sizePtr, uint32_t(end - start));
             return Ret(ctx, STATUS_SUCCESS);
         }
         RangeAllocator* heap = VirtualHeapFor(want);
@@ -72,12 +85,16 @@ GUEST_IMPORT(NtAllocateVirtualMemory)
         }
         St32(basePtr, aligned);
         heap->Query(aligned, nullptr, &size);
+        if (std::getenv("WET_TRACE_VM"))
+            Log("NtAllocateVirtualMemory(fixed %08X, size %X, type %X) -> %08X size %X", want, Ld32(sizePtr), type, aligned, size);
         St32(sizePtr, size);
         std::lock_guard lock(s_protLock);
         s_protect[aligned] = protect;
         return Ret(ctx, STATUS_SUCCESS);
     }
 
+    if (std::getenv("WET_TRACE_VM"))
+        Log("NtAllocateVirtualMemory(want %08X, size %X, type %X, protect %X) lr=%08X", want, size, type, protect, uint32_t(ctx.lr));
     RangeAllocator& heap = (type & MEM_LARGE_PAGES) ? g_mem.virt64k : g_mem.virt4k;
     uint32_t addr = heap.Alloc(size);
     if (!addr && &heap == &g_mem.virt4k)
@@ -91,6 +108,8 @@ GUEST_IMPORT(NtAllocateVirtualMemory)
     QueryAny(addr, &addr, &actual);
     St32(basePtr, addr);
     St32(sizePtr, actual);
+    if (std::getenv("WET_TRACE_VM"))
+        Log("  -> %08X size %X", addr, actual);
     {
         std::lock_guard lock(s_protLock);
         s_protect[addr] = protect;
@@ -103,8 +122,18 @@ GUEST_IMPORT(NtFreeVirtualMemory)
 {
     uint32_t basePtr = Arg(ctx, 0), sizePtr = Arg(ctx, 1), type = Arg(ctx, 2);
     uint32_t addr = Ld32(basePtr);
+    if (std::getenv("WET_TRACE_VM"))
+        Log("NtFreeVirtualMemory(%08X, size %X, type %X) lr=%08X", addr, Ld32(sizePtr), type, uint32_t(ctx.lr));
     if (type & MEM_DECOMMIT)
-        return Ret(ctx, STATUS_SUCCESS); // keep it committed; the region stays reserved
+    {
+        // Kept committed (the region stays reserved); report the page-rounded range.
+        uint32_t size = Ld32(sizePtr), page = g_mem.virt64k.Contains(addr) ? 0x10000 : 0x1000;
+        uint32_t start = addr & ~(page - 1);
+        uint64_t end = size ? (uint64_t(addr) + size + page - 1) & ~uint64_t(page - 1) : start + page;
+        St32(basePtr, start);
+        St32(sizePtr, uint32_t(end - start));
+        return Ret(ctx, STATUS_SUCCESS);
+    }
     RangeAllocator* heap = VirtualHeapFor(addr);
     uint32_t freed = 0;
     if (!heap || !heap->Free(addr, &freed))
