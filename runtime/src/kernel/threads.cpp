@@ -273,7 +273,7 @@ namespace wet
                     Log("  %3u %-30s exited", t->id, name.c_str());
                 else if (!t->waitingOn.empty())
                     Log("  %3u %-30s waiting %5.1fs on %s (lr=%08X)", t->id, name.c_str(),
-                        double(now - t->waitSinceNs) / 1e9, t->waitingOn.c_str(), t->waitLr);
+                        now > t->waitSinceNs ? double(now - t->waitSinceNs) / 1e9 : 0.0, t->waitingOn.c_str(), t->waitLr);
                 else
                     Log("  %3u %-30s running (lr=%08X, last import %s)", t->id, name.c_str(),
                         t->ctx ? uint32_t(t->ctx->lr) : 0, t->currentImport ? t->currentImport : "-");

@@ -5,11 +5,16 @@
 // - A command processor walks the PM4 packets the game submits and performs the
 //   bookkeeping ones: register writes (with scratch-register write-back),
 //   MEM_WRITE / EVENT_WRITE_SHD / COND_WRITE fences, WAIT_REG_MEM (the CP
-//   blocks until the CPU sets a flag), INDIRECT_BUFFER and INTERRUPT. Everything
+//   blocks until the CPU sets a flag), INDIRECT_BUFFER (fetched in full when
+//   started, as the hardware does) and INTERRUPT. Everything
 //   else (draws, state) is skipped by length. CP_RB_RPTR and the read-pointer
 //   write-back then follow CP_RB_WPTR.
 // - A 60 Hz vertical-blank interrupt is delivered to the game's graphics
 //   interrupt callback (source 0), on a dedicated thread with its own guest stack.
+//
+// VdSwap fills the 64-dword slot the title reserves for it, and
+// VdInitializeScalerCommandBuffer reports the length of the buffer it fills: both
+// end up inside the command stream, so getting them wrong desynchronises the CP.
 //
 // TODO (real GPU work): execute draws and state, translate rendering to D3D12/Vulkan.
 #include "kernel.h"
@@ -20,6 +25,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <unordered_map>
+#include <vector>
 
 using namespace wet;
 
@@ -96,6 +103,19 @@ namespace
 
     void ServiceVblank(); // keeps vblank interrupts flowing while the CP is blocked
 
+    // Diagnostics: fingerprints of indirect buffers taken when they are first seen in
+    // the ring, compared when the CP actually executes them.
+    std::unordered_map<uint64_t, uint64_t> s_ibPrint; // (addr<<32|size) -> hash
+    uint64_t HashIb(uint32_t guest, uint32_t size)
+    {
+        uint64_t h = 1469598103934665603ull;
+        for (uint32_t i = 0; i < size; i++)
+            h = (h ^ Ld32(guest + i * 4)) * 1099511628211ull;
+        return h;
+    }
+    uint32_t s_ringScanPos = 0;   // ring dword index scanned so far (absolute, may exceed size)
+    void ScanRingAhead();
+
     bool Compare(uint32_t func, uint32_t value, uint32_t ref)
     {
         switch (func & 7)
@@ -149,24 +169,65 @@ namespace
         {
             if (index >= 0x10000)
                 return;
+            if ((index == kRegScratchAddr || index == kRegScratchUmsk) && Reg(index) != value)
+            {
+                static int logged = 0;
+                if (logged++ < 20)
+                {
+                    Log("GPU: %s changed %08X -> %08X (packet at %08X, depth %d, buffer %08X, end +%X)",
+                        index == kRegScratchAddr ? "SCRATCH_ADDR" : "SCRATCH_UMSK", Reg(index), value, curPacket,
+                        curDepth, curBase, curEnd);
+                    for (uint32_t a = curPacket - 32; a < curPacket + 32; a += 16)
+                        Log("   %08X: %08X %08X %08X %08X", a, Ld32(a), Ld32(a + 4), Ld32(a + 8), Ld32(a + 12));
+                }
+            }
             SetReg(index, value);
             if (index >= kRegScratchReg0 && index < kRegScratchReg0 + 8)
                 ScratchWriteBack(index - kRegScratchReg0, value);
         }
 
-        // Reads dwords from guest memory (big-endian), handling ring wrap.
+        // Reads command dwords (big-endian). The ring is read from guest memory as it
+        // is executed (with wrap); indirect buffers are read from a copy taken when the
+        // CP starts them, like the hardware's IB prefetch. The title relies on that:
+        // once a buffer has started (signalled through a scratch register), it reuses
+        // the buffer's tail for the next submission.
         struct Reader
         {
-            uint32_t base, sizeDwords, pos; // pos in dwords
-            uint32_t Read() { uint32_t v = Ld32(base + (pos % sizeDwords) * 4); pos++; return v; }
+            uint32_t base, sizeDwords, pos; // pos in dwords; base = guest address (for logs)
+            const uint32_t* copy = nullptr; // raw big-endian dwords, or null for live memory
+            uint32_t copySize = 0;
+            uint32_t Read()
+            {
+                uint32_t v;
+                if (copy)
+                    v = pos < copySize ? __builtin_bswap32(copy[pos]) : 0x80000000u; // type-2 no-op past the end
+                else
+                    v = Ld32(base + (pos % sizeDwords) * 4);
+                pos++;
+                return v;
+            }
+            uint32_t Peek(uint32_t at) const
+            {
+                if (copy)
+                    return at < copySize ? __builtin_bswap32(copy[at]) : 0;
+                return Ld32(base + (at % sizeDwords) * 4);
+            }
         };
 
         uint32_t overruns = 0;
+        uint32_t snap[0x4000] = {};
+        uint32_t snapAddr = 0, snapSize = 0;
+        uint64_t snapNs = 0;
+
+        uint32_t curPacket = 0, curBase = 0, curStart = 0, curEnd = 0;
+        int curDepth = 0;
 
         void Execute(Reader& r, uint32_t endPos, int depth)
         {
             while (r.pos < endPos)
             {
+                curPacket = r.base + (r.pos % r.sizeDwords) * 4;
+                curBase = r.base; curEnd = endPos; curDepth = depth;
                 uint32_t header = r.Read();
                 switch (header >> 30)
                 {
@@ -200,7 +261,7 @@ namespace
                 if (depth && std::getenv("WET_GPU_TRACE"))
                 {
                     // Re-walk the buffer printing each packet header.
-                    Reader w{ r.base, r.sizeDwords, 0 };
+                    Reader w{ r.base, r.sizeDwords, 0, r.copy, r.copySize };
                     Log("GPU TRACE: buffer at %08X, %u dwords:", r.base, endPos);
                     while (w.pos < endPos)
                     {
@@ -214,7 +275,7 @@ namespace
                         }
                         char words[200] = "";
                         for (uint32_t k = 0; k < n && k < 6; k++)
-                            std::snprintf(words + strlen(words), sizeof(words) - strlen(words), " %08X", Ld32(r.base + (at + 1 + k) * 4));
+                            std::snprintf(words + strlen(words), sizeof(words) - strlen(words), " %08X", r.Peek(at + 1 + k));
                         Log("   +%04X %08X type%u op%02X n=%u:%s", at, h, h >> 30, (h >> 8) & 0x7F, n, words);
                         w.pos += n;
                     }
@@ -263,9 +324,37 @@ namespace
                 if (std::getenv("WET_GPU_TRACE") && ibLogged++ < 0)
                     Log("GPU TRACE: IB from %08X: addr %08X -> %08X, raw size %08X (%u dwords, ends %08X), depth %d",
                         r.base + ((start - 1) % r.sizeDwords) * 4, addr, guest, rawSize, size, guest + size * 4, depth);
+                if (guest && depth == 0 && std::getenv("WET_GPU_TRACE"))
+                {
+                    auto it = s_ibPrint.find((uint64_t(guest) << 32) | size);
+                    if (it != s_ibPrint.end())
+                    {
+                        if (it->second != HashIb(guest, size))
+                        {
+                            static int warned = 0;
+                            if (warned++ < 10)
+                                Log("GPU TRACE: IB %08X (%u dwords) was OVERWRITTEN between submission and execution", guest, size);
+                        }
+                        s_ibPrint.erase(it);
+                    }
+                }
                 if (guest && depth < 4)
                 {
-                    Reader ib{ guest, 0xFFFFFFFF, 0 };
+                    if (depth == 0 && std::getenv("WET_GPU_TRACE"))
+                    {
+                        snapAddr = guest;
+                        snapSize = std::min<uint32_t>(size + 64, 0x4000);
+                        snapNs = os::MonotonicNs();
+                        for (uint32_t i = 0; i < snapSize; i++)
+                            snap[i] = Ld32(guest + i * 4);
+                    }
+                    std::vector<uint32_t> fetched;
+                    if (std::getenv("WET_GPU_PREFETCH"))
+                    {
+                        fetched.resize(size);
+                        std::memcpy(fetched.data(), HostPtr(guest), size_t(size) * 4);
+                    }
+                    Reader ib{ guest, 0xFFFFFFFF, 0, fetched.empty() ? nullptr : fetched.data(), size };
                     Execute(ib, size, depth + 1);
                 }
                 else if (!guest && !warnedUnmapped)
@@ -317,17 +406,63 @@ namespace
                     break;
                 uint64_t startNs = os::MonotonicNs();
                 bool warned = false;
+                static int traced = 0;
+                bool trace = std::getenv("WET_GPU_TRACE") && traced < 400;
+                uint32_t dev = s_interruptUser.load();
+                uint32_t here = r.base + (start - 1) * 4;
+                uint32_t v0 = (info & 0x10) ? GpuLoad(mem, poll & 3) : Reg(poll & 0xFFFF);
+                if (trace && !Compare(info, v0 & mask, ref))
+                {
+                    traced++;
+                    Log("GPU TRACE: WAIT at %08X (+%04X of %08X) for %08X==%08X blocks; CPU write ptr %08X",
+                        here, start - 1, r.base, (info & 0x10) ? mem : poll, ref, dev ? Ld32(dev + 48) : 0);
+                }
                 for (;;)
                 {
                     uint32_t v = (info & 0x10) ? GpuLoad(mem, poll & 3) : Reg(poll & 0xFFFF);
                     if (Compare(info, v & mask, ref))
+                    {
+                        if (trace && !Compare(info, v0 & mask, ref))
+                            Log("GPU TRACE: WAIT at %08X released after %.1f ms; CPU write ptr %08X; packet now %08X %08X %08X %08X %08X %08X | %08X %08X",
+                                here, double(os::MonotonicNs() - startNs) / 1e6, dev ? Ld32(dev + 48) : 0,
+                                Ld32(here), Ld32(here + 4), Ld32(here + 8), Ld32(here + 12), Ld32(here + 16), Ld32(here + 20),
+                                Ld32(here + 24), Ld32(here + 28));
                         break;
+                    }
                     if (!warned && os::MonotonicNs() - startNs > 5000000000ull)
                     {
                         warned = true;
                         Log("GPU: WAIT_REG_MEM still waiting after 5 s for %s %08X & %08X %s %08X (now %08X)",
                             (info & 0x10) ? "memory" : "register", (info & 0x10) ? mem : (poll & 0xFFFF), mask,
                             (const char*[]){ "never", "<", "<=", "==", "!=", ">=", ">", "always" }[info & 7], ref, v & mask);
+                        if (r.copy)
+                        {
+                            Log("GPU TRACE: fetched buffer %08X (%u dwords), stuck at +%04X; packets:", r.base, r.copySize, start - 1);
+                            for (uint32_t at = 0; at < r.copySize;)
+                            {
+                                uint32_t h = r.Peek(at), n = (h >> 30) == 1 ? 2 : (h >> 30) == 2 ? 0 : ((h >> 16) & 0x3FFF) + 1;
+                                char words[160] = "";
+                                for (uint32_t k = 0; k < n && k < 5; k++)
+                                    std::snprintf(words + strlen(words), sizeof(words) - strlen(words), " %08X", r.Peek(at + 1 + k));
+                                Log("   %s+%04X %08X%s", at == start - 1 ? ">" : " ", at, h, words);
+                                at += 1 + n;
+                            }
+                        }
+                        if (snapSize)
+                        {
+                            Log("GPU TRACE: buffer %08X (%u dwords) changed since the GPU entered it %.3f s ago:",
+                                snapAddr, snapSize - 64, double(os::MonotonicNs() - snapNs) / 1e9);
+                            int shown = 0;
+                            for (uint32_t i = 0; i < snapSize && shown < 40; i++)
+                            {
+                                uint32_t now = Ld32(snapAddr + i * 4);
+                                if (now != snap[i])
+                                {
+                                    Log("   +%04X (%08X): %08X -> %08X", i, snapAddr + i * 4, snap[i], now);
+                                    shown++;
+                                }
+                            }
+                        }
                         {
                             uint32_t from = hist[(histN - 6) % 16].addr;
                             for (uint32_t a = from; a < hist[(histN - 1) % 16].addr + 0x18; a += 16)
@@ -342,6 +477,8 @@ namespace
                     }
                     ServiceVblank();
                     SyncScratchFromCpu();
+                    if (std::getenv("WET_GPU_TRACE"))
+                        ScanRingAhead();
                     os::SleepNs(50000);
                 }
                 break;
@@ -405,6 +542,11 @@ namespace
                     end += sizeDwords;      // wrapped
                 s_cp.Execute(rd, end, 0);
                 rptr = wptr;
+                if (std::getenv("WET_GPU_TRACE"))
+                {
+                    // Anything the scanner had not reached is executed now: forget stale entries.
+                    s_ringScanPos = rptr;
+                }
                 SetReg(kRegCpRbRptr, rptr);
                 if (uint32_t wb = s_rptrWriteBack.load())
                     if (uint32_t g = GpuAddr(wb))
@@ -420,6 +562,30 @@ namespace
         }
     }
 
+    void ScanRingAhead()
+    {
+        uint32_t ring = s_ringBase.load() ? GpuAddr(s_ringBase.load()) : 0;
+        if (!ring)
+            return;
+        uint32_t sizeDwords = (1u << (s_ringSizeLog2.load() + 3)) / 4;
+        uint32_t wptr = Reg(kRegCpRbWptr);
+        uint32_t pos = s_ringScanPos % sizeDwords;
+        int guard = 0;
+        while (pos != wptr && guard++ < 4096)
+        {
+            uint32_t h = Ld32(ring + pos * 4);
+            uint32_t n = (h >> 30) == 1 ? 2 : (h >> 30) == 2 ? 0 : ((h >> 16) & 0x3FFF) + 1;
+            if ((h >> 30) == 3 && (((h >> 8) & 0x7F) == 0x3F || ((h >> 8) & 0x7F) == 0x37))
+            {
+                uint32_t addr = Ld32(ring + ((pos + 1) % sizeDwords) * 4), size = Ld32(ring + ((pos + 2) % sizeDwords) * 4) & 0xFFFFF;
+                if (uint32_t g = GpuAddr(addr))
+                    s_ibPrint.emplace((uint64_t(g) << 32) | size, HashIb(g, size));
+            }
+            pos = (pos + 1 + n) % sizeDwords;
+        }
+        s_ringScanPos = pos;
+    }
+
     void ServiceVblank()
     {
         uint64_t now = os::MonotonicNs();
@@ -429,6 +595,9 @@ namespace
         if (now > s_nextVblank + kVblankNs * 4)
             s_nextVblank = now + kVblankNs; // don't try to catch up after a stall
         uint64_t n = ++s_vblanks;
+        // Hardware raises D1MODE_VBLANK_STATUS on every vblank; the title's handler
+        // only acts when it is set and acknowledges it, so set it again each time.
+        SetReg(0x1951, Reg(0x1951) | 1);
         if (s_interruptCallback.load())
         {
             DeliverInterrupt(0);
@@ -478,12 +647,30 @@ GUEST_IMPORT(VdSetSystemCommandBufferGpuIdentifierAddress)
     Log("VdSetSystemCommandBufferGpuIdentifierAddress(0x%08X)", Arg(ctx, 0));
 }
 
-// VdSwap(...) - the title presented a frame.
+// VdSwap(buffer, fetch, unk2, unk3, unk4, frontbuffer*, format*, color_space*, width*, height*)
+// The title reserves 64 dwords in its command buffer at `buffer` for the swap
+// commands. They must be filled: we write one 64-dword type-3 packet carrying the
+// front buffer and size (as Xenia does), which the command processor skips.
+constexpr uint32_t kPm4XeSwap = 0x64;
+
 GUEST_IMPORT(VdSwap)
 {
+    uint32_t buffer = Arg(ctx, 0);
+    uint32_t frontPtr = Arg(ctx, 5), widthPtr = Arg(ctx, 8), heightPtr = Arg(ctx, 9);
+    uint32_t front = frontPtr ? Ld32(frontPtr) : 0;
+    uint32_t width = widthPtr ? Ld32(widthPtr) : 0, height = heightPtr ? Ld32(heightPtr) : 0;
+    if (buffer)
+    {
+        Zero(buffer, 64 * 4);
+        St32(buffer + 0, (3u << 30) | ((63u - 1) << 16) | (kPm4XeSwap << 8));
+        St32(buffer + 4, 0x53574150); // 'SWAP'
+        St32(buffer + 8, front & 0x1FFFFFFF);
+        St32(buffer + 12, width);
+        St32(buffer + 16, height);
+    }
     uint64_t n = ++s_swaps;
     if (n <= 3 || (n & (n - 1)) == 0)
-        Log("VdSwap: frame %llu presented", (unsigned long long)n);
+        Log("VdSwap: frame %llu presented (front buffer %08X, %ux%u)", (unsigned long long)n, front, width, height);
     Ret(ctx, 0);
 }
 
@@ -518,3 +705,21 @@ GUEST_IMPORT(VdPersistDisplay)
 
 GUEST_IMPORT(VdSetDisplayMode) { Ret(ctx, 0); }
 GUEST_IMPORT(VdCallGraphicsNotificationRoutines) { Ret(ctx, 0); }
+
+// VdInitializeScalerCommandBuffer(source_xy, source_wh, output_xy, output_wh, ..., dest, dest_count)
+// -> dwords written to dest. WET passes 12 arguments: the destination buffer is
+// argument 10 and its size in dwords argument 11 (it pre-fills it with type-2 no-ops,
+// then copies the returned number of dwords into its command buffer). We emit no
+// scaler commands, only no-ops, but must report the full length.
+GUEST_IMPORT(VdInitializeScalerCommandBuffer)
+{
+    uint32_t dest = Arg(ctx, 10), count = Arg(ctx, 11);
+    if (!dest || count > 0x10000)
+    {
+        Log("VdInitializeScalerCommandBuffer: unexpected arguments (dest %08X, count %u)", dest, count);
+        return Ret(ctx, 0);
+    }
+    for (uint32_t i = 0; i < count; i++)
+        St32(dest + i * 4, 0x80000000);
+    Ret(ctx, count);
+}
