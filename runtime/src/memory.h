@@ -104,6 +104,10 @@ namespace wet
     using PhysicalWriteCallback = void (*)(uint32_t physStart, uint32_t length);
     void SetPhysicalWriteCallback(PhysicalWriteCallback callback);
     void WatchPhysical(uint32_t physStart, uint32_t length);
+    // Call before the OS writes into guest memory on our behalf (file reads): the OS
+    // cannot take a write-watch fault, so watched pages in the range are unwatched
+    // (and their caches invalidated) up front.
+    void PrepareHostWrite(uint32_t guest, uint32_t length);
     // A mapping of physical memory that is never watched (index = physical address).
     uint8_t* PhysicalHostView();
 }

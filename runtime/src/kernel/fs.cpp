@@ -458,6 +458,7 @@ GUEST_IMPORT(NtReadFile)
                 f->position = off;
         }
         SeekTo(f->fp, f->position);
+        PrepareHostWrite(buffer, length);
         got = std::fread(HostPtr(buffer), 1, length, f->fp);
         f->position += got;
     }
@@ -484,6 +485,7 @@ GUEST_IMPORT(NtReadFileScatter)
         {
             uint32_t page = Ld32(segs + i * 8 + 4);
             size_t want = std::min<size_t>(0x1000, length - total);
+            PrepareHostWrite(page, want);
             size_t got = std::fread(HostPtr(page), 1, want, f->fp);
             total += got;
             if (got < want)

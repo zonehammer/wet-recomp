@@ -340,6 +340,37 @@ namespace wet
         return true;
     }
 
+    void PrepareHostWrite(uint32_t guest, uint32_t length)
+    {
+        if (!length || guest < 0xA0000000u || s_watched.empty())
+            return;
+        uint64_t end = uint64_t(guest) + length;
+        if (end > 0x100000000ull)
+            end = 0x100000000ull;
+        // Physical pages covered (views are contiguous in physical space).
+        uint32_t first = ViewToPhysical(guest) / kHostPage;
+        uint32_t last = (ViewToPhysical(uint32_t(end - 1))) / kHostPage;
+        if (last >= kPhysPages)
+            last = kPhysPages - 1;
+        std::vector<std::pair<uint32_t, uint32_t>> runs;
+        {
+            std::lock_guard lock(s_watchLock);
+            for (uint32_t p = first; p <= last;)
+            {
+                if (!s_watched[p]) { p++; continue; }
+                uint32_t run = p;
+                while (run <= last && s_watched[run])
+                    s_watched[run++] = 0;
+                SetRangeProtection(p, run - p, false);
+                runs.push_back({ p, run - p });
+                p = run;
+            }
+        }
+        if (s_watchCallback)
+            for (auto& [p, n] : runs)
+                s_watchCallback(p * kHostPage, n * kHostPage);
+    }
+
     void SetPhysicalWriteCallback(PhysicalWriteCallback callback)
     {
         std::lock_guard lock(s_watchLock);
