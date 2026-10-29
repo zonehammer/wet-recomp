@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <map>
 #include <mutex>
+#include <set>
 
 namespace fs = std::filesystem;
 using namespace wet;
@@ -33,6 +34,8 @@ namespace
         fs::path root;
         bool writable;
         const char* fsName;
+        // Folders split across disc layers ("movies0", "movies1") presented as one ("movies").
+        std::map<std::string, std::vector<fs::path>> unions; // lower-case name -> parts
     };
 
     std::mutex s_vfsLock;
@@ -78,6 +81,7 @@ namespace
         fs::path host;
         const Device* device = nullptr;
         bool ok = false;
+        std::vector<fs::path> unionDirs; // set when the path is a merged folder itself
     };
 
     Resolved ResolveGuestPath(const std::string& guestIn)
@@ -107,10 +111,9 @@ namespace
         if (!best)
             return {};
 
-        fs::path host = best->root;
+        std::vector<std::string> comps;
         std::string rest = p.substr(best->prefix.size());
-        size_t i = 0;
-        while (i < rest.size())
+        for (size_t i = 0; i < rest.size();)
         {
             size_t j = rest.find('\\', i);
             if (j == std::string::npos) j = rest.size();
@@ -120,8 +123,36 @@ namespace
                 continue;
             if (comp == "..")
                 return {}; // no escaping the device root
-            host = MatchComponent(host, comp);
+            comps.push_back(comp);
         }
+
+        std::error_code ec;
+        if (!comps.empty())
+        {
+            auto u = best->unions.find(Lower(comps[0]));
+            if (u != best->unions.end() && !fs::exists(best->root / comps[0], ec))
+            {
+                const auto& parts = u->second;
+                if (comps.size() == 1)
+                    return { parts.front(), best, true, parts };
+                for (const auto& part : parts)
+                {
+                    fs::path h = part;
+                    for (size_t k = 1; k < comps.size(); k++)
+                        h = MatchComponent(h, comps[k]);
+                    if (fs::exists(h, ec))
+                        return { h, best, true };
+                }
+                fs::path h = parts.front();
+                for (size_t k = 1; k < comps.size(); k++)
+                    h = MatchComponent(h, comps[k]);
+                return { h, best, true };
+            }
+        }
+
+        fs::path host = best->root;
+        for (const auto& comp : comps)
+            host = MatchComponent(host, comp);
         return { host, best, true };
     }
 
@@ -135,6 +166,7 @@ namespace
         const Device* device = nullptr;
         bool isDirectory = false;
         bool deleteOnClose = false;
+        std::vector<fs::path> unionDirs;
         std::FILE* fp = nullptr;
         uint64_t position = 0;
         std::mutex lock;
@@ -271,6 +303,7 @@ namespace
         f->guestPath = NormalizeGuest(guest);
         f->hostPath = r.host;
         f->device = r.device;
+        f->unionDirs = r.unionDirs;
 
         if (isDir || (!exists && (options & FILE_DIRECTORY_FILE)))
         {
@@ -325,6 +358,36 @@ namespace wet
             { "cache:", "\\device\\harddisk0\\cache0" },
         };
         Log("VFS: game: -> %s (read-only), hdd: -> %s", gameDir.string().c_str(), hddDir.string().c_str());
+
+        // Dual-layer discs split big folders as name0, name1, ... with no "name";
+        // the title asks for "name". Present the parts as one folder (lowest first).
+        std::map<std::string, std::vector<std::pair<int, fs::path>>> groups;
+        for (auto& e : fs::directory_iterator(gameDir, ec))
+        {
+            if (!e.is_directory(ec))
+                continue;
+            std::string name = e.path().filename().string();
+            size_t k = name.size();
+            while (k > 0 && isdigit((unsigned char)name[k - 1]))
+                k--;
+            if (k == 0 || k == name.size())
+                continue;
+            groups[Lower(name.substr(0, k))].push_back({ std::stoi(name.substr(k)), e.path() });
+        }
+        for (auto& [stem, parts] : groups)
+        {
+            if (parts.size() < 2 || fs::exists(gameDir / stem, ec))
+                continue;
+            std::sort(parts.begin(), parts.end());
+            auto& list = s_devices[0].unions[stem];
+            std::string names;
+            for (auto& [n, path] : parts)
+            {
+                list.push_back(path);
+                names += (names.empty() ? "" : " + ") + path.filename().string();
+            }
+            Log("VFS: game:\\%s = %s (disc layers merged)", stem.c_str(), names.c_str());
+        }
     }
 }
 
@@ -593,8 +656,12 @@ GUEST_IMPORT(NtQueryDirectoryFile)
     {
         std::error_code ec;
         f->entries.clear();
-        for (auto& e : fs::directory_iterator(f->hostPath, ec))
-            f->entries.push_back(e);
+        std::vector<fs::path> dirs = f->unionDirs.empty() ? std::vector<fs::path>{ f->hostPath } : f->unionDirs;
+        std::set<std::string> seen;
+        for (const auto& dir : dirs)
+            for (auto& e : fs::directory_iterator(dir, ec))
+                if (seen.insert(Lower(e.path().filename().string())).second)
+                    f->entries.push_back(e);
         std::sort(f->entries.begin(), f->entries.end(),
                   [](auto& a, auto& b) { return a.path().filename().string() < b.path().filename().string(); });
         f->pattern = namePtr ? ReadAnsiString(namePtr) : "*";

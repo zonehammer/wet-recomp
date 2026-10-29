@@ -10694,3 +10694,22 @@ labels = [
     0x832F389C,
 ]
 
+
+# 1 jump tables found by tools/find_jump_tables.py (1881 other bctr sites are indirect tail calls)
+[[switch]]
+base = 0x83392028
+r = 10
+default = 0x83393D8C
+labels = [
+    0x83392054,
+    0x833920EC,
+    0x83392CA8,
+    0x833931A8,
+    0x83393370,
+    0x83393444,
+    0x833934F8,
+    0x83393574,
+    0x83393690,
+    0x833939B4,
+]
+

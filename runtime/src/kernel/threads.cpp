@@ -43,6 +43,7 @@ namespace wet
     //   PCR+0x000 tls_ptr   PCR+0x030 pcr_ptr   PCR+0x070 stack_base   PCR+0x074 stack_end
     //   PCR+0x100 current_thread                PCR+0x10C current_cpu (u8)
     //   KTHREAD+0x00 DISPATCHER_HEADER (type 6)  +0x5C stack_base  +0x60 stack_limit  +0x68 tls_address
+    //   KTHREAD+0x14C thread_id
     static void SetupGuestThreadMemory(GuestThread& t, uint32_t stackSize)
     {
         t.stackSize = (stackSize + 0xFFF) & ~0xFFFu;
@@ -69,6 +70,7 @@ namespace wet
 
         St8 (t.kthread + 0x00, kDispThread);
         St8 (t.kthread + 0x02, 0xAB0 / 4);
+        St32(t.kthread + 0x14C, t.id);      // thread id (GetCurrentThreadId reads this)
         St32(t.kthread + 0x5C, t.stackBase);
         St32(t.kthread + 0x60, t.stackLimit);
         St32(t.kthread + 0x68, t.tlsStatic);

@@ -38,11 +38,15 @@ class Image:
         nsec, = struct.unpack_from("<H", self.d, pe + 6)
         optsz, = struct.unpack_from("<H", self.d, pe + 20)
         self.sections = {}
+        self.code_sections = []
         for i in range(nsec):
             o = pe + 24 + optsz + i * 40
             name = self.d[o:o + 8].rstrip(b"\0").decode()
             vsize, va = struct.unpack_from("<II", self.d, o + 8)
+            chars, = struct.unpack_from("<I", self.d, o + 36)
             self.sections[name] = (BASE + va, vsize)
+            if chars & 0x20000000:      # IMAGE_SCN_MEM_EXECUTE
+                self.code_sections.append((BASE + va, vsize))
         pva, psz = self.sections[".pdata"]
         self.funcs = []
         for p in range(pva - BASE, pva - BASE + psz, 8):
@@ -209,17 +213,16 @@ def main():
             s, n = item.split(":")
             extra[int(s, 16)] = int(n, 16)
 
-    tva, tsz = img.sections[".text"]
     covered = set()
     # An existing entry covers the first bctr at or after its base.
     for b in existing:
         a = b
-        while a < tva + tsz and img.u32(a) != 0x4E800420:
+        while img.u32(a) != 0x4E800420:
             a += 4
         covered.add(a)
 
     found, skipped = [], 0
-    for a in range(tva, tva + tsz, 4):
+    for a in (x for va, sz in img.code_sections for x in range(va, va + sz, 4)):
         if img.u32(a) != 0x4E800420 or a in covered:
             continue
         fn = img.func_of(a) or next(((s, n) for s, n in extra.items() if s <= a < s + n), None)
