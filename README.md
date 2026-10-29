@@ -28,8 +28,9 @@ extracts it and generates the C++ from it locally. Nothing under `game/` or
 
 ## Playing
 
-Run `build\runtime\WetRecomp.exe`. It needs a GPU with Vulkan 1.1 drivers (any
-recent NVIDIA, AMD or Intel GPU). Controls: an Xbox controller, or the keyboard while the
+Run `build\runtime\WetRecomp.exe`. It renders with Direct3D 12 (Xenia's most complete
+backend) and falls back to Vulkan 1.1 if D3D12 isn't available; `set WET_GPU=vulkan`
+forces Vulkan. Controls: an Xbox controller, or the keyboard while the
 game window is focused:
 
 | Key | Button | Key | Button |
@@ -41,7 +42,8 @@ game window is focused:
 
 Saves go to `game\hdd\content\`. Logs: `wet.log` (the game and kernel) and
 `xenia_gpu.log` (the renderer). `WET_RENDERER=0` falls back to the old stand-in GPU
-(no picture), which helps tell renderer problems from game problems.
+(no picture), which helps tell renderer problems from game problems. F9 writes every
+draw of the next two frames to `xenia_gpu.log` (`DRAWTRACE` lines) for renderer bugs.
 
 ## Building (Windows)
 

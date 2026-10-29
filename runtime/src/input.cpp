@@ -1,5 +1,6 @@
 #include "input.h"
 #include "log.h"
+#include "gpu/renderer.h"
 
 #include <atomic>
 #include <cctype>
@@ -113,6 +114,15 @@ namespace wet
                     b |= k.bit;
             if (GetAsyncKeyState('Z') & 0x8000) lt = 255;
             if (GetAsyncKeyState('C') & 0x8000) rt = 255;
+            // F9: trace the next two frames' draws to xenia_gpu.log.
+            static bool f9 = false;
+            bool f9Now = (GetAsyncKeyState(VK_F9) & 0x8000) != 0;
+            if (f9Now && !f9)
+            {
+                Log("Input: F9 - tracing the next 2 frames' draws to xenia_gpu.log");
+                renderer::RequestDrawTrace(2);
+            }
+            f9 = f9Now;
             return b;
         }
 #endif

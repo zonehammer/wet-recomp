@@ -11,6 +11,7 @@
 #include "gpu/renderer.h"
 
 #include <atomic>
+#include <cctype>
 #include <condition_variable>
 #include <chrono>
 #include <cstdio>
@@ -32,6 +33,9 @@
 #include "xenia/gpu/register_file.h"
 #include "xenia/gpu/registers.h"
 #include "xenia/gpu/vulkan/vulkan_graphics_system.h"
+#if WET_HAVE_D3D12
+#include "xenia/gpu/d3d12/d3d12_graphics_system.h"
+#endif
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/memory.h"
 #include "xenia/ui/presenter.h"
@@ -176,7 +180,8 @@ namespace
     std::unique_ptr<xe::Memory> s_memory;
     std::unique_ptr<xe::cpu::Processor> s_processor;
     std::unique_ptr<xe::kernel::KernelState> s_kernel;
-    std::unique_ptr<xe::gpu::vulkan::VulkanGraphicsSystem> s_graphics;
+    std::unique_ptr<xe::gpu::GraphicsSystem> s_graphics;
+    const char* s_backend = "Vulkan";
     std::atomic<bool> s_running{ false };
 
 #if XE_PLATFORM_WIN32
@@ -375,7 +380,6 @@ namespace wet::renderer
         renderer_host::SetPhysicalWriteCallback(OnPhysicalWrite);
         s_processor = std::make_unique<xe::cpu::Processor>(s_memory.get());
         s_kernel = std::make_unique<xe::kernel::KernelState>(titleId);
-        s_graphics = std::make_unique<xe::gpu::vulkan::VulkanGraphicsSystem>();
         xe::ui::WindowedAppContext* appContext = nullptr;
 #if XE_PLATFORM_WIN32
         if (!std::getenv("WET_HEADLESS"))
@@ -387,7 +391,30 @@ namespace wet::renderer
                 renderer_host::Log("Renderer: could not open the game window; running without one");
         }
 #endif
-        xe::X_STATUS status = s_graphics->Setup(s_processor.get(), s_kernel.get(), appContext, true);
+        // WET_GPU=d3d12 | vulkan. Direct3D 12 is Xenia's most complete backend and
+        // the default on Windows; Vulkan is the fallback (and the only one on Linux).
+        std::string want = std::getenv("WET_GPU") ? std::getenv("WET_GPU") : "";
+        for (auto& ch : want) ch = char(std::tolower((unsigned char)ch));
+        xe::X_STATUS status = xe::X_STATUS(0xC0000001);
+#if WET_HAVE_D3D12
+        if (want != "vulkan")
+        {
+            s_backend = "Direct3D 12";
+            s_graphics = std::make_unique<xe::gpu::d3d12::D3D12GraphicsSystem>();
+            status = s_graphics->Setup(s_processor.get(), s_kernel.get(), appContext, true);
+            if (XFAILED(status))
+            {
+                renderer_host::Log("Renderer: Direct3D 12 initialisation failed (see xenia_gpu.log); trying Vulkan");
+                s_graphics.reset();
+            }
+        }
+#endif
+        if (!s_graphics)
+        {
+            s_backend = "Vulkan";
+            s_graphics = std::make_unique<xe::gpu::vulkan::VulkanGraphicsSystem>();
+            status = s_graphics->Setup(s_processor.get(), s_kernel.get(), appContext, true);
+        }
         if (XFAILED(status))
         {
             renderer_host::Log("Renderer: Vulkan initialisation failed (see xenia_gpu.log); using the stand-in GPU");
@@ -403,7 +430,7 @@ namespace wet::renderer
 #endif
         s_running = true;
         char text[160];
-        std::snprintf(text, sizeof(text), "Renderer: Xenia GPU emulation on Vulkan started (%s)", s_graphics->name().c_str());
+        std::snprintf(text, sizeof(text), "Renderer: Xenia GPU emulation on %s started (%s)", s_backend, s_graphics->name().c_str());
         renderer_host::Log(text);
         renderer_host::StartThread(DumpThread, nullptr, "Frame dump");
         return true;
@@ -433,6 +460,19 @@ namespace wet::renderer
         {
             if (std::getenv("WET_GPU_INVALIDATE_ALL"))   // diagnostic: bypass write watches
                 OnPhysicalWrite(0, 0x20000000);
+            // WET_DRAW_TRACE_AT=<seconds>: trace two frames' draws at that time.
+            static const double traceAt = [] {
+                const char* v = std::getenv("WET_DRAW_TRACE_AT");
+                return v ? std::atof(v) : -1.0;
+            }();
+            static const auto t0 = std::chrono::steady_clock::now();
+            static bool traced = false;
+            if (traceAt >= 0 && !traced &&
+                std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() >= traceAt)
+            {
+                traced = true;
+                RequestDrawTrace(2);
+            }
             s_graphics->command_processor()->UpdateWritePointer(value);
         }
     }
@@ -451,6 +491,11 @@ namespace wet::renderer
                 xe::store_and_swap<uint32_t>(
                     s_memory->TranslatePhysical(regs.values[xe::gpu::XE_GPU_REG_SCRATCH_ADDR] + n * 4), value);
         }
+    }
+
+    void RequestDrawTrace(int frames)
+    {
+        xe::gpu::wet_draw_trace_frames = frames;
     }
 
     uint32_t ReadRegister(uint32_t index)

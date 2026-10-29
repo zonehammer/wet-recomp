@@ -88,10 +88,97 @@ index 8f6087b05..47c87eec0 100644
  
  static void set_name(HANDLE thread, const std::string_view name) {
 diff --git a/src/xenia/gpu/command_processor.cc b/src/xenia/gpu/command_processor.cc
-index ce08d19bd..a8c7c0179 100644
+index ce08d19bd..253a386c6 100644
 --- a/src/xenia/gpu/command_processor.cc
 +++ b/src/xenia/gpu/command_processor.cc
-@@ -932,10 +932,33 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(RingBuffer* reader,
+@@ -32,6 +32,86 @@
+ namespace xe {
+ namespace gpu {
+ 
++#if XE_WET_RUNTIME
++int wet_draw_trace_frames = 0;
++
++void WetTraceDraw(const RegisterFile& regs, const Memory& memory,
++                  const Shader& vertex_shader, const Shader* pixel_shader,
++                  uint32_t prim_type, uint32_t index_count, bool indexed) {
++  XELOGW("DRAWTRACE: draw VS {:016X} PS {:016X} prim {} count {} indexed {}",
++         vertex_shader.ucode_data_hash(),
++         pixel_shader ? pixel_shader->ucode_data_hash() : 0, prim_type,
++         index_count, indexed);
++  std::string consts;
++  for (uint32_t i = 0; i < 32; ++i) {
++    uint32_t l = regs.values[XE_GPU_REG_SHADER_CONSTANT_LOOP_00 + i];
++    if (l) consts += fmt::format(" i{}={:08X}", i, l);
++  }
++  for (uint32_t i = 0; i < 8; ++i) {
++    uint32_t b = regs.values[XE_GPU_REG_SHADER_CONSTANT_BOOL_000_031 + i];
++    if (b) consts += fmt::format(" b{}={:08X}", i * 32, b);
++  }
++  const float* c = reinterpret_cast<const float*>(
++      &regs.values[XE_GPU_REG_SHADER_CONSTANT_000_X]);
++  XELOGW(
++      "DRAWTRACE:   consts{} | c0 {} {} {} {} | c3 {} {} {} {} | c254 {} {} {} "
++      "{} | c255 {} {} {} {}",
++      consts, c[0], c[1], c[2], c[3], c[12], c[13], c[14], c[15], c[1016],
++      c[1017], c[1018], c[1019], c[1020], c[1021], c[1022], c[1023]);
++  for (const Shader::VertexBinding& vb : vertex_shader.vertex_bindings()) {
++    xenos::xe_gpu_vertex_fetch_t vf = regs.GetVertexFetch(vb.fetch_constant);
++    uint32_t addr = vf.address << 2, size = vf.size << 2;
++    const uint32_t* data = memory.TranslatePhysical<const uint32_t*>(addr);
++    uint32_t n = std::min<uint32_t>(size / 4, 1u << 20), zero = 0, nan = 0,
++             hash = 2166136261u;
++    for (uint32_t i = 0; i < n; ++i) {
++      uint32_t w = xe::byte_swap(data[i]);
++      if (!w) ++zero;
++      if ((w & 0x7F800000) == 0x7F800000) ++nan;
++      hash = (hash ^ w) * 16777619u;
++    }
++    float f[4] = {};
++    for (uint32_t i = 0; i < 4 && i < n; ++i) {
++      uint32_t w = xe::byte_swap(data[i]);
++      std::memcpy(&f[i], &w, 4);
++    }
++    XELOGW(
++        "DRAWTRACE:   vf{} type {} addr {:08X} size {} stride {} endian {} "
++        "attrs {} zero {}/{} naninf {} hash {:08X} first {} {} {} {}",
++        vb.fetch_constant, uint32_t(vf.type), addr, size, vb.stride_words * 4,
++        uint32_t(vf.endian), vb.attributes.size(), zero, n, nan, hash, f[0],
++        f[1], f[2], f[3]);
++  }
++}
++
++void WetTraceSkip(const Shader& vertex_shader, const char* why,
++                  uint32_t index_count) {
++  XELOGW("DRAWTRACE: draw VS {:016X} skipped ({}), count {}",
++         vertex_shader.ucode_data_hash(), why, index_count);
++}
++
++void WetTraceState(const RegisterFile& regs, uint32_t host_vertex_count) {
++  auto r = [&](uint32_t i) { return regs.values[i]; };
++  auto f = [&](uint32_t i) { return regs.Get<float>(i); };
++  XELOGW(
++      "DRAWTRACE:   issued {} host verts | surf {:08X} c0 {:08X} c1 {:08X} z "
++      "{:08X} mask {:08X} zctl {:08X} mode {:08X} blend0 {:08X} | sc {:08X} vte "
++      "{:08X} clip {:08X} | vp {} {} {} {} {} {} | idx min {} max {} off {} | "
++      "ctrl {:08X}",
++      host_vertex_count, r(XE_GPU_REG_RB_SURFACE_INFO),
++      r(XE_GPU_REG_RB_COLOR_INFO), r(XE_GPU_REG_RB_COLOR1_INFO),
++      r(XE_GPU_REG_RB_DEPTH_INFO), r(XE_GPU_REG_RB_COLOR_MASK),
++      r(XE_GPU_REG_RB_DEPTHCONTROL), r(XE_GPU_REG_RB_MODECONTROL),
++      r(XE_GPU_REG_RB_BLENDCONTROL0), r(XE_GPU_REG_PA_SU_SC_MODE_CNTL),
++      r(XE_GPU_REG_PA_CL_VTE_CNTL), r(XE_GPU_REG_PA_CL_CLIP_CNTL),
++      f(XE_GPU_REG_PA_CL_VPORT_XSCALE), f(XE_GPU_REG_PA_CL_VPORT_XOFFSET),
++      f(XE_GPU_REG_PA_CL_VPORT_YSCALE), f(XE_GPU_REG_PA_CL_VPORT_YOFFSET),
++      f(XE_GPU_REG_PA_CL_VPORT_ZSCALE), f(XE_GPU_REG_PA_CL_VPORT_ZOFFSET),
++      r(XE_GPU_REG_VGT_MIN_VTX_INDX), r(XE_GPU_REG_VGT_MAX_VTX_INDX),
++      r(XE_GPU_REG_VGT_INDX_OFFSET), r(XE_GPU_REG_SQ_PROGRAM_CNTL));
++}
++#endif
++
+ using namespace xe::gpu::xenos;
+ 
+ CommandProcessor::CommandProcessor(GraphicsSystem* graphics_system,
+@@ -932,11 +1012,43 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(RingBuffer* reader,
    uint32_t frontbuffer_ptr = reader->ReadAndSwap<uint32_t>();
    uint32_t frontbuffer_width = reader->ReadAndSwap<uint32_t>();
    uint32_t frontbuffer_height = reader->ReadAndSwap<uint32_t>();
@@ -108,7 +195,8 @@ index ce08d19bd..a8c7c0179 100644
 +  if (swap_fetch) {
 +    for (uint32_t i = 0; i < 6; ++i) {
 +      saved_fetch[i] = fetch_regs[i];
-+      fetch_regs[i] = reader->ReadAndSwap<uint32_t>();
++      WriteRegister(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0 + i,
++                    reader->ReadAndSwap<uint32_t>());
 +    }
 +    reader->AdvanceRead((count - 10) * sizeof(uint32_t));
 +  } else {
@@ -118,14 +206,96 @@ index ce08d19bd..a8c7c0179 100644
    IssueSwap(frontbuffer_ptr, frontbuffer_width, frontbuffer_height);
  
 +  if (swap_fetch) {
++    // Through WriteRegister so the backends see fetch constant 0 change back
++    // (texture bindings, constant buffers).
 +    for (uint32_t i = 0; i < 6; ++i) {
-+      fetch_regs[i] = saved_fetch[i];
++      WriteRegister(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0 + i, saved_fetch[i]);
 +    }
 +  }
 +
    ++counter_;
++#if XE_WET_RUNTIME
++  if (wet_draw_trace_frames > 0) {
++    XELOGW("DRAWTRACE: ---- swap {} ----", counter_);
++    --wet_draw_trace_frames;
++  }
++#endif
    return true;
  }
+ 
+diff --git a/src/xenia/gpu/command_processor.h b/src/xenia/gpu/command_processor.h
+index ffc8eeffa..2a6dd226a 100644
+--- a/src/xenia/gpu/command_processor.h
++++ b/src/xenia/gpu/command_processor.h
+@@ -35,9 +35,22 @@ class ByteStream;
+ 
+ namespace gpu {
+ 
++
+ class GraphicsSystem;
+ class Shader;
+ 
++#if XE_WET_RUNTIME
++// WET: >0 while draws are being traced (diagnostics, F9 / WET_DRAW_TRACE_AT).
++extern int wet_draw_trace_frames;
++// Draw trace helpers shared by the backends.
++void WetTraceDraw(const RegisterFile& regs, const Memory& memory,
++                  const Shader& vertex_shader, const Shader* pixel_shader,
++                  uint32_t prim_type, uint32_t index_count, bool indexed);
++void WetTraceSkip(const Shader& vertex_shader, const char* why,
++                  uint32_t index_count);
++void WetTraceState(const RegisterFile& regs, uint32_t host_vertex_count);
++#endif
++
+ struct SwapState {
+   // Lock must be held when changing data in this structure.
+   std::mutex mutex;
+diff --git a/src/xenia/gpu/d3d12/d3d12_command_processor.cc b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
+index 0ec70a7d1..cc9bb402f 100644
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
+@@ -2052,6 +2052,10 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+     // cache.
+     if (!memexport_used_vertex) {
+       // This draw has no effect.
++#if XE_WET_RUNTIME
++      if (wet_draw_trace_frames > 0)
++        WetTraceSkip(*vertex_shader, "no rasterization", index_count);
++#endif
+       return true;
+     }
+   }
+@@ -2070,8 +2074,18 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+   }
+   if (!primitive_processing_result.host_draw_vertex_count) {
+     // Nothing to draw.
++#if XE_WET_RUNTIME
++    if (wet_draw_trace_frames > 0)
++      WetTraceSkip(*vertex_shader, "no host vertices", index_count);
++#endif
+     return true;
+   }
++#if XE_WET_RUNTIME
++  if (wet_draw_trace_frames > 0)
++    WetTraceDraw(regs, *memory_, *vertex_shader, pixel_shader,
++                 uint32_t(primitive_type), index_count,
++                 index_buffer_info != nullptr);
++#endif
+ 
+   reg::RB_DEPTHCONTROL normalized_depth_control =
+       draw_util::GetNormalizedDepthControl(regs);
+@@ -2467,6 +2481,11 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+     }
+   }
+ 
++#if XE_WET_RUNTIME
++  if (wet_draw_trace_frames > 0)
++    WetTraceState(regs, primitive_processing_result.host_draw_vertex_count);
++#endif
++
+   return true;
+ }
+ 
 diff --git a/src/xenia/gpu/spirv_shader_translator_fetch.cc b/src/xenia/gpu/spirv_shader_translator_fetch.cc
 index e0fd8440d..15115f823 100644
 --- a/src/xenia/gpu/spirv_shader_translator_fetch.cc
@@ -160,6 +330,56 @@ index e0fd8440d..15115f823 100644
                                    builder_->makeUintConstant(13),
                                    builder_->makeUintConstant(6)));
          {
+diff --git a/src/xenia/gpu/vulkan/vulkan_command_processor.cc b/src/xenia/gpu/vulkan/vulkan_command_processor.cc
+index 7df306c12..987c0046b 100644
+--- a/src/xenia/gpu/vulkan/vulkan_command_processor.cc
++++ b/src/xenia/gpu/vulkan/vulkan_command_processor.cc
+@@ -2194,6 +2194,10 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type,
+     // cache.
+     if (memexport_ranges_.empty()) {
+       // This draw has no effect.
++#if XE_WET_RUNTIME
++      if (wet_draw_trace_frames > 0)
++        WetTraceSkip(*vertex_shader, "no rasterization", index_count);
++#endif
+       return true;
+     }
+   }
+@@ -2233,6 +2237,10 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type,
+     }
+     if (!primitive_processing_result.host_draw_vertex_count) {
+       // Nothing to draw.
++#if XE_WET_RUNTIME
++      if (wet_draw_trace_frames > 0)
++        WetTraceSkip(*vertex_shader, "no host vertices", index_count);
++#endif
+       return true;
+     }
+     // TODO(Triang3l): Tessellation, geometry-type-specific vertex shader,
+@@ -2516,6 +2524,11 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type,
+     vertex_buffers_resident[vfetch_index >> 6] |= uint64_t(1)
+                                                   << (vfetch_index & 63);
+   }
++#if XE_WET_RUNTIME
++  if (wet_draw_trace_frames > 0)
++    WetTraceDraw(regs, *memory_, *vertex_shader, pixel_shader,
++                 uint32_t(prim_type), index_count, index_buffer_info != nullptr);
++#endif
+ 
+   // Synchronize the memory pages backing memory scatter export streams, and
+   // calculate the range that includes the streams for the buffer barrier.
+@@ -2600,6 +2613,11 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type,
+                                       memexport_range.size_bytes);
+   }
+ 
++#if XE_WET_RUNTIME
++  if (wet_draw_trace_frames > 0)
++    WetTraceState(regs, primitive_processing_result.host_draw_vertex_count);
++#endif
++
+   return true;
+ }
+ 
 diff --git a/src/xenia/ui/window_win.cc b/src/xenia/ui/window_win.cc
 index f2458b69d..dda682882 100644
 --- a/src/xenia/ui/window_win.cc

@@ -24,6 +24,8 @@ namespace wet::renderer
     // The title wrote a GPU register through MMIO.
     void WriteRegister(uint32_t index, uint32_t value);
     uint32_t ReadRegister(uint32_t index);
+    // Logs every draw of the next `frames` frames (diagnostics, F9).
+    void RequestDrawTrace(int frames);
 }
 
 // Provided by the kernel for the renderer's threads.

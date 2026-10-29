@@ -41,3 +41,8 @@ struct std::char_traits<fmt::internal::char8_type>
 };
 #endif
 #endif
+
+// MSVC accepts `_uuidof` as a synonym of `__uuidof`; MinGW doesn't.
+#if defined(__MINGW32__) && !defined(_uuidof)
+#define _uuidof __uuidof
+#endif

@@ -15,6 +15,21 @@ set(XE_TP ${XE_ROOT}/third_party)
 wet_apply_patch(${XE_ROOT} xenia-wet.patch)
 set(XE_COMPAT_HEADER ${WET_ROOT}/runtime/xenia_shim/compat/xe_compat.h)
 
+# llvm-mingw: DirectX-Headers with by-value overloads of the struct-returning
+# D3D12 methods (see tools/mingw_d3d12_headers.py).
+if(MINGW)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    set(XE_MINGW_DXHEADERS ${CMAKE_BINARY_DIR}/mingw_dxheaders)
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} ${WET_ROOT}/tools/mingw_d3d12_headers.py
+                ${XE_ROOT}/third_party/DirectX-Headers/include/directx
+                ${XE_MINGW_DXHEADERS}/third_party/DirectX-Headers/include/directx
+        RESULT_VARIABLE dxh_result)
+    if(NOT dxh_result EQUAL 0)
+        message(FATAL_ERROR "tools/mingw_d3d12_headers.py failed")
+    endif()
+endif()
+
 foreach(dep fmt glslang Vulkan-Headers VulkanMemoryAllocator xxhash snappy utfcpp xbyak disruptorplus cpptoml date cxxopts DirectX-Headers SPIRV-Tools)
     if(NOT EXISTS ${XE_TP}/${dep}/.git)
         message(FATAL_ERROR "Xenia dependency third_party/${dep} is missing. Run:\n  python tools/build.py\n"
@@ -50,17 +65,22 @@ endfunction()
 function(xe_target name)
     set_target_properties(${name} PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON)
     target_include_directories(${name} BEFORE PUBLIC ${WET_ROOT}/runtime/xenia_shim)
+    if(XE_MINGW_DXHEADERS)
+        target_include_directories(${name} BEFORE PUBLIC ${XE_MINGW_DXHEADERS})
+    endif()
     target_include_directories(${name} PUBLIC ${XE_ROOT} ${XE_ROOT}/src ${XE_TP}
                                ${XE_TP}/Vulkan-Headers/include ${XE_TP}/fmt/include)
     target_compile_definitions(${name} PUBLIC UNICODE _UNICODE NDEBUG _LIB XE_WET_RUNTIME=1)
     if(MSVC)
-        target_compile_options(${name} PRIVATE /utf-8 /W0 -Wno-everything /arch:AVX /FI${XE_COMPAT_HEADER})
+        target_compile_options(${name} PRIVATE /utf-8 /W0 -Wno-everything -Wno-address-of-temporary /arch:AVX /FI${XE_COMPAT_HEADER})
     else()
-        target_compile_options(${name} PRIVATE -w -mavx -fno-strict-aliasing
+        target_compile_options(${name} PRIVATE -w -mavx -fno-strict-aliasing -Wno-address-of-temporary
                                "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include ${XE_COMPAT_HEADER}>")
     endif()
     if(MINGW)
         target_compile_definitions(${name} PUBLIC WINVER=0x0A00 _WIN32_WINNT=0x0A00 NOMINMAX)
+        # Windows SDK headers llvm-mingw lacks (DXProgrammableCapture.h).
+        target_include_directories(${name} SYSTEM AFTER PUBLIC ${WET_ROOT}/runtime/xenia_shim/mingw)
     endif()
 endfunction()
 
@@ -111,9 +131,32 @@ endif()
 
 # ---- xenia-gpu (Vulkan) ----
 xe_platform_files(XE_GPU_SOURCES ${XE_SRC}/gpu)
-list(FILTER XE_GPU_SOURCES EXCLUDE REGEX "/(dxbc_[a-z_]*|trace_dump|trace_viewer|trace_player|shader_compiler_main)\\.cc$")
+list(FILTER XE_GPU_SOURCES EXCLUDE REGEX "/(trace_dump|trace_viewer|trace_player|shader_compiler_main)\\.cc$")
+if(NOT WIN32)
+    # The DXBC translator is only used by the D3D12 backend.
+    list(FILTER XE_GPU_SOURCES EXCLUDE REGEX "/dxbc_[a-z_]*\\.cc$")
+endif()
 xe_platform_files(XE_GPU_VULKAN_SOURCES ${XE_SRC}/gpu/vulkan)
 list(FILTER XE_GPU_VULKAN_SOURCES EXCLUDE REGEX "/vulkan_(trace_[a-z_]*)\\.cc$")
 add_library(xe_gpu STATIC ${XE_GPU_SOURCES} ${XE_GPU_VULKAN_SOURCES})
 xe_target(xe_gpu)
 target_link_libraries(xe_gpu PUBLIC xe_ui xe_base xe_glslang_spirv xe_xxhash xe_snappy)
+
+# ---- D3D12 backend (Windows) ----
+# Xenia's most complete backend; selected with WET_GPU=d3d12 (see xenia_bridge.cpp).
+if(WIN32)
+    add_library(xe_dxbc STATIC ${XE_TP}/dxbc/DXBCChecksum.cpp)
+    xe_target(xe_dxbc)
+
+    xe_platform_files(XE_UI_D3D12_SOURCES ${XE_SRC}/ui/d3d12)
+    list(FILTER XE_UI_D3D12_SOURCES EXCLUDE REGEX "/d3d12_window_demo\\.cc$")
+    add_library(xe_ui_d3d12 STATIC ${XE_UI_D3D12_SOURCES})
+    xe_target(xe_ui_d3d12)
+    target_link_libraries(xe_ui_d3d12 PUBLIC xe_ui)
+
+    xe_platform_files(XE_GPU_D3D12_SOURCES ${XE_SRC}/gpu/d3d12)
+    add_library(xe_gpu_d3d12 STATIC ${XE_GPU_D3D12_SOURCES})
+    xe_target(xe_gpu_d3d12)
+    target_link_libraries(xe_gpu_d3d12 PUBLIC xe_gpu xe_ui_d3d12 xe_dxbc)
+    target_link_libraries(xe_gpu PUBLIC xe_dxbc)
+endif()
