@@ -11,6 +11,7 @@
 #include "kernel/kernel.h"
 #include "kernel/threads.h"
 #include "log.h"
+#include "profiler.h"
 #include "memory.h"
 #include "module.h"
 #include "os.h"
@@ -91,6 +92,7 @@ int main(int argc, char** argv)
     if (!StartMainThread(g_module.entryPoint, g_module.stackSize))
         return 1;
     StartStallMonitor(10);
+    profiler::StartFromEnv();
 
     // The title runs on its own threads; the process ends when it exits or faults.
     for (;;)

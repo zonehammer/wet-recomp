@@ -1,6 +1,7 @@
 #include "input.h"
 #include "log.h"
 #include "gpu/renderer.h"
+#include "profiler.h"
 
 #include <atomic>
 #include <cctype>
@@ -123,6 +124,12 @@ namespace wet
                 renderer::RequestDrawTrace(2);
             }
             f9 = f9Now;
+            // F10: start / stop the sampling profiler (profile.txt).
+            static bool f10 = false;
+            bool f10Now = (GetAsyncKeyState(VK_F10) & 0x8000) != 0;
+            if (f10Now && !f10)
+                profiler::Toggle();
+            f10 = f10Now;
             return b;
         }
 #endif

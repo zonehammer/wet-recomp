@@ -1,3 +1,4 @@
+#include <atomic>
 #include "memory.h"
 #include "log.h"
 #include "os.h"
@@ -343,6 +344,8 @@ namespace wet
     }
     static void SetPageProtection(uint32_t page, bool readOnly) { SetRangeProtection(page, 1, readOnly); }
 
+    static std::atomic<uint64_t> s_watchFaults{0}, s_protectCalls{0};
+
     static bool OnWriteFault(uintptr_t host)
     {
         uintptr_t base = uintptr_t(g_mem.base);
@@ -363,9 +366,16 @@ namespace wet
         }
         // Outside the lock: the callback takes the renderer's own locks, and the
         // renderer may be adding watches meanwhile.
+        s_watchFaults.fetch_add(1, std::memory_order_relaxed);
         if (s_watchCallback)
             s_watchCallback(page * kHostPage, kHostPage);
         return true;
+    }
+
+    void WatchStats(uint64_t& faults, uint64_t& protectCalls)
+    {
+        faults = s_watchFaults.load();
+        protectCalls = s_protectCalls.load();
     }
 
     void PrepareHostWrite(uint32_t guest, uint32_t length)
@@ -428,6 +438,7 @@ namespace wet
             while (run < end && !s_watched[run])
                 s_watched[run++] = 1;
             SetRangeProtection(p, run - p, true);
+            s_protectCalls.fetch_add(1, std::memory_order_relaxed);
             p = run;
         }
     }

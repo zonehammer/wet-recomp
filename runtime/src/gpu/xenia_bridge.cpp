@@ -369,6 +369,9 @@ namespace wet::renderer
         cvars::host_present_from_non_ui_thread = false;
         if (const char* dir = std::getenv("WET_DUMP_SHADERS"))
             cvars::dump_shaders = dir;
+        // Warnings and errors only by default: at the info level Xenia logs every
+        // texture upload and shader, megabytes a minute.
+        cvars::log_level = 1;
         if (const char* level = std::getenv("WET_GPU_LOG_LEVEL"))
             cvars::log_level = std::atoi(level);
         xe::InitializeLogging("xenia_gpu");

@@ -71,11 +71,13 @@ target_link_libraries(WetRecomp PRIVATE WetPPC WetRenderer XenonUtils Threads::T
 if(WIN32)
     target_compile_definitions(WetRecomp PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
     if(MINGW)
-        target_link_libraries(WetRecomp PRIVATE xinput1_4)
+        target_link_libraries(WetRecomp PRIVATE xinput1_4 winmm)
         # Guest code recurses deeply; give the main thread a big stack too.
-        target_link_options(WetRecomp PRIVATE -Wl,--stack,16777216)
+        # The map file lets tools/resolve_profile.py name profiled addresses.
+        target_link_options(WetRecomp PRIVATE -Wl,--stack,16777216 -Wl,-Map=$<TARGET_FILE_DIR:WetRecomp>/WetRecomp.map)
     else()
-        target_link_libraries(WetRecomp PRIVATE xinput)
+        target_link_libraries(WetRecomp PRIVATE xinput winmm)
+        target_link_options(WetRecomp PRIVATE /MAP:$<TARGET_FILE_DIR:WetRecomp>/WetRecomp.map)
     endif()
 endif()
 if(MSVC)

@@ -110,4 +110,6 @@ namespace wet
     void PrepareHostWrite(uint32_t guest, uint32_t length);
     // A mapping of physical memory that is never watched (index = physical address).
     uint8_t* PhysicalHostView();
+    // Write-watch counters since start: faults taken, protect (watch) calls.
+    void WatchStats(uint64_t& faults, uint64_t& protectCalls);
 }

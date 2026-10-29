@@ -120,6 +120,7 @@ namespace wet
         t_current = *holder;
         delete holder;
         GuestThread& t = *t_current;
+        t.hostTid = os::CurrentHostThreadId();
 
         WaitWhileSuspended(t);
         PPCContext& ctx = *t.ctx;
@@ -180,6 +181,7 @@ namespace wet
         auto* holder = static_cast<std::shared_ptr<GuestThread>*>(arg);
         t_current = *holder;
         delete holder;
+        t_current->hostTid = os::CurrentHostThreadId();
         PPCContext& ctx = *t_current->ctx;
         Log("Main thread %u: calling entry point 0x%08X", t_current->id, t_current->startAddress);
         CallGuest(ctx, t_current->startAddress);
@@ -239,6 +241,18 @@ namespace wet
 
 
 
+    std::string GuestThreadNameForHostTid(uint32_t hostTid)
+    {
+        std::lock_guard lock(s_threadLock);
+        for (auto& w : s_threads)
+            if (auto t = w.lock(); t && t->hostTid == hostTid)
+            {
+                std::lock_guard l2(t->statusLock);
+                return t->name.empty() ? "thread@" + std::to_string(t->id) : t->name;
+            }
+        return {};
+    }
+
     static void StallMonitorMain(void* arg)
     {
         uint32_t interval = uint32_t(reinterpret_cast<uintptr_t>(arg));
@@ -289,6 +303,7 @@ namespace wet
     PPCContext& AdoptHostThread(uint32_t stackSize)
     {
         t_current = NewThread(stackSize);
+        t_current->hostTid = os::CurrentHostThreadId();
         return *t_current->ctx;
     }
 

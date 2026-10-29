@@ -18,6 +18,7 @@ namespace wet
         GuestThread() : KObject(ObjType::Thread) {}
 
         uint32_t id = 0;
+        uint32_t hostTid = 0;       // host thread id (profiler)
         uint32_t stackSize = 0;
         uint32_t stackLimit = 0;    // lowest address
         uint32_t stackBase = 0;     // highest address (initial r1 is just below)
@@ -79,7 +80,9 @@ namespace wet
         ~WaitScope();
     };
 
-    void SetThreadName(uint32_t threadId, const std::string& name);  // id 0xFFFFFFFF = current
+    void SetThreadName(uint32_t threadId, const std::string& name);
+    // Name of the guest thread running on host thread `hostTid` (empty if none).
+    std::string GuestThreadNameForHostTid(uint32_t hostTid);  // id 0xFFFFFFFF = current
     // Every `intervalSeconds`, if no frame was presented, logs what each thread is doing.
     void StartStallMonitor(uint32_t intervalSeconds);
     uint64_t PresentedFrameCount();   // gpu.cpp
