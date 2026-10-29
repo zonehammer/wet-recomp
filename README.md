@@ -3,11 +3,11 @@
 A static recompilation of **WET** (Xbox 360, 2009) to native Windows code, built on
 [XenonRecomp](https://github.com/hedge-dev/XenonRecomp).
 
-> **Status: boots into its frame loop, no graphics yet.** The game's executable is fully
+> **Status: boots to the menus and renders them.** The game's executable is fully
 > recompiled to C++ and runs under a host runtime that implements the Xbox 360 kernel/XAM
-> functions it needs. It starts its threads, loads its configuration, submits GPU commands
-> to a stand-in GPU, receives 60 Hz vertical-blank interrupts and presents frames, but
-> nothing is drawn yet: there is no real GPU, audio or video playback. See [Roadmap](#roadmap).
+> functions it needs. Graphics go through [Xenia](https://github.com/xenia-project/xenia)'s
+> GPU emulation (Vulkan) in a game window; saves work; there is no audio yet. See
+> [Roadmap](#roadmap).
 
 **This repository contains no game data.** You need your own copy of WET; the build
 extracts it and generates the C++ from it locally. Nothing under `game/` or
@@ -22,6 +22,26 @@ extracts it and generates the C++ from it locally. Nothing under `game/` or
 3. The `WetRecomp` program compiles that code together with `runtime/`, which plays the
    part of the console: guest memory, threads, synchronisation, files, input and the
    ~240 kernel/XAM functions the game imports.
+4. The GPU commands the game submits are executed by Xenia's command processor, shader
+   translator and texture/render-target caches (Vulkan), built from `thirdparty/xenia`
+   and hosted by `runtime/src/gpu/xenia_bridge.cpp`; the result appears in a window.
+
+## Playing
+
+Run `build\runtime\WetRecomp.exe`. It needs a GPU with Vulkan 1.1 drivers (any
+recent NVIDIA, AMD or Intel GPU). Controls: an Xbox controller, or the keyboard while the
+game window is focused:
+
+| Key | Button | Key | Button |
+|---|---|---|---|
+| Arrow keys | D-pad | Enter | Start |
+| Space | A | Backspace | Back |
+| Esc | B | X / Y | X / Y |
+| Q / E | LB / RB | Z / C | LT / RT |
+
+Saves go to `game\hdd\content\`. Logs: `wet.log` (the game and kernel) and
+`xenia_gpu.log` (the renderer). `WET_RENDERER=0` falls back to the old stand-in GPU
+(no picture), which helps tell renderer problems from game problems.
 
 ## Building (Windows)
 
@@ -95,7 +115,10 @@ runtime/      the host program
   src/kernel/ host implementations of xboxkrnl/XAM imports
 tools/        build.py (one-command build), disc extraction and analysis scripts
 ci/           stand-in for the generated code, used by the Windows CI build
-thirdparty/   XenonRecomp (git submodule)
+  src/gpu/    the renderer bridge (Xenia's GPU emulation)
+  xenia_shim/ the few emulator interfaces Xenia's GPU code expects
+cmake/        builds the parts of Xenia the renderer needs
+thirdparty/   XenonRecomp and Xenia (git submodules; tools/fetch_deps.py fetches them)
 game/         YOUR game files (ignored by git)
 generated/    generated C++ (ignored by git)
 ```
@@ -121,10 +144,10 @@ table it detects identically; it added 163 more.
 
 1. **Kernel bring-up** — implement stubs as the log shows the game needs them. *(done up to
    the frame loop: the game submits GPU commands and presents frames)*
-2. **GPU** — Xenos command processor, EDRAM, and shader translation to D3D12/Vulkan.
-   This is the largest piece of work.
+2. **GPU** — *(running: Xenia's Vulkan renderer draws the intros and menus)* Next:
+   correctness in-game, performance.
 3. **Audio** — XMA decoding, the XAudio render driver callback.
-4. **Video** — Bink playback for `movies0/1`.
+4. **Video** — Bink is decoded by the game itself and drawn by the GPU *(works)*.
 5. **Saves, content, polish.**
 
 [Xenia](https://github.com/xenia-project/xenia) is the reference for the console's
