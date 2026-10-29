@@ -43,6 +43,8 @@
 #endif
 
 DECLARE_bool(log_to_stdout);
+DECLARE_bool(host_present_from_non_ui_thread);
+DECLARE_int32(log_level);
 DECLARE_path(log_file);
 
 // ---------------------------------------------------------------------------
@@ -213,6 +215,19 @@ namespace
             wet::renderer_host::ExitProcess();
         }
 
+        // Repaints the window at 60 Hz from its own thread (WM_PAINT), so presentation
+        // never depends on a single paint request getting through.
+        static void RepaintThread(void* p)
+        {
+            auto* self = static_cast<GameWindow*>(p);
+            for (;;)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(16));
+                if (self->window)
+                    self->window->RequestPaint();
+            }
+        }
+
         bool Open()
         {
             wet::renderer_host::StartThread(&GameWindow::Thread, this, "UI");
@@ -293,6 +308,10 @@ namespace wet::renderer
             return true;
         cvars::log_to_stdout = false;
         cvars::log_file = "xenia_gpu.log";
+        // Present from the window's thread on WM_PAINT (Xenia's most conservative mode).
+        cvars::host_present_from_non_ui_thread = false;
+        if (const char* level = std::getenv("WET_GPU_LOG_LEVEL"))
+            cvars::log_level = std::atoi(level);
         xe::InitializeLogging("xenia_gpu");
 
         uint8_t* physical = renderer_host::PhysicalHostView();
@@ -323,7 +342,10 @@ namespace wet::renderer
         }
 #if XE_PLATFORM_WIN32
         if (appContext && s_graphics->presenter())
+        {
             appContext->CallInUIThreadSynchronous([] { s_window->window->SetPresenter(s_graphics->presenter()); });
+            renderer_host::StartThread(&GameWindow::RepaintThread, s_window, "Repaint");
+        }
 #endif
         s_running = true;
         char text[160];
