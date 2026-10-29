@@ -1,0 +1,17 @@
+# ---- Game data: NEVER commit anything derived from the disc ----
+/game/*
+!/game/README.md
+/generated/*
+!/generated/README.md
+*.iso
+*.xex
+*.xexp
+*.pe
+
+# ---- Build output ----
+/build*/
+/out/
+/.vs/
+/.vscode/
+*.log
+__pycache__/

@@ -1,0 +1,283 @@
+diff --git a/XenonRecomp/recompiler.cpp b/XenonRecomp/recompiler.cpp
+index fa91527..d44f3e7 100644
+--- a/XenonRecomp/recompiler.cpp
++++ b/XenonRecomp/recompiler.cpp
+@@ -525,6 +525,128 @@ bool Recompiler::Recompile(
+ 
+     switch (id)
+     {
++    // ---- WET_EXTRA_INSTRUCTIONS (added for WET recomp) ----
++#define WET_LOAD_U(name, expr) \
++    case name: \
++        println("\t{} = {} + {}.u32;", ea(), int32_t(insn.operands[1]), r(insn.operands[2])); \
++        expr; \
++        println("\t{}.u32 = {};", r(insn.operands[2]), ea()); \
++        break;
++#define WET_LOAD_UX(name, expr) \
++    case name: \
++        println("\t{} = {}.u32 + {}.u32;", ea(), r(insn.operands[1]), r(insn.operands[2])); \
++        expr; \
++        println("\t{}.u32 = {};", r(insn.operands[1]), ea()); \
++        break;
++
++    WET_LOAD_U(PPC_INST_LHZU, println("\t{}.u64 = PPC_LOAD_U16({});", r(insn.operands[0]), ea()))
++    WET_LOAD_U(PPC_INST_LHAU, println("\t{}.s64 = int16_t(PPC_LOAD_U16({}));", r(insn.operands[0]), ea()))
++    WET_LOAD_U(PPC_INST_LFSU, (printSetFlushMode(false), println("\t{}.u32 = PPC_LOAD_U32({});", temp(), ea()), println("\t{}.f64 = double({}.f32);", f(insn.operands[0]), temp())))
++    WET_LOAD_U(PPC_INST_LFDU, (printSetFlushMode(false), println("\t{}.u64 = PPC_LOAD_U64({});", f(insn.operands[0]), ea())))
++    WET_LOAD_U(PPC_INST_STHU, println("\tPPC_STORE_U16({}, {}.u16);", ea(), r(insn.operands[0])))
++    WET_LOAD_U(PPC_INST_STFSU, (printSetFlushMode(false), println("\t{}.f32 = float({}.f64);", temp(), f(insn.operands[0])), println("\tPPC_STORE_U32({}, {}.u32);", ea(), temp())))
++    WET_LOAD_U(PPC_INST_STFDU, (printSetFlushMode(false), println("\tPPC_STORE_U64({}, {}.u64);", ea(), f(insn.operands[0]))))
++
++    WET_LOAD_UX(PPC_INST_LBZUX, println("\t{}.u64 = PPC_LOAD_U8({});", r(insn.operands[0]), ea()))
++    WET_LOAD_UX(PPC_INST_LHZUX, println("\t{}.u64 = PPC_LOAD_U16({});", r(insn.operands[0]), ea()))
++    WET_LOAD_UX(PPC_INST_LHAUX, println("\t{}.s64 = int16_t(PPC_LOAD_U16({}));", r(insn.operands[0]), ea()))
++    WET_LOAD_UX(PPC_INST_LWZUX, println("\t{}.u64 = PPC_LOAD_U32({});", r(insn.operands[0]), ea()))
++    WET_LOAD_UX(PPC_INST_LFSUX, (printSetFlushMode(false), println("\t{}.u32 = PPC_LOAD_U32({});", temp(), ea()), println("\t{}.f64 = double({}.f32);", f(insn.operands[0]), temp())))
++    WET_LOAD_UX(PPC_INST_LFDUX, (printSetFlushMode(false), println("\t{}.u64 = PPC_LOAD_U64({});", f(insn.operands[0]), ea())))
++    WET_LOAD_UX(PPC_INST_STBUX, println("\tPPC_STORE_U8({}, {}.u8);", ea(), r(insn.operands[0])))
++    WET_LOAD_UX(PPC_INST_STHUX, println("\tPPC_STORE_U16({}, {}.u16);", ea(), r(insn.operands[0])))
++    WET_LOAD_UX(PPC_INST_STDUX, println("\tPPC_STORE_U64({}, {}.u64);", ea(), r(insn.operands[0])))
++    WET_LOAD_UX(PPC_INST_STFSUX, (printSetFlushMode(false), println("\t{}.f32 = float({}.f64);", temp(), f(insn.operands[0])), println("\tPPC_STORE_U32({}, {}.u32);", ea(), temp())))
++#undef WET_LOAD_U
++#undef WET_LOAD_UX
++
++    case PPC_INST_BDZF:
++    case PPC_INST_BDNZT:
++    {
++        static const char* bits[] = { "lt", "gt", "eq", "so" };
++        const bool dz = (id == PPC_INST_BDZF);
++        println("\t--{}.u64;", ctr());
++        println("\tif ({}.u32 {} 0 && {}{}.{}) goto loc_{:X};", ctr(), dz ? "==" : "!=", dz ? "!" : "", cr(insn.operands[0] / 4), bits[insn.operands[0] % 4], insn.operands[1]);
++        break;
++    }
++
++    case PPC_INST_EQV:
++        println("\t{}.u64 = ~({}.u64 ^ {}.u64);", r(insn.operands[0]), r(insn.operands[1]), r(insn.operands[2]));
++        if (strchr(insn.opcode->name, '.'))
++            println("\t{}.compare<int32_t>({}.s32, 0, {});", cr(0), r(insn.operands[0]), xer());
++        break;
++
++    case PPC_INST_ADDC:
++        println("\t{}.u8 = uint32_t({}.u32 + {}.u32) < {}.u32;", temp(), r(insn.operands[1]), r(insn.operands[2]), r(insn.operands[1]));
++        println("\t{}.u64 = {}.u64 + {}.u64;", r(insn.operands[0]), r(insn.operands[1]), r(insn.operands[2]));
++        println("\t{}.ca = {}.u8;", xer(), temp());
++        if (strchr(insn.opcode->name, '.'))
++            println("\t{}.compare<int32_t>({}.s32, 0, {});", cr(0), r(insn.operands[0]), xer());
++        break;
++
++    case PPC_INST_ADDME:
++        println("\t{}.u8 = ({}.u32 != 0) | {}.ca;", temp(), r(insn.operands[1]), xer());
++        println("\t{}.u64 = {}.u64 + {}.ca - 1;", r(insn.operands[0]), r(insn.operands[1]), xer());
++        println("\t{}.ca = {}.u8;", xer(), temp());
++        if (strchr(insn.opcode->name, '.'))
++            println("\t{}.compare<int32_t>({}.s32, 0, {});", cr(0), r(insn.operands[0]), xer());
++        break;
++
++    case PPC_INST_SUBFZE:
++        println("\t{}.u8 = ({}.u32 == 0) & {}.ca;", temp(), r(insn.operands[1]), xer());
++        println("\t{}.u64 = ~{}.u64 + {}.ca;", r(insn.operands[0]), r(insn.operands[1]), xer());
++        println("\t{}.ca = {}.u8;", xer(), temp());
++        if (strchr(insn.opcode->name, '.'))
++            println("\t{}.compare<int32_t>({}.s32, 0, {});", cr(0), r(insn.operands[0]), xer());
++        break;
++
++    case PPC_INST_MULHD:
++        println("\t{}.s64 = int64_t((__int128({}.s64) * __int128({}.s64)) >> 64);", r(insn.operands[0]), r(insn.operands[1]), r(insn.operands[2]));
++        break;
++
++    case PPC_INST_DCBST:
++        // no op
++        break;
++
++    case PPC_INST_FRSQRTE:
++        printSetFlushMode(false);
++        println("\t{}.f64 = 1.0 / sqrt({}.f64);", f(insn.operands[0]), f(insn.operands[1]));
++        break;
++
++    case PPC_INST_VPKSWSS:
++    case PPC_INST_VPKSWSS128:
++        println("\tsimde_mm_store_si128((simde__m128i*){}.s16, simde_mm_packs_epi32(simde_mm_load_si128((simde__m128i*){}.s32), simde_mm_load_si128((simde__m128i*){}.s32)));", v(insn.operands[0]), v(insn.operands[2]), v(insn.operands[1]));
++        break;
++
++    case PPC_INST_VCMPGTSW:
++        println("\tsimde_mm_store_si128((simde__m128i*){}.u8, simde_mm_cmpgt_epi32(simde_mm_load_si128((simde__m128i*){}.s32), simde_mm_load_si128((simde__m128i*){}.s32)));", v(insn.operands[0]), v(insn.operands[1]), v(insn.operands[2]));
++        if (strchr(insn.opcode->name, '.'))
++            println("\t{}.setFromMask(simde_mm_load_ps({}.f32), 0xF);", cr(6), v(insn.operands[0]));
++        break;
++
++    case PPC_INST_VSUBSHS:
++        println("\tsimde_mm_store_si128((simde__m128i*){}.s16, simde_mm_subs_epi16(simde_mm_load_si128((simde__m128i*){}.s16), simde_mm_load_si128((simde__m128i*){}.s16)));", v(insn.operands[0]), v(insn.operands[1]), v(insn.operands[2]));
++        break;
++
++    case PPC_INST_VADDSWS:
++        for (size_t i = 0; i < 4; i++)
++        {
++            println("\t{}.s64 = int64_t({}.s32[{}]) + int64_t({}.s32[{}]);", temp(), v(insn.operands[1]), i, v(insn.operands[2]), i);
++            println("\t{}.s32[{}] = {}.s64 > INT_MAX ? INT_MAX : {}.s64 < INT_MIN ? INT_MIN : {}.s64;", v(insn.operands[0]), i, temp(), temp(), temp());
++        }
++        break;
++
++    case PPC_INST_VCTUXS:
++    case PPC_INST_VCFPUXWS128:
++        printSetFlushMode(true);
++        for (size_t i = 0; i < 4; i++)
++        {
++            println("\t{}.f64 = double({}.f32[{}]) * {}.0;", temp(), v(insn.operands[1]), i, 1u << insn.operands[2]);
++            println("\t{}.u32[{}] = ({}.f64 != {}.f64 || {}.f64 <= 0.0) ? 0u : {}.f64 >= 4294967295.0 ? 0xFFFFFFFFu : uint32_t({}.f64);", v(insn.operands[0]), i, temp(), temp(), temp(), temp(), temp());
++        }
++        break;
++    // ---- end WET_EXTRA_INSTRUCTIONS ----
++
+     case PPC_INST_ADD:
+         println("\t{}.u64 = {}.u64 + {}.u64;", r(insn.operands[0]), r(insn.operands[1]), r(insn.operands[2]));
+         if (strchr(insn.opcode->name, '.'))
+@@ -712,7 +834,12 @@ bool Recompiler::Recompile(
+         break;
+ 
+     case PPC_INST_BLRL:
+-        println("__builtin_debugtrap();");
++        // WET_D3D_HALF: indirect call through LR
++        println("\t{}.u32 = ctx.lr;", temp());
++        if (!config.skipLr)
++            println("\tctx.lr = 0x{:X};", base + 4);
++        println("\tPPC_CALL_INDIRECT_FUNC({}.u32);", temp());
++        csrState = CSRState::Unknown;
+         break;
+ 
+     case PPC_INST_BLT:
+@@ -1135,6 +1262,7 @@ bool Recompiler::Recompile(
+ 
+     case PPC_INST_LVEWX:
+     case PPC_INST_LVEWX128:
++    case PPC_INST_LVEHX:
+     case PPC_INST_LVX:
+     case PPC_INST_LVX128:
+         // NOTE: for endian swapping, we reverse the whole vector instead of individual elements.
+@@ -1260,7 +1388,7 @@ bool Recompiler::Recompile(
+         break;
+ 
+     case PPC_INST_MFTB:
+-        println("\t{}.u64 = __rdtsc();", r(insn.operands[0]));
++        println("\t{}.u64 = PPC_QUERY_TIMEBASE();", r(insn.operands[0]));
+         break;
+ 
+     case PPC_INST_MR:
+@@ -1831,7 +1959,20 @@ bool Recompiler::Recompile(
+ 
+     case PPC_INST_VCMPBFP:
+     case PPC_INST_VCMPBFP128:
+-        println("\t__builtin_debugtrap();");
++        // WET: bit31 = !(a <= b), bit30 = !(a >= -b); NaN sets both. Rc -> cr6.eq = all in bounds.
++        printSetFlushMode(true);
++        println("\t{{ simde__m128 a_ = simde_mm_load_ps({}.f32), b_ = simde_mm_load_ps({}.f32);", v(insn.operands[1]), v(insn.operands[2]));
++        println("\t  simde__m128i le_ = simde_mm_castps_si128(simde_mm_cmple_ps(a_, b_));");
++        println("\t  simde__m128i ge_ = simde_mm_castps_si128(simde_mm_cmpge_ps(a_, simde_mm_xor_ps(b_, simde_mm_set1_ps(-0.0f))));");
++        println("\t  simde__m128i r_ = simde_mm_or_si128(simde_mm_andnot_si128(le_, simde_mm_set1_epi32(int32_t(0x80000000))), simde_mm_andnot_si128(ge_, simde_mm_set1_epi32(0x40000000)));");
++        println("\t  simde_mm_store_si128((simde__m128i*){}.u32, r_);", v(insn.operands[0]));
++        if (strchr(insn.opcode->name, '.'))
++        {
++            println("\t  {}.lt = 0; {}.gt = 0; {}.so = 0;", cr(6), cr(6), cr(6));
++            println("\t  {}.eq = simde_mm_testz_si128(r_, r_); }}", cr(6));
++        }
++        else
++            println("\t}}");
+         break;
+ 
+     case PPC_INST_VCMPEQFP:
+@@ -2014,6 +2155,17 @@ bool Recompiler::Recompile(
+             println("\t{}.u32[{}] = {}.u32;", v(insn.operands[0]), insn.operands[4], temp());
+             break;
+ 
++        case 3: // float16_2 (WET)
++            if (insn.operands[3] != 1)
++            {
++                fmt::println("Unexpected float16_2 pack instruction at {:X}", base);
++                println("\t__builtin_debugtrap();");
++                break;
++            }
++            println("\t{}.u32 = (uint32_t(PPCFloatToHalf({}.f32[3])) << 16) | PPCFloatToHalf({}.f32[2]);", temp(), v(insn.operands[1]), v(insn.operands[1]));
++            println("\t{}.u32[{}] = {}.u32;", v(insn.operands[0]), insn.operands[4], temp());
++            break;
++
+         case 5: // float16_4
+             if (insn.operands[3] != 2 || insn.operands[4] > 2)
+                 fmt::println("Unexpected float16_4 pack instruction at {:X}", base);
+@@ -2088,6 +2240,7 @@ bool Recompiler::Recompile(
+         break;
+ 
+     case PPC_INST_VSEL:
++    case PPC_INST_VSEL128:
+         println("\tsimde_mm_store_si128((simde__m128i*){}.u8, simde_mm_or_si128(simde_mm_andnot_si128(simde_mm_load_si128((simde__m128i*){}.u8), simde_mm_load_si128((simde__m128i*){}.u8)), simde_mm_and_si128(simde_mm_load_si128((simde__m128i*){}.u8), simde_mm_load_si128((simde__m128i*){}.u8))));", v(insn.operands[0]), v(insn.operands[3]), v(insn.operands[1]), v(insn.operands[3]), v(insn.operands[2]));
+         break;
+ 
+@@ -2212,6 +2365,20 @@ bool Recompiler::Recompile(
+             println("\t{} = {};", v(insn.operands[0]), vTemp());
+             break;
+ 
++        case 3: // float16_2 -> (x, y, 0, 1); BE halfwords 6,7 live in u16[1],u16[0]
++            println("\t{}.f32[3] = PPCHalfToFloat({}.u16[1]);", vTemp(), v(insn.operands[1]));
++            println("\t{}.f32[2] = PPCHalfToFloat({}.u16[0]);", vTemp(), v(insn.operands[1]));
++            println("\t{}.f32[1] = 0.0f;", vTemp());
++            println("\t{}.f32[0] = 1.0f;", vTemp());
++            println("\t{} = {};", v(insn.operands[0]), vTemp());
++            break;
++
++        case 5: // float16_4 -> (x, y, z, w); BE halfwords 4..7 live in u16[3..0]
++            for (size_t i = 0; i < 4; i++)
++                println("\t{}.f32[{}] = PPCHalfToFloat({}.u16[{}]);", vTemp(), 3 - i, v(insn.operands[1]), 3 - i);
++            println("\t{} = {};", v(insn.operands[0]), vTemp());
++            break;
++
+         default:
+             println("\t__builtin_debugtrap();");
+             break;
+diff --git a/XenonUtils/ppc_context.h b/XenonUtils/ppc_context.h
+index 31a86cd..c6c0d13 100644
+--- a/XenonUtils/ppc_context.h
++++ b/XenonUtils/ppc_context.h
+@@ -109,6 +109,10 @@
+ 
+ #define PPC_LOOKUP_FUNC(x, y) *(PPCFunc**)(x + PPC_IMAGE_BASE + PPC_IMAGE_SIZE + (uint64_t(uint32_t(y) - PPC_CODE_BASE) * 2))
+ 
++#ifndef PPC_QUERY_TIMEBASE
++#define PPC_QUERY_TIMEBASE() __rdtsc()
++#endif
++
+ #ifndef PPC_CALL_INDIRECT_FUNC
+ #define PPC_CALL_INDIRECT_FUNC(x) (PPC_LOOKUP_FUNC(base, x))(ctx, base)
+ #endif
+@@ -191,6 +195,34 @@ struct PPCCRRegister
+     }
+ };
+ 
++
++// ---- WET: half-float helpers used by vpkd3d128/vupkd3d128 ----
++inline float PPCHalfToFloat(uint16_t h)
++{
++    uint32_t s = uint32_t(h & 0x8000) << 16, e = (h >> 10) & 0x1F, m = h & 0x3FF, f;
++    if (e == 0)
++    {
++        if (m == 0) f = s;
++        else { e = 113; while (!(m & 0x400)) { m <<= 1; --e; } f = s | (e << 23) | ((m & 0x3FF) << 13); }
++    }
++    else if (e == 31) f = s | 0x7F800000 | (m << 13);
++    else f = s | ((e + 112) << 23) | (m << 13);
++    float r; memcpy(&r, &f, 4); return r;
++}
++
++// Saturating float->half matching the existing float16_4 pack path (truncate, clamp to 0x7FFF).
++inline uint16_t PPCFloatToHalf(float x)
++{
++    uint32_t u; memcpy(&u, &x, 4);
++    uint16_t sign = uint16_t((u & 0x80000000) >> 16);
++    uint32_t a = u & 0x7FFFFFFF; float af; memcpy(&af, &a, 4);
++    if (af != af || af > 65504.0f) return sign | 0x7FFF;
++    uint32_t e = (a & 0x7F800000) >> 23, m = (a & 0x7FE000) >> 13;
++    if (e > 0x70) return sign | uint16_t(((e - 0x70) << 10) + m);
++    uint32_t sh = 0x71 - e;
++    return sign | uint16_t(sh > 31 ? 0 : ((0x400 + m) >> sh));
++}
++
+ union alignas(0x10) PPCVRegister
+ {
+     int8_t s8[16];
