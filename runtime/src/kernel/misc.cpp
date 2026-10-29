@@ -2,11 +2,14 @@
 #include "kernel.h"
 #include "threads.h"
 #include "xma.h"
+#include "apu/apu.h"
 #include "os.h"
 
 #include <algorithm>
 #include <TinySHA1.hpp>
 #include <atomic>
+#include <cmath>
+#include <cstdlib>
 #include <mutex>
 
 using namespace wet;
@@ -89,28 +92,30 @@ GUEST_IMPORT(XAudioGetVoiceCategoryVolume)
 // sounds never finish and the title's heap fills with them.
 namespace
 {
-    struct AudioClient { uint32_t callback = 0, argPtr = 0; bool active = false; };
+    struct AudioClient
+    {
+        uint32_t callback = 0, argPtr = 0;
+        bool active = false;
+        bool triedOutput = false;
+        apu::Output* output = nullptr;  // XAudio2 voice; null = timer-paced, silent
+        uint64_t next = 0;
+    };
     constexpr int kMaxAudioClients = 8;
     AudioClient s_audioClients[kMaxAudioClients];
     std::mutex s_audioLock;
     std::once_flag s_audioThreadOnce;
 
+    // Calls each client back once per 256-sample frame: when its output has room
+    // for another frame (so the title's mixing follows the sound card's clock),
+    // or every 5.33 ms when there is no output.
     void AudioThreadMain(void*)
     {
         PPCContext& ctx = AdoptHostThread(0x10000);
         SetThreadName(0xFFFFFFFF, "Audio driver (host)");
         constexpr uint64_t kFrameNs = 256ull * 1000000000ull / 48000ull;
-        uint64_t next = os::MonotonicNs();
         for (;;)
         {
-            uint64_t now = os::MonotonicNs();
-            if (now < next)
-            {
-                os::SleepNs(next - now);
-                continue;
-            }
-            // Catch up at most a few frames after a stall, then resynchronise.
-            next = (now - next > 8 * kFrameNs) ? now + kFrameNs : next + kFrameNs;
+            bool called = false;
             for (int i = 0; i < kMaxAudioClients; i++)
             {
                 AudioClient c;
@@ -120,10 +125,51 @@ namespace
                 }
                 if (!c.active)
                     continue;
+                if (!c.triedOutput)
+                {
+                    c.triedOutput = true;
+                    c.output = apu::OpenOutput();
+                    Log("Audio client %d: %s", i, c.output ? "playing through XAudio2" : "no output device - silent");
+                }
+                uint64_t now = os::MonotonicNs();
+                bool due;
+                if (c.output)
+                    due = apu::WaitForFrameSlot(c.output, 0);
+                else
+                {
+                    if (!c.next)
+                        c.next = now;
+                    due = now >= c.next;
+                    if (due)
+                        c.next = (now - c.next > 8 * kFrameNs) ? now + kFrameNs : c.next + kFrameNs;
+                }
+                {
+                    std::lock_guard lock(s_audioLock);
+                    if (s_audioClients[i].active && s_audioClients[i].callback == c.callback)
+                    {
+                        s_audioClients[i].triedOutput = c.triedOutput;
+                        s_audioClients[i].output = c.output;
+                        s_audioClients[i].next = c.next;
+                    }
+                }
+                if (!due)
+                    continue;
                 ctx.r3.u64 = c.argPtr;
                 CallGuest(ctx, c.callback);
+                called = true;
             }
+            if (!called)
+                os::SleepNs(500000);
         }
+    }
+
+    apu::Output* OutputForDriver(uint32_t driver)
+    {
+        uint32_t index = driver & 0xFFFF;
+        if ((driver & 0xFFFF0000) != 0x41550000 || index >= kMaxAudioClients)
+            return nullptr;
+        std::lock_guard lock(s_audioLock);
+        return s_audioClients[index].active ? s_audioClients[index].output : nullptr;
     }
 }
 
@@ -143,12 +189,18 @@ GUEST_IMPORT(XAudioRegisterRenderDriverClient)
             // Like Xenia, the callback gets a pointer to a word holding its argument.
             uint32_t argPtr = s_audioClients[index].argPtr ? s_audioClients[index].argPtr : SystemAlloc(4);
             St32(argPtr, arg);
-            s_audioClients[index] = { callback, argPtr, true };
+            apu::Output* keep = s_audioClients[index].output;   // a voice is reused, never closed
+            s_audioClients[index] = AudioClient{};
+            s_audioClients[index].callback = callback;
+            s_audioClients[index].argPtr = argPtr;
+            s_audioClients[index].active = true;
+            s_audioClients[index].output = keep;
+            s_audioClients[index].triedOutput = keep != nullptr;
         }
     }
     if (index < 0)
         return Ret(ctx, 0xC0000017);    // STATUS_NO_MEMORY
-    Log("XAudioRegisterRenderDriverClient(callback 0x%08X, arg 0x%08X) -> client %d (callbacks at 48 kHz/256, no sound output yet)",
+    Log("XAudioRegisterRenderDriverClient(callback 0x%08X, arg 0x%08X) -> client %d",
         callback, arg, index);
     St32(Arg(ctx, 1), 0x41550000u | uint32_t(index));
     std::call_once(s_audioThreadOnce, [] { os::StartThread(AudioThreadMain, nullptr, 1 << 20); });
@@ -166,7 +218,32 @@ GUEST_IMPORT(XAudioUnregisterRenderDriverClient)
     }
     Ret(ctx, ERROR_SUCCESS);
 }
-GUEST_IMPORT(XAudioSubmitRenderDriverFrame) { Ret(ctx, ERROR_SUCCESS); }
+// XAudioSubmitRenderDriverFrame(driver, samples): 6 channels x 256 big-endian floats.
+GUEST_IMPORT(XAudioSubmitRenderDriverFrame)
+{
+    if (apu::Output* out = OutputForDriver(Arg(ctx, 0)))
+        apu::SubmitFrame(out, Arg(ctx, 1));
+    // WET_AUDIO_DEBUG: log the loudest sample of the mix every ~5 s.
+    static const bool debug = std::getenv("WET_AUDIO_DEBUG") != nullptr;
+    if (debug)
+    {
+        static uint32_t frames = 0;
+        static float peak = 0;
+        for (uint32_t i = 0; i < 6 * 256; i++)
+        {
+            uint32_t bits = Ld32(Arg(ctx, 1) + i * 4);
+            float f;
+            std::memcpy(&f, &bits, 4);
+            peak = std::max(peak, std::fabs(f));
+        }
+        if (++frames % 1000 == 0)
+        {
+            Log("Audio: %u frames mixed, peak %.3f in the last 1000", frames, peak);
+            peak = 0;
+        }
+    }
+    Ret(ctx, ERROR_SUCCESS);
+}
 
 // XMACreateContext(u32* context)
 GUEST_IMPORT(XMACreateContext)

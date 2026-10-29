@@ -1,0 +1,167 @@
+# FFmpeg sources Xenia's fork builds (generated from its premake5.lua files).
+
+set(XE_FF_AVUTIL_SOURCES
+    libavutil/adler32.c
+    libavutil/aes.c
+    libavutil/aes_ctr.c
+    libavutil/audio_fifo.c
+    libavutil/avstring.c
+    libavutil/avsscanf.c
+    libavutil/base64.c
+    libavutil/blowfish.c
+    libavutil/bprint.c
+    libavutil/buffer.c
+    libavutil/cast5.c
+    libavutil/camellia.c
+    libavutil/channel_layout.c
+    libavutil/color_utils.c
+    libavutil/cpu.c
+    libavutil/crc.c
+    libavutil/des.c
+    libavutil/dict.c
+    libavutil/display.c
+    libavutil/dovi_meta.c
+    libavutil/downmix_info.c
+    libavutil/encryption_info.c
+    libavutil/error.c
+    libavutil/eval.c
+    libavutil/fifo.c
+    libavutil/file.c
+    libavutil/file_open.c
+    libavutil/float_dsp.c
+    libavutil/fixed_dsp.c
+    libavutil/frame.c
+    libavutil/hash.c
+    libavutil/hdr_dynamic_metadata.c
+    libavutil/hmac.c
+    libavutil/hwcontext.c
+    libavutil/imgutils.c
+    libavutil/integer.c
+    libavutil/intmath.c
+    libavutil/lfg.c
+    libavutil/lls.c
+    libavutil/log.c
+    libavutil/log2_tab.c
+    libavutil/mathematics.c
+    libavutil/mastering_display_metadata.c
+    libavutil/md5.c
+    libavutil/mem.c
+    libavutil/murmur3.c
+    libavutil/opt.c
+    libavutil/parseutils.c
+    libavutil/pixdesc.c
+    libavutil/pixelutils.c
+    libavutil/random_seed.c
+    libavutil/rational.c
+    libavutil/reverse.c
+    libavutil/rc4.c
+    libavutil/ripemd.c
+    libavutil/samplefmt.c
+    libavutil/sha.c
+    libavutil/sha512.c
+    libavutil/slicethread.c
+    libavutil/spherical.c
+    libavutil/stereo3d.c
+    libavutil/threadmessage.c
+    libavutil/time.c
+    libavutil/timecode.c
+    libavutil/tree.c
+    libavutil/twofish.c
+    libavutil/utils.c
+    libavutil/xga_font_data.c
+    libavutil/xtea.c
+    libavutil/tea.c
+    libavutil/tx.c
+    libavutil/tx_float.c
+    libavutil/tx_double.c
+    libavutil/tx_int32.c
+    libavutil/video_enc_params.c
+    libavutil/film_grain_params.c
+)
+set(XE_FF_AVUTIL_WIN_SOURCES
+    libavutil/x86/cpu.c
+    libavutil/x86/fixed_dsp_init.c
+    libavutil/x86/float_dsp_init.c
+    libavutil/x86/imgutils_init.c
+    libavutil/x86/lls_init.c
+)
+set(XE_FF_AVUTIL_LINUX_SOURCES
+    libavutil/x86/cpu.c
+    libavutil/x86/fixed_dsp_init.c
+    libavutil/x86/float_dsp_init.c
+    libavutil/x86/imgutils_init.c
+    libavutil/x86/lls_init.c
+)
+
+set(XE_FF_AVCODEC_SOURCES
+    libavcodec/ac3_parser.c
+    libavcodec/adts_parser.c
+    libavcodec/allcodecs.c
+    libavcodec/avcodec.c
+    libavcodec/avdct.c
+    libavcodec/avpacket.c
+    libavcodec/avpicture.c
+    libavcodec/bitstream.c
+    libavcodec/bitstream_filter.c
+    libavcodec/bitstream_filters.c
+    libavcodec/bsf.c
+    libavcodec/codec_desc.c
+    libavcodec/codec_par.c
+    libavcodec/d3d11va.c
+    libavcodec/decode.c
+    libavcodec/dirac.c
+    libavcodec/dv_profile.c
+    libavcodec/encode.c
+    libavcodec/imgconvert.c
+    libavcodec/jni.c
+    libavcodec/mathtables.c
+    libavcodec/mediacodec.c
+    libavcodec/mpeg12framerate.c
+    libavcodec/options.c
+    libavcodec/parser.c
+    libavcodec/parsers.c
+    libavcodec/profiles.c
+    libavcodec/qsv_api.c
+    libavcodec/raw.c
+    libavcodec/utils.c
+    libavcodec/vorbis_parser.c
+    libavcodec/xiph.c
+    libavcodec/faandct.c
+    libavcodec/faanidct.c
+    libavcodec/fdctdsp.c
+    libavcodec/jfdctfst.c
+    libavcodec/jfdctint.c
+    libavcodec/idctdsp.c
+    libavcodec/simple_idct.c
+    libavcodec/jrevdct.c
+    libavcodec/mdct_float.c
+    libavcodec/mdct_fixed_32.c
+    libavcodec/sinewin.c
+    libavcodec/wma_freqs.c
+    libavcodec/wmaprodec.c
+    libavcodec/wma.c
+    libavcodec/wma_common.c
+    libavcodec/null_bsf.c
+    libavcodec/pthread.c
+    libavcodec/pthread_slice.c
+    libavcodec/pthread_frame.c
+    libavcodec/avfft.c
+    libavcodec/fft_float.c
+    libavcodec/fft_fixed_32.c
+    libavcodec/fft_init_table.c
+)
+set(XE_FF_AVCODEC_WIN_SOURCES
+    libavcodec/file_open.c
+    libavcodec/x86/constants.c
+    libavcodec/x86/fdctdsp_init.c
+    libavcodec/x86/fft_init.c
+    libavcodec/x86/idctdsp_init.c
+    libavcodec/x86/fdct.c
+)
+set(XE_FF_AVCODEC_LINUX_SOURCES
+    libavcodec/x86/constants.c
+    libavcodec/x86/fdctdsp_init.c
+    libavcodec/x86/fft_init.c
+    libavcodec/x86/idctdsp_init.c
+    libavcodec/x86/fdct.c
+)

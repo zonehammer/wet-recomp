@@ -10,6 +10,8 @@
 #include <string>
 #include <utility>
 
+#include "xenia/base/threading.h"
+#include "xenia/cpu/processor.h"
 #include "xenia/xbox.h"
 
 namespace xe {

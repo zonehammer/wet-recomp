@@ -6,7 +6,7 @@ A static recompilation of **WET** (Xbox 360, 2009) to native Windows code, built
 > **Status: boots to the menus and renders them.** The game's executable is fully
 > recompiled to C++ and runs under a host runtime that implements the Xbox 360 kernel/XAM
 > functions it needs. Graphics go through [Xenia](https://github.com/xenia-project/xenia)'s
-> GPU emulation (Vulkan) in a game window; saves work; there is no audio yet. See
+> GPU emulation (Direct3D 12 or Vulkan) in a game window, with sound (Xenia's XMA decoder and XAudio2 output); saves work. See
 > [Roadmap](#roadmap).
 
 **This repository contains no game data.** You need your own copy of WET; the build

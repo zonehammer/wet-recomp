@@ -14,6 +14,7 @@
 // xma_decoder.cc, xma_context.h).
 #include "kernel.h"
 #include "xma.h"
+#include "apu/apu.h"
 #include "gpu/renderer.h"
 #include "../memory.h"
 
@@ -40,6 +41,9 @@ namespace
     uint32_t s_arrayPhys = 0, s_arrayGuest = 0;
     std::bitset<kContextCount> s_allocated;
     uint64_t s_kicks = 0, s_framesOut = 0;
+    // Real decoding (Xenia's XmaContext with FFmpeg), started at the first
+    // XMACreateContext so the renderer's logging is up; else the silent stand-in.
+    bool s_realTried = false, s_real = false;
 
     // Context words (big-endian in guest memory). Bit positions from Xenia's
     // XMA_CONTEXT_DATA, which reads the words as little-endian bitfields: bit 0
@@ -199,7 +203,7 @@ namespace wet
         // APU registers are little-endian (the title reads them with lwbrx).
         St32(kApuBase + kRegContextArrayAddress * 4, __builtin_bswap32(phys));
         St32(kApuBase + kRegNextContextIndex * 4, __builtin_bswap32(1u));
-        Log("XMA: %u contexts at 0x%08X (physical 0x%08X); decoding to silence (no sound output yet)",
+        Log("XMA: %u contexts at 0x%08X (physical 0x%08X)",
             kContextCount, s_arrayGuest, phys);
     }
 
@@ -222,8 +226,15 @@ namespace wet
             if ((s_kicks & (s_kicks - 1)) == 0 && s_kicks >= 1024)
                 Log("XMA: %llu kicks, %llu silent frames produced", (unsigned long long)s_kicks,
                     (unsigned long long)s_framesOut);
-            forEach(kRegKick0, [](uint32_t id) { Work(id); });
+            if (s_real)
+                forEach(kRegKick0, [](uint32_t id) { apu::XmaKick(id); });
+            else
+                forEach(kRegKick0, [](uint32_t id) { Work(id); });
         }
+        else if (s_real && reg >= kRegClear0 && reg < kRegClear0 + 10)
+            forEach(kRegClear0, [](uint32_t id) { apu::XmaClear(id); });
+        else if (s_real && reg >= kRegLock0 && reg < kRegLock0 + 10)
+            forEach(kRegLock0, [](uint32_t id) { apu::XmaLock(id); });
         else if (reg >= kRegClear0 && reg < kRegClear0 + 10)
         {
             forEach(kRegClear0, [](uint32_t id) {
@@ -246,11 +257,19 @@ namespace wet
         std::lock_guard lock(s_lock);
         if (!s_arrayGuest)
             return 0;
+        if (!s_realTried)
+        {
+            s_realTried = true;
+            s_real = apu::XmaStart(g_mem.base, PhysicalHostView(), s_arrayGuest, kContextCount);
+            Log("XMA: %s", s_real ? "decoding with FFmpeg" : "decoding to silence");
+        }
         for (uint32_t i = 0; i < kContextCount; i++)
             if (!s_allocated[i])
             {
                 s_allocated[i] = true;
                 Zero(ContextGuest(i), kContextSize);
+                if (s_real)
+                    apu::XmaAllocate(i);
                 return ContextGuest(i);
             }
         return 0;
@@ -265,6 +284,8 @@ namespace wet
         if (id < kContextCount)
         {
             s_allocated[id] = false;
+            if (s_real)
+                apu::XmaRelease(id);
             Zero(ContextGuest(id), kContextSize);
         }
     }

@@ -47,18 +47,20 @@ add_custom_command(
     COMMENT "Generating import stubs")
 
 # The renderer bridge is compiled with Xenia's settings (C++17, its include paths).
-list(FILTER WET_RUNTIME_SOURCES EXCLUDE REGEX "/src/gpu/xenia_bridge\\.cpp$")
+list(FILTER WET_RUNTIME_SOURCES EXCLUDE REGEX "/src/(gpu/xenia_bridge|apu/xenia_apu_bridge)\\.cpp$")
 if(WET_RENDERER)
-    add_library(WetRenderer STATIC ${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/xenia_bridge.cpp)
+    add_library(WetRenderer STATIC ${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/xenia_bridge.cpp
+                            ${CMAKE_CURRENT_SOURCE_DIR}/src/apu/xenia_apu_bridge.cpp)
     xe_target(WetRenderer)
     target_include_directories(WetRenderer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    target_link_libraries(WetRenderer PUBLIC xe_gpu)
+    target_link_libraries(WetRenderer PUBLIC xe_gpu xe_apu)
     if(WIN32)
         target_link_libraries(WetRenderer PUBLIC xe_gpu_d3d12 dxguid)
         target_compile_definitions(WetRenderer PRIVATE WET_HAVE_D3D12=1)
     endif()
 else()
-    add_library(WetRenderer STATIC ${CMAKE_CURRENT_SOURCE_DIR}/renderer_stub/renderer_stub.cpp)
+    add_library(WetRenderer STATIC ${CMAKE_CURRENT_SOURCE_DIR}/renderer_stub/renderer_stub.cpp
+                            ${CMAKE_CURRENT_SOURCE_DIR}/renderer_stub/apu_stub.cpp)
     target_include_directories(WetRenderer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 endif()
 
