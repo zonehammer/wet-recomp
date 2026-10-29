@@ -1,0 +1,74 @@
+# Windows build check. Builds the patched XenonRecomp tools and the full runtime,
+# linked against ci/stub_ppc (a stand-in for the generated code), with both
+# supported toolchains. No game files are involved or needed.
+name: Windows build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.toolchain }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [llvm-mingw, clang-cl]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Ninja
+        run: choco install ninja -y --no-progress
+
+      - name: Install llvm-mingw
+        if: matrix.toolchain == 'llvm-mingw'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $rel = Invoke-RestMethod https://api.github.com/repos/mstorsjo/llvm-mingw/releases/latest -Headers @{ Authorization = "Bearer $env:GH_TOKEN" }
+          $asset = $rel.assets | Where-Object { $_.name -like '*-ucrt-x86_64.zip' } | Select-Object -First 1
+          Write-Host "Using $($asset.name)"
+          Invoke-WebRequest $asset.browser_download_url -OutFile llvm-mingw.zip
+          Expand-Archive llvm-mingw.zip -DestinationPath C:\toolchain
+          $bin = (Get-ChildItem C:\toolchain -Directory | Select-Object -First 1).FullName + "\bin"
+          $bin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Set up MSVC environment (for clang-cl)
+        if: matrix.toolchain == 'clang-cl'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          if ('${{ matrix.toolchain }}' -eq 'clang-cl') { $cc = 'clang-cl'; $cxx = 'clang-cl' } else { $cc = 'clang'; $cxx = 'clang++' }
+          & $cxx --version
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_C_COMPILER=$cc" "-DCMAKE_CXX_COMPILER=$cxx" -DWET_CI_STUB=ON
+
+      - name: Build
+        run: cmake --build build --target XenonAnalyse XenonRecomp WetRecomp
+
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          # With no game present the runtime must start, log, and exit with code 1.
+          & build\runtime\WetRecomp.exe --game no-such-folder --log smoke.log
+          if ($LASTEXITCODE -ne 1) { throw "unexpected exit code $LASTEXITCODE" }
+          Get-Content smoke.log
+          & build\thirdparty\XenonRecomp\XenonRecomp\XenonRecomp.exe
+          if ($LASTEXITCODE -ne 0) { throw "XenonRecomp.exe failed to start" }
+
+      - name: Upload recompiler tools
+        if: matrix.toolchain == 'llvm-mingw'
+        uses: actions/upload-artifact@v4
+        with:
+          name: XenonRecomp-WET-windows-x64
+          path: |
+            build/thirdparty/XenonRecomp/XenonRecomp/XenonRecomp.exe
+            build/thirdparty/XenonRecomp/XenonAnalyse/XenonAnalyse.exe
+            thirdparty/XenonRecomp/LICENSE.md

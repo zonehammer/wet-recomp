@@ -20,6 +20,19 @@ set(WET_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
 set(XR_DIR ${WET_ROOT}/thirdparty/XenonRecomp)
 set(WET_GENERATED_DIR ${WET_ROOT}/generated/ppc)
 
+# CI: build and link the whole runtime against a tiny stand-in for the generated
+# code (ci/stub_ppc), so Windows builds can be checked without any game files.
+option(WET_CI_STUB "Build against ci/stub_ppc instead of generated/ppc (no game files needed)" OFF)
+if(WET_CI_STUB)
+    set(WET_GENERATED_DIR ${WET_ROOT}/ci/stub_ppc)
+endif()
+
+# MinGW (llvm-mingw, MSYS2 clang64): link the C++ runtime statically so the
+# executables run without extra DLLs next to them.
+if(MINGW)
+    add_link_options(-static)
+endif()
+
 # ---------------------------------------------------------------------------
 # XenonRecomp (submodule) + the WET patch set
 # ---------------------------------------------------------------------------
