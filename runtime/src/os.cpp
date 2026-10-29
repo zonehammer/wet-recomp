@@ -57,9 +57,22 @@ namespace wet::os
     void ExitCurrentThread() { ExitThread(0); }
     uint32_t CurrentHostThreadId() { return GetCurrentThreadId(); }
 
-    static LONG CALLBACK VectoredHandler(PEXCEPTION_POINTERS info)
+    // Called only for exceptions nothing else handled, i.e. real crashes.
+    static LONG WINAPI UnhandledFilter(PEXCEPTION_POINTERS info)
     {
         auto* rec = info->ExceptionRecord;
+        uintptr_t pc = uintptr_t(rec->ExceptionAddress);
+        HMODULE mod = nullptr;
+        GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCSTR>(pc), &mod);
+        char modName[MAX_PATH] = "?";
+        if (mod)
+            GetModuleFileNameA(mod, modName, MAX_PATH);
+        const char* shortName = modName;
+        for (const char* c = modName; *c; c++)
+            if (*c == '\\' || *c == '/')
+                shortName = c + 1;
+
         switch (rec->ExceptionCode)
         {
         case EXCEPTION_ACCESS_VIOLATION:
@@ -68,10 +81,12 @@ namespace wet::os
             break;
         case EXCEPTION_STACK_OVERFLOW:     LogFatal("Host stack overflow"); LogCrashContext(); break;
         case EXCEPTION_ILLEGAL_INSTRUCTION:
-        case EXCEPTION_BREAKPOINT:         LogFatal("Trap/breakpoint at host %p", rec->ExceptionAddress); LogCrashContext(); break;
-        case EXCEPTION_INT_DIVIDE_BY_ZERO: LogFatal("Integer divide by zero at host %p", rec->ExceptionAddress); LogCrashContext(); break;
-        default: break;
+        case EXCEPTION_BREAKPOINT:         LogFatal("Trap/breakpoint"); LogCrashContext(); break;
+        case EXCEPTION_INT_DIVIDE_BY_ZERO: LogFatal("Integer divide by zero"); LogCrashContext(); break;
+        default: LogFatal("Unhandled exception 0x%08lX", rec->ExceptionCode); LogCrashContext(); break;
         }
+        LogFatal("  faulting code: %s+0x%llX", shortName,
+                 (unsigned long long)(mod ? pc - uintptr_t(mod) : pc));
         return EXCEPTION_CONTINUE_SEARCH;
     }
 
@@ -79,7 +94,7 @@ namespace wet::os
     {
         s_guestBase = guestBase;
         s_guestSize = guestSize;
-        AddVectoredExceptionHandler(1, VectoredHandler);
+        SetUnhandledExceptionFilter(UnhandledFilter);
     }
 #else
     void* Reserve(size_t size)

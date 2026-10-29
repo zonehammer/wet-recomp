@@ -89,7 +89,9 @@ namespace wet
             return false;
         }
 
+        Log("Loader: read %s (%zu bytes); decrypting/decompressing", xexPath.filename().string().c_str(), file.size());
         Image image = Xex2LoadImage(file.data(), file.size());
+        Log("Loader: image base 0x%zX size 0x%X entry 0x%zX", image.base, image.size, image.entry_point);
         if (!image.data || image.base != PPC_IMAGE_BASE || image.size > PPC_IMAGE_SIZE)
         {
             LogFatal("XEX image mismatch: base 0x%zX size 0x%X (recompiled code expects base 0x%llX size <= 0x%llX).\n"
@@ -99,9 +101,11 @@ namespace wet
         }
 
         // ---- Image + function table ----
+        Log("Loader: mapping image");
         g_mem.Commit(PPC_IMAGE_BASE, PPC_IMAGE_SIZE);
         std::memcpy(HostPtr(PPC_IMAGE_BASE), image.data.get(), image.size);
 
+        Log("Loader: building function table");
         uint32_t tableBase = uint32_t(PPC_IMAGE_BASE + PPC_IMAGE_SIZE);
         g_mem.Commit(tableBase, uint32_t(PPC_CODE_SIZE * 2));
         size_t mapped = 0;
@@ -133,6 +137,7 @@ namespace wet
             g_module.tlsRawSize = BE32(tls + 12);
         }
 
+        Log("Loader: %zu functions mapped; reading headers and imports", mapped);
         // ---- Imports ----
         if (auto* ih = static_cast<const uint8_t*>(getOptHeaderPtr(xex, XEX_HEADER_IMPORT_LIBRARIES)))
         {
@@ -168,6 +173,7 @@ namespace wet
             }
         }
 
+        Log("Loader: building loader structures");
         // ---- XEX header copy, execution id, loader entry ----
         g_module.guestHeaderSize = hdr->headerSize;
         g_module.guestHeader = SystemAlloc(g_module.guestHeaderSize, 0x1000);

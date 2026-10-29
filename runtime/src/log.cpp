@@ -26,7 +26,10 @@ namespace wet
         std::lock_guard lock(s_logMutex);
         std::fprintf(stderr, "[%9.4f][%5u]%s %s\n", t, os::CurrentHostThreadId(), tag, msg);
         if (s_logFile)
+        {
             std::fprintf(s_logFile, "[%9.4f][%5u]%s %s\n", t, os::CurrentHostThreadId(), tag, msg);
+            std::fflush(s_logFile); // every line reaches disk even if we crash right after
+        }
     }
 
     void Log(const char* fmt, ...)
