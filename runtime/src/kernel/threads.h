@@ -2,6 +2,9 @@
 #include "objects.h"
 
 #include <atomic>
+#include <functional>
+#include <mutex>
+#include <string>
 #include <ppc_config.h>
 #include <ppc_context.h>
 
@@ -33,6 +36,13 @@ namespace wet
         PPCContext* ctx = nullptr;
         const char* currentImport = nullptr;
 
+        // Diagnostics (see StartStallMonitor)
+        std::mutex statusLock;
+        std::string name;
+        std::string waitingOn;      // empty while running guest code
+        uint32_t waitLr = 0;
+        uint64_t waitSinceNs = 0;
+
         bool IsSignaled(GuestThread*) override { return exited; }
     };
 
@@ -51,6 +61,18 @@ namespace wet
     // Gives the calling host thread its own guest stack/PCR/TLS so it can call guest
     // code (used for interrupt delivery). Returns the thread's context.
     PPCContext& AdoptHostThread(uint32_t stackSize);
+
+    // Marks the current thread as blocked for the stall monitor.
+    struct WaitScope
+    {
+        explicit WaitScope(std::string what);
+        ~WaitScope();
+    };
+
+    void SetThreadName(uint32_t threadId, const std::string& name);  // id 0xFFFFFFFF = current
+    // Every `intervalSeconds`, if no frame was presented, logs what each thread is doing.
+    void StartStallMonitor(uint32_t intervalSeconds);
+    uint64_t PresentedFrameCount();   // gpu.cpp
 
     void InitThreading(uint32_t tlsSlotCount, uint32_t tlsRawAddr, uint32_t tlsDataSize, uint32_t tlsRawSize);
 }

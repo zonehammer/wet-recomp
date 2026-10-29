@@ -7,6 +7,15 @@ namespace wet::os
 {
     // Address space
     void* Reserve(size_t size);                 // PROT_NONE / MEM_RESERVE
+
+    // Reserves `total` bytes of address space in which every `views[i]` range maps the
+    // SAME `physicalSize` bytes of shared memory (offset 0), so writes through one
+    // view are visible through the others. Everything else is plain reserved space
+    // usable with Commit/Decommit. Returns nullptr on failure.
+    struct AliasView { uint64_t offset, size; };
+    uint8_t* ReserveWithAliases(uint64_t total, const AliasView* views, int viewCount, uint64_t physicalSize,
+                                const char** failureReason);
+    void Release(uint8_t* base, uint64_t total);
     bool Commit(void* p, size_t size);          // make read/write, zero-filled when fresh
     void Decommit(void* p, size_t size);        // back to no-access, contents discarded
 

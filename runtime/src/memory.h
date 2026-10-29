@@ -9,10 +9,10 @@
 //   0x82000000-...         the XEX image, then XenonRecomp's function table
 //   0xA0000000/0xC0000000/0xE0000000  physical memory views (64 KB / 16 MB / 4 KB pages)
 //
-// Physical memory is one 512 MB physical address space handed out through
-// whichever view the protection flags select. TODO: alias the three views onto the
-// same host pages (the real console does); today each allocation is only usable
-// through the view it was allocated in.
+// Physical memory is one 512 MB block mapped at all three views at once, as on the
+// console: 0xA0000000+P, 0xC0000000+P and 0xE0000000+P-0x1000 are the same byte.
+// (If the OS can't map at 4 KB granularity, the 0xE0000000 view falls back to
+// 0xE0000000+P; see Memory::eViewOffset.)
 #pragma once
 #include <cstdint>
 #include <map>
@@ -63,9 +63,11 @@ namespace wet
         RangeAllocator virt4k  { "virtual4k",  0x10000000, 0x40000000, 0x1000,  CommitMode::DecommitOnFree };
         RangeAllocator virt64k { "virtual64k", 0x40000000, 0x70000000, 0x10000, CommitMode::DecommitOnFree };
         RangeAllocator system  { "system",     0x70000000, 0x7F000000, 0x10,    CommitMode::ZeroOnAlloc };
-        RangeAllocator physical{ "physical",   0x00010000, 0x20000000, 0x1000,  CommitMode::None };
+        RangeAllocator physical{ "physical",   0x00010000, 0x1FFF0000, 0x1000,  CommitMode::None };
+        uint32_t eViewOffset = 0x1000;  // 0xE0000000 view: guest = 0xE0000000 + phys - eViewOffset
 
         bool Init();
+        bool SelfTest();    // checks the physical views really alias (used by CI)
         void Commit(uint32_t addr, uint32_t size);
         void Decommit(uint32_t addr, uint32_t size);
 

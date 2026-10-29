@@ -2,6 +2,8 @@
 #include "kernel.h"
 #include "threads.h"
 
+#include <cstdio>
+
 #include <unordered_map>
 
 namespace wet
@@ -81,8 +83,9 @@ namespace wet
                             std::optional<std::chrono::steady_clock::time_point> deadline)
     {
         GuestThread* self = CurrentThread();
+        std::optional<WaitScope> scope;
         std::unique_lock lock(s_dispatchLock);
-        for (;;)
+        for (bool first = true;; first = false)
         {
             for (auto& o : objects)
                 o->SyncFromGuest();
@@ -114,6 +117,24 @@ namespace wet
             auto now = std::chrono::steady_clock::now();
             if (deadline && now >= *deadline)
                 return STATUS_TIMEOUT;
+
+            if (first)
+            {
+                static const char* kNames[] = { "event", "semaphore", "mutant", "thread", "iocompletion", "file", "notify", "object" };
+                std::string what = waitAll ? "all of " : (objects.size() > 1 ? "any of " : "");
+                for (size_t i = 0; i < objects.size() && i < 4; i++)
+                {
+                    char buf[48];
+                    std::snprintf(buf, sizeof(buf), "%s%s@%08X", i ? ", " : "", kNames[int(objects[i]->type)], objects[i]->guestPtr);
+                    what += buf;
+                }
+                if (deadline)
+                    what += " (with timeout)";
+                lock.unlock();
+                scope.emplace(std::move(what));
+                lock.lock();
+                continue;
+            }
 
             // Wake periodically too: guest-owned objects can be changed by game
             // code writing memory directly, which never notifies us.

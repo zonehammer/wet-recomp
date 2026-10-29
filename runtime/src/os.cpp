@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <vector>
 #include <cstdlib>
 #include <thread>
 
@@ -11,6 +12,7 @@
 #else
 #include <pthread.h>
 #include <signal.h>
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -32,6 +34,99 @@ namespace wet::os
 
 #ifdef _WIN32
     void* Reserve(size_t size) { return VirtualAlloc(nullptr, size, MEM_RESERVE, PAGE_NOACCESS); }
+
+#ifndef MEM_RESERVE_PLACEHOLDER
+#define MEM_RESERVE_PLACEHOLDER 0x00040000
+#endif
+#ifndef MEM_REPLACE_PLACEHOLDER
+#define MEM_REPLACE_PLACEHOLDER 0x00004000
+#endif
+#ifndef MEM_PRESERVE_PLACEHOLDER
+#define MEM_PRESERVE_PLACEHOLDER 0x00000002
+#endif
+
+    // Placeholder APIs (Windows 10 1803+), loaded at run time so older headers work.
+    using VirtualAlloc2Fn = PVOID(WINAPI*)(HANDLE, PVOID, SIZE_T, ULONG, ULONG, void*, ULONG);
+    using MapViewOfFile3Fn = PVOID(WINAPI*)(HANDLE, HANDLE, PVOID, ULONG64, SIZE_T, ULONG, ULONG, void*, ULONG);
+
+    uint8_t* ReserveWithAliases(uint64_t total, const AliasView* views, int viewCount, uint64_t physicalSize,
+                                const char** failureReason)
+    {
+        HMODULE kb = GetModuleHandleW(L"kernelbase.dll");
+        auto va2 = kb ? reinterpret_cast<VirtualAlloc2Fn>(reinterpret_cast<void*>(GetProcAddress(kb, "VirtualAlloc2"))) : nullptr;
+        auto mv3 = kb ? reinterpret_cast<MapViewOfFile3Fn>(reinterpret_cast<void*>(GetProcAddress(kb, "MapViewOfFile3"))) : nullptr;
+        if (!va2 || !mv3)
+        {
+            *failureReason = "VirtualAlloc2/MapViewOfFile3 unavailable (needs Windows 10 1803 or later)";
+            return nullptr;
+        }
+
+        HANDLE section = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
+                                            DWORD(physicalSize >> 32), DWORD(physicalSize), nullptr);
+        if (!section)
+        {
+            *failureReason = "CreateFileMapping failed";
+            return nullptr;
+        }
+
+        HANDLE proc = GetCurrentProcess();
+        auto* base = static_cast<uint8_t*>(va2(proc, nullptr, SIZE_T(total), MEM_RESERVE | MEM_RESERVE_PLACEHOLDER,
+                                               PAGE_NOACCESS, nullptr, 0));
+        if (!base)
+        {
+            CloseHandle(section);
+            *failureReason = "VirtualAlloc2 placeholder reservation failed";
+            return nullptr;
+        }
+
+        // Segments in address order: views and the plain gaps between them.
+        struct Seg { uint64_t start, size; bool view; };
+        std::vector<Seg> segs;
+        uint64_t cursor = 0;
+        for (int i = 0; i < viewCount; i++)
+        {
+            if (views[i].offset > cursor)
+                segs.push_back({ cursor, views[i].offset - cursor, false });
+            segs.push_back({ views[i].offset, views[i].size, true });
+            cursor = views[i].offset + views[i].size;
+        }
+        if (cursor < total)
+            segs.push_back({ cursor, total - cursor, false });
+
+        bool ok = true;
+        // Split the placeholder into one placeholder per segment.
+        for (size_t i = 0; ok && i + 1 < segs.size(); i++)
+            ok = VirtualFree(base + segs[i].start, SIZE_T(segs[i].size), MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER) != 0;
+        if (!ok)
+            *failureReason = "splitting the placeholder failed (alignment?)";
+        // Replace each placeholder: views map the section, gaps become normal reservations.
+        for (size_t i = 0; ok && i < segs.size(); i++)
+        {
+            void* r = segs[i].view
+                ? mv3(section, proc, base + segs[i].start, 0, SIZE_T(segs[i].size), MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, nullptr, 0)
+                : va2(proc, base + segs[i].start, SIZE_T(segs[i].size), MEM_RESERVE | MEM_REPLACE_PLACEHOLDER, PAGE_NOACCESS, nullptr, 0);
+            if (!r)
+            {
+                ok = false;
+                *failureReason = segs[i].view ? "MapViewOfFile3 failed (alignment?)" : "VirtualAlloc2 replace failed";
+            }
+        }
+        CloseHandle(section); // views keep the section alive
+        if (!ok)
+        {
+            // Best effort cleanup; the caller may retry with a different layout.
+            for (auto& sg : segs)
+            {
+                if (sg.view) UnmapViewOfFile(base + sg.start);
+                VirtualFree(base + sg.start, 0, MEM_RELEASE);
+            }
+            VirtualFree(base, 0, MEM_RELEASE);
+            return nullptr;
+        }
+        return base;
+    }
+
+    void Release(uint8_t* base, uint64_t total) { VirtualFree(base, 0, MEM_RELEASE); }
     bool Commit(void* p, size_t size) { return VirtualAlloc(p, size, MEM_COMMIT, PAGE_READWRITE) != nullptr; }
     void Decommit(void* p, size_t size) { VirtualFree(p, size, MEM_DECOMMIT); }
 
@@ -102,6 +197,40 @@ namespace wet::os
         void* p = mmap(nullptr, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
         return p == MAP_FAILED ? nullptr : p;
     }
+    uint8_t* ReserveWithAliases(uint64_t total, const AliasView* views, int viewCount, uint64_t physicalSize,
+                                const char** failureReason)
+    {
+        int fd = memfd_create("wet-physical", 0);
+        if (fd < 0 || ftruncate(fd, off_t(physicalSize)) != 0)
+        {
+            *failureReason = "memfd_create/ftruncate failed";
+            return nullptr;
+        }
+        auto* base = static_cast<uint8_t*>(Reserve(size_t(total)));
+        if (!base)
+        {
+            close(fd);
+            *failureReason = "address space reservation failed";
+            return nullptr;
+        }
+        for (int i = 0; i < viewCount; i++)
+        {
+            void* r = mmap(base + views[i].offset, size_t(views[i].size), PROT_READ | PROT_WRITE,
+                           MAP_SHARED | MAP_FIXED, fd, 0);
+            if (r == MAP_FAILED)
+            {
+                close(fd);
+                munmap(base, size_t(total));
+                *failureReason = "mmap of physical view failed";
+                return nullptr;
+            }
+        }
+        close(fd);
+        return base;
+    }
+
+    void Release(uint8_t* base, uint64_t total) { munmap(base, size_t(total)); }
+
     bool Commit(void* p, size_t size) { return mprotect(p, size, PROT_READ | PROT_WRITE) == 0; }
     void Decommit(void* p, size_t size)
     {

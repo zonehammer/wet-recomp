@@ -11,6 +11,7 @@ namespace wet
 
     static std::mutex s_threadLock;
     static uint32_t s_nextThreadId = 0x10;
+    static std::vector<std::weak_ptr<GuestThread>> s_threads; // s_threadLock
 
     // XEX TLS directory
     static uint32_t s_tlsSlotCount = 64, s_tlsRawAddr = 0, s_tlsDataSize = 0, s_tlsRawSize = 0;
@@ -120,6 +121,11 @@ namespace wet
 
         WaitWhileSuspended(t);
         PPCContext& ctx = *t.ctx;
+        {
+            std::lock_guard lock(t.statusLock);
+            if (t.name.empty())
+                t.name = "thread@" + std::to_string(t.id);
+        }
         if (t.xapiStartup)
         {
             ctx.r3.u64 = t.startAddress;
@@ -144,6 +150,10 @@ namespace wet
         SetupGuestThreadMemory(*t, stackSize);
         InitContext(*t);
         RegisterGuestObject(t->kthread, t);
+        {
+            std::lock_guard lock(s_threadLock);
+            s_threads.push_back(t);
+        }
         return t;
     }
 
@@ -185,6 +195,93 @@ namespace wet
             return nullptr;
         }
         return t;
+    }
+
+    WaitScope::WaitScope(std::string what)
+    {
+        if (GuestThread* t = CurrentThread())
+        {
+            std::lock_guard lock(t->statusLock);
+            t->waitingOn = std::move(what);
+            t->waitLr = t->ctx ? uint32_t(t->ctx->lr) : 0;
+            t->waitSinceNs = os::MonotonicNs();
+        }
+    }
+
+    WaitScope::~WaitScope()
+    {
+        if (GuestThread* t = CurrentThread())
+        {
+            std::lock_guard lock(t->statusLock);
+            t->waitingOn.clear();
+        }
+    }
+
+    void SetThreadName(uint32_t threadId, const std::string& name)
+    {
+        std::shared_ptr<GuestThread> target;
+        if (threadId == 0xFFFFFFFF)
+            target = t_current;
+        else
+        {
+            std::lock_guard lock(s_threadLock);
+            for (auto& w : s_threads)
+                if (auto t = w.lock(); t && t->id == threadId)
+                    target = t;
+        }
+        if (!target)
+            return;
+        std::lock_guard lock(target->statusLock);
+        target->name = name;
+    }
+
+
+
+    static void StallMonitorMain(void* arg)
+    {
+        uint32_t interval = uint32_t(reinterpret_cast<uintptr_t>(arg));
+        uint64_t lastFrames = PresentedFrameCount();
+        int reports = 0;
+        for (;;)
+        {
+            os::SleepNs(uint64_t(interval) * 1000000000ull);
+            uint64_t frames = PresentedFrameCount();
+            if (frames != lastFrames)
+            {
+                lastFrames = frames;
+                continue;
+            }
+            if (reports++ >= 3)
+                continue;
+            Log("STALL: no frame presented in the last %u s (%llu so far). Thread states:", interval,
+                (unsigned long long)frames);
+            std::vector<std::shared_ptr<GuestThread>> threads;
+            {
+                std::lock_guard lock(s_threadLock);
+                for (auto& w : s_threads)
+                    if (auto t = w.lock())
+                        threads.push_back(t);
+            }
+            uint64_t now = os::MonotonicNs();
+            for (auto& t : threads)
+            {
+                std::lock_guard lock(t->statusLock);
+                std::string name = t->name.empty() ? "?" : t->name;
+                if (t->exited)
+                    Log("  %3u %-30s exited", t->id, name.c_str());
+                else if (!t->waitingOn.empty())
+                    Log("  %3u %-30s waiting %5.1fs on %s (lr=%08X)", t->id, name.c_str(),
+                        double(now - t->waitSinceNs) / 1e9, t->waitingOn.c_str(), t->waitLr);
+                else
+                    Log("  %3u %-30s running (lr=%08X, last import %s)", t->id, name.c_str(),
+                        t->ctx ? uint32_t(t->ctx->lr) : 0, t->currentImport ? t->currentImport : "-");
+            }
+        }
+    }
+
+    void StartStallMonitor(uint32_t intervalSeconds)
+    {
+        os::StartThread(StallMonitorMain, reinterpret_cast<void*>(uintptr_t(intervalSeconds)), 1 << 20);
     }
 
     PPCContext& AdoptHostThread(uint32_t stackSize)
@@ -332,7 +429,10 @@ GUEST_IMPORT(KeDelayExecutionThread)
     if (ns <= 0)
         os::YieldThread();
     else
+    {
+        WaitScope ws("sleep " + std::to_string(ns / 1000000) + " ms");
         os::SleepNs(uint64_t(ns));
+    }
     Ret(ctx, STATUS_SUCCESS);
 }
 

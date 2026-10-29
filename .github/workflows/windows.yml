@@ -69,6 +69,11 @@ jobs:
           & build\runtime\WetRecomp.exe --game no-such-folder --log smoke.log
           if ($LASTEXITCODE -ne 1) { throw "unexpected exit code $LASTEXITCODE" }
           Get-Content smoke.log
+          # Physical memory must be mirrored across the 0xA/0xC/0xE views.
+          & build\runtime\WetRecomp.exe --selftest
+          $selftest = $LASTEXITCODE
+          Get-Content selftest.log | ForEach-Object { Write-Output "::notice::$_" }
+          if ($selftest -ne 0) { throw "memory self-test failed" }
           & build\thirdparty\XenonRecomp\XenonRecomp\XenonRecomp.exe
           if ($LASTEXITCODE -ne 0) { throw "XenonRecomp.exe failed to start" }
 

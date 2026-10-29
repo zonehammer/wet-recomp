@@ -136,20 +136,61 @@ namespace wet
 
     bool Memory::Init()
     {
-        // A little slack past 4 GB so 8/16-byte accesses at the very top can't fault.
-        base = static_cast<uint8_t*>(os::Reserve(kGuestSize + 0x10000));
+        // Preferred: the console's exact layout. The 0xE0000000 view starts one page
+        // early (0xDFFFF000) so that 0xE0000000 shows physical 0x1000; the 0xC0000000
+        // view stops one page short to make room.
+        const os::AliasView exact[] = { { 0xA0000000, 0x20000000 }, { 0xC0000000, 0x1FFFF000 }, { 0xDFFFF000, 0x20000000 } };
+        // Fallback for 64 KB-granular mapping: all views start on their window.
+        const os::AliasView aligned[] = { { 0xA0000000, 0x20000000 }, { 0xC0000000, 0x20000000 }, { 0xE0000000, 0x20000000 } };
+
+        const uint64_t total = kGuestSize + 0x10000; // slack so wide accesses at the top can't fault
+        const char* why = "";
+        base = os::ReserveWithAliases(total, exact, 3, 0x20000000, &why);
+        eViewOffset = 0x1000;
         if (!base)
         {
-            LogFatal("Could not reserve 4 GB of address space for the guest");
+            Log("Physical memory: exact console layout unavailable (%s); using 64 KB-aligned views", why);
+            base = os::ReserveWithAliases(total, aligned, 3, 0x20000000, &why);
+            eViewOffset = 0;
+        }
+        if (!base)
+        {
+            LogFatal("Could not set up guest memory: %s", why);
             return false;
         }
-        Log("Guest memory reserved at host %p", (void*)base);
+        Log("Guest memory reserved at host %p (physical views aliased, 0xE0000000 offset 0x%X)", (void*)base, eViewOffset);
         Commit(kMmioBase, kMmioSize);
         return true;
     }
 
+    bool Memory::SelfTest()
+    {
+        uint32_t phys = physical.Alloc(0x20000, 0x10000);
+        if (!phys)
+            return false;
+        uint32_t a = PhysicalToView(phys, 0xA0000000), c = PhysicalToView(phys, 0xC0000000), e = PhysicalToView(phys, 0xE0000000);
+        bool ok = true;
+        for (uint32_t i = 0; i < 0x20000; i += 0x1000)
+        {
+            *Host<uint32_t>(e + i) = 0x5EED0000u + i;
+            ok &= *Host<uint32_t>(a + i) == 0x5EED0000u + i && *Host<uint32_t>(c + i) == 0x5EED0000u + i;
+            *Host<uint32_t>(a + i) = 0xA11A5000u + i;
+            ok &= *Host<uint32_t>(e + i) == 0xA11A5000u + i;
+        }
+        ok &= ViewToPhysical(e) == phys && ViewToPhysical(a) == phys && ViewToPhysical(c) == phys;
+        // Ordinary (non-view) memory still commits normally.
+        uint32_t v = virt4k.Alloc(0x3000);
+        if (v) { *Host<uint32_t>(v + 0x2000) = 0x1234; ok &= *Host<uint32_t>(v + 0x2000) == 0x1234; virt4k.Free(v); }
+        else ok = false;
+        physical.Free(phys);
+        Log("Memory self-test: %s (views A=0x%08X C=0x%08X E=0x%08X for physical 0x%08X)", ok ? "PASS" : "FAIL", a, c, e, phys);
+        return ok;
+    }
+
     void Memory::Commit(uint32_t addr, uint32_t size)
     {
+        if (addr >= 0xA0000000)
+            return; // physical views are always backed
         uint32_t first = addr & ~(kHostPage - 1);
         uint64_t last = AlignUp(uint64_t(addr) + size, kHostPage);
         if (!os::Commit(base + first, size_t(last - first)))
@@ -162,6 +203,8 @@ namespace wet
 
     void Memory::Decommit(uint32_t addr, uint32_t size)
     {
+        if (addr >= 0xA0000000)
+            return;
         uint32_t first = uint32_t(AlignUp(addr, kHostPage));
         uint64_t last = (uint64_t(addr) + size) & ~uint64_t(kHostPage - 1);
         if (last > first)
@@ -195,12 +238,12 @@ namespace wet
     // The 0xE0000000 view is offset by one page on the console.
     uint32_t PhysicalToView(uint32_t phys, uint32_t viewBase)
     {
-        return viewBase + phys - (viewBase == 0xE0000000 ? 0x1000 : 0);
+        return viewBase + phys - (viewBase == 0xE0000000 ? g_mem.eViewOffset : 0);
     }
 
     uint32_t ViewToPhysical(uint32_t guest)
     {
-        return (guest & 0x1FFFFFFF) + (guest >= 0xE0000000 ? 0x1000 : 0);
+        return (guest & 0x1FFFFFFF) + (guest >= 0xE0000000 ? g_mem.eViewOffset : 0);
     }
 
     bool IsPhysicalView(uint32_t guest) { return guest >= 0xA0000000; }

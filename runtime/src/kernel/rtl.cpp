@@ -165,8 +165,11 @@ GUEST_IMPORT(RtlRaiseException)
     {
         // MSVC "SetThreadName": THREADNAME_INFO in ExceptionInformation[] at +0x14:
         // { dwType = 0x1000, szName, dwThreadID, dwFlags }
-        uint32_t namePtr = Ld32(rec + 0x18);
-        Log("Thread %u named \"%s\"", CurrentThread() ? CurrentThread()->id : 0, ReadCString(namePtr, 64).c_str());
+        uint32_t namePtr = Ld32(rec + 0x18), threadId = Ld32(rec + 0x1C);
+        std::string name = ReadCString(namePtr, 64);
+        SetThreadName(threadId, name);
+        Log("Thread %u named \"%s\"", threadId == 0xFFFFFFFF ? (CurrentThread() ? CurrentThread()->id : 0) : threadId,
+            name.c_str());
         return;
     }
     LogFatal("RtlRaiseException(code 0x%08X) - structured exceptions are not supported yet", code);

@@ -5,6 +5,7 @@
 #include "threads.h"
 
 #include <atomic>
+#include <cstdio>
 #include <unordered_map>
 
 using namespace wet;
@@ -245,6 +246,7 @@ GUEST_IMPORT(NtRemoveIoCompletion)
     if (!port)
         return Ret(ctx, STATUS_INVALID_HANDLE);
     auto deadline = DeadlineFromTimeout(Arg(ctx, 4));
+    WaitScope ws("I/O completion port");
     std::unique_lock lock(DispatchLock());
     while (port->queue.empty())
     {
@@ -361,7 +363,14 @@ GUEST_IMPORT(RtlInitializeCriticalSectionAndSpinCount)
 GUEST_IMPORT(RtlEnterCriticalSection)
 {
     uint32_t cs = Arg(ctx, 0);
-    CsFor(cs).lock();
+    auto& m = CsFor(cs);
+    if (!m.try_lock())
+    {
+        char what[64];
+        std::snprintf(what, sizeof(what), "critical section %08X (owner kthread %08X)", cs, Ld32(cs + 0x18));
+        WaitScope ws(what);
+        m.lock();
+    }
     CsAcquired(cs);
 }
 
