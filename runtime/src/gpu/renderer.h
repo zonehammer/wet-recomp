@@ -46,4 +46,5 @@ namespace wet::renderer_host
     void WatchPhysical(uint32_t physStart, uint32_t length);
     // Routes write-watch hits to `callback` (the renderer's invalidation).
     void SetPhysicalWriteCallback(void (*callback)(uint32_t physStart, uint32_t length));
+    void UnwatchPhysical(uint32_t physStart, uint32_t length);
 }

@@ -103,6 +103,8 @@ namespace wet
     // write to it calls the callback (physical start, length) and unwatches it.
     using PhysicalWriteCallback = void (*)(uint32_t physStart, uint32_t length);
     void SetPhysicalWriteCallback(PhysicalWriteCallback callback);
+    // Stops watching (and unprotects) pages the renderer has already invalidated.
+    void UnwatchPhysical(uint32_t physStart, uint32_t length);
     void WatchPhysical(uint32_t physStart, uint32_t length);
     // Call before the OS writes into guest memory on our behalf (file reads): the OS
     // cannot take a write-watch fault, so watched pages in the range are unwatched

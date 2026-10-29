@@ -10,6 +10,7 @@
 // first CPU write invalidates the GPU copy (Xenia's scheme, see xe::Memory).
 #include "gpu/renderer.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cctype>
 #include <condition_variable>
@@ -69,9 +70,29 @@ namespace
 
     void OnPhysicalWrite(uint32_t physStart, uint32_t length)
     {
-        std::lock_guard lock(s_watchLock);
-        for (auto& w : s_watches)
-            w->callback(w->context, physStart, length, false);
+        // Like Xenia's PhysicalHeap::TriggerCallbacks: the callbacks may invalidate
+        // a wider range than the written page (up to 256 KB around it); unwatching
+        // what all of them invalidated saves a fault per neighbouring page.
+        uint64_t first = 0, last = UINT32_MAX;
+        {
+            std::lock_guard lock(s_watchLock);
+            if (s_watches.empty())
+                return;
+            for (auto& w : s_watches)
+            {
+                auto r = w->callback(w->context, physStart, length, false);
+                first = std::max<uint64_t>(first, r.first);
+                last = std::min<uint64_t>(last, uint64_t(r.first) + std::max<uint32_t>(r.second, 1) - 1);
+            }
+        }
+        uint64_t reqLast = uint64_t(physStart) + length - 1;
+        first = std::min<uint64_t>(first, physStart);
+        last = std::max<uint64_t>(last, reqLast);
+        constexpr uint64_t kMaxExcess = 4 * 1024 * 1024;
+        first = std::max<uint64_t>(first, physStart & ~(kMaxExcess - 1));
+        last = std::min<uint64_t>(last, reqLast | (kMaxExcess - 1));
+        if (first < physStart || last > reqLast)
+            wet::renderer_host::UnwatchPhysical(uint32_t(first), uint32_t(last - first + 1));
     }
 }
 

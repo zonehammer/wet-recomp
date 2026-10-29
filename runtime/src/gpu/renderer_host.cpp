@@ -52,4 +52,5 @@ namespace wet::renderer_host
     uint8_t* PhysicalHostView() { return wet::PhysicalHostView(); }
     void WatchPhysical(uint32_t physStart, uint32_t length) { wet::WatchPhysical(physStart, length); }
     void SetPhysicalWriteCallback(void (*callback)(uint32_t, uint32_t)) { wet::SetPhysicalWriteCallback(callback); }
+    void UnwatchPhysical(uint32_t start, uint32_t length) { wet::UnwatchPhysical(start, length); }
 }

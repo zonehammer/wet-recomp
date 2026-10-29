@@ -435,6 +435,27 @@ namespace wet
                 s_watchCallback(p * kHostPage, n * kHostPage);
     }
 
+    void UnwatchPhysical(uint32_t physStart, uint32_t length)
+    {
+        if (!length || s_watched.empty())
+            return;
+        uint32_t first = (physStart & 0x1FFFFFFF) / kHostPage;
+        uint64_t end = (uint64_t(physStart & 0x1FFFFFFF) + length + kHostPage - 1) / kHostPage;
+        if (end > kPhysPages)
+            end = kPhysPages;
+        std::lock_guard lock(s_watchLock);
+        for (uint32_t p = first; p < end;)
+        {
+            if (!s_watched[p]) { p++; continue; }
+            uint32_t run = p;
+            while (run < end && s_watched[run])
+                s_watched[run++] = 0;
+            SetRangeProtection(p, run - p, false);
+            s_protectCalls.fetch_add(1, std::memory_order_relaxed);
+            p = run;
+        }
+    }
+
     void SetPhysicalWriteCallback(PhysicalWriteCallback callback)
     {
         std::lock_guard lock(s_watchLock);
