@@ -54,11 +54,11 @@ jobs:
       - name: Build
         shell: pwsh
         run: |
-          cmake --build build --target XenonAnalyse XenonRecomp WetRecomp 2>&1 | Tee-Object -FilePath build.log
+          cmake --build build --target XenonAnalyse XenonRecomp WetRecomp -- -k 0 2>&1 | Tee-Object -FilePath build.log
           if ($LASTEXITCODE -ne 0) {
             # Surface compiler/linker errors as annotations (readable without downloading logs).
             Select-String -Path build.log -Pattern 'error|FAILED|undefined' |
-              Select-Object -First 40 |
+              Select-Object -First 60 |
               ForEach-Object { Write-Output ("::error::" + $_.Line.Trim()) }
             exit 1
           }

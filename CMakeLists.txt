@@ -44,24 +44,26 @@ if(NOT EXISTS ${XR_DIR}/CMakeLists.txt OR NOT EXISTS ${XR_DIR}/thirdparty/simde/
 endif()
 
 find_package(Git REQUIRED)
-set(WET_PATCH ${WET_ROOT}/patches/xenonrecomp-wet.patch)
-execute_process(
-    COMMAND ${GIT_EXECUTABLE} apply --reverse --check ${WET_PATCH}
-    WORKING_DIRECTORY ${XR_DIR} RESULT_VARIABLE WET_PATCH_PRESENT OUTPUT_QUIET ERROR_QUIET)
-if(NOT WET_PATCH_PRESENT EQUAL 0)
-    # Not applied, or an older version of the patch set is: start from a clean submodule.
+# Applies patches/<patch> to a submodule once (re-applies from a clean checkout
+# when the patch set changes).
+function(wet_apply_patch dir patch)
+    set(file ${WET_ROOT}/patches/${patch})
     execute_process(
-        COMMAND ${GIT_EXECUTABLE} checkout -- .
-        WORKING_DIRECTORY ${XR_DIR} OUTPUT_QUIET ERROR_QUIET)
-    execute_process(
-        COMMAND ${GIT_EXECUTABLE} apply --whitespace=nowarn ${WET_PATCH}
-        WORKING_DIRECTORY ${XR_DIR} RESULT_VARIABLE WET_PATCH_RESULT)
-    if(NOT WET_PATCH_RESULT EQUAL 0)
-        message(FATAL_ERROR "Could not apply patches/xenonrecomp-wet.patch to thirdparty/XenonRecomp.\n"
-            "Reset the submodule (git -C thirdparty/XenonRecomp checkout .) and configure again.")
+        COMMAND ${GIT_EXECUTABLE} apply --reverse --check ${file}
+        WORKING_DIRECTORY ${dir} RESULT_VARIABLE present OUTPUT_QUIET ERROR_QUIET)
+    if(NOT present EQUAL 0)
+        execute_process(COMMAND ${GIT_EXECUTABLE} checkout -- . WORKING_DIRECTORY ${dir} OUTPUT_QUIET ERROR_QUIET)
+        execute_process(
+            COMMAND ${GIT_EXECUTABLE} apply --whitespace=nowarn ${file}
+            WORKING_DIRECTORY ${dir} RESULT_VARIABLE result)
+        if(NOT result EQUAL 0)
+            message(FATAL_ERROR "Could not apply patches/${patch} to ${dir}.\n"
+                "Reset the submodule (git -C ${dir} checkout .) and configure again.")
+        endif()
+        message(STATUS "Applied patches/${patch}")
     endif()
-    message(STATUS "Applied WET patches to XenonRecomp")
-endif()
+endfunction()
+wet_apply_patch(${XR_DIR} xenonrecomp-wet.patch)
 
 add_subdirectory(${XR_DIR} thirdparty/XenonRecomp EXCLUDE_FROM_ALL)
 

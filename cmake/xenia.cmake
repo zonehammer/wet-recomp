@@ -11,6 +11,9 @@
 set(XE_ROOT ${WET_ROOT}/thirdparty/xenia)
 set(XE_SRC ${XE_ROOT}/src/xenia)
 set(XE_TP ${XE_ROOT}/third_party)
+# Small portability fixes (clang-cl, llvm-mingw); see the patch for details.
+wet_apply_patch(${XE_ROOT} xenia-wet.patch)
+set(XE_COMPAT_HEADER ${WET_ROOT}/runtime/xenia_shim/compat/xe_compat.h)
 
 foreach(dep fmt glslang Vulkan-Headers VulkanMemoryAllocator xxhash snappy utfcpp xbyak disruptorplus cpptoml date cxxopts)
     if(NOT EXISTS ${XE_TP}/${dep}/.git)
@@ -51,9 +54,10 @@ function(xe_target name)
                                ${XE_TP}/Vulkan-Headers/include ${XE_TP}/fmt/include)
     target_compile_definitions(${name} PUBLIC UNICODE _UNICODE NDEBUG _LIB XE_WET_RUNTIME=1)
     if(MSVC)
-        target_compile_options(${name} PRIVATE /utf-8 /W0 -Wno-everything)
+        target_compile_options(${name} PRIVATE /utf-8 /W0 -Wno-everything /arch:AVX /FI${XE_COMPAT_HEADER})
     else()
-        target_compile_options(${name} PRIVATE -w -mavx -fno-strict-aliasing)
+        target_compile_options(${name} PRIVATE -w -mavx -fno-strict-aliasing
+                               "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include ${XE_COMPAT_HEADER}>")
     endif()
     if(MINGW)
         target_compile_definitions(${name} PUBLIC WINVER=0x0A00 _WIN32_WINNT=0x0A00 NOMINMAX)

@@ -1,0 +1,35 @@
+diff --git a/src/xenia/base/mapped_memory_win.cc b/src/xenia/base/mapped_memory_win.cc
+index f0af5ee7b..023f6fea7 100644
+--- a/src/xenia/base/mapped_memory_win.cc
++++ b/src/xenia/base/mapped_memory_win.cc
+@@ -28,7 +28,7 @@ namespace xe {
+ class Win32MappedMemory : public MappedMemory {
+  public:
+   // CreateFile returns INVALID_HANDLE_VALUE in case of failure.
+-  static constexpr HANDLE kFileHandleInvalid = INVALID_HANDLE_VALUE;
++  static inline const HANDLE kFileHandleInvalid = INVALID_HANDLE_VALUE;
+   // CreateFileMapping returns nullptr in case of failure.
+   static constexpr HANDLE kMappingHandleInvalid = nullptr;
+ 
+diff --git a/src/xenia/base/memory.h b/src/xenia/base/memory.h
+index 3ed4dc3ab..8cb95f239 100644
+--- a/src/xenia/base/memory.h
++++ b/src/xenia/base/memory.h
+@@ -118,7 +118,7 @@ bool QueryProtect(void* base_address, size_t& length, PageAccess& access_out);
+ // The memory must be freed with AlignedFree.
+ template <typename T>
+ inline T* AlignedAlloc(size_t alignment) {
+-#if XE_COMPILER_MSVC
++#if XE_PLATFORM_WIN32
+   return reinterpret_cast<T*>(_aligned_malloc(sizeof(T), alignment));
+ #else
+   void* ptr = nullptr;
+@@ -132,7 +132,7 @@ inline T* AlignedAlloc(size_t alignment) {
+ // Frees memory previously allocated with AlignedAlloc.
+ template <typename T>
+ void AlignedFree(T* ptr) {
+-#if XE_COMPILER_MSVC
++#if XE_PLATFORM_WIN32
+   _aligned_free(ptr);
+ #else
+   free(ptr);
