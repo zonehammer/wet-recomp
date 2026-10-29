@@ -224,35 +224,55 @@ namespace
     GameWindow* s_window = nullptr;
 #endif
 
-    // Frame dumps for headless testing: WET_DUMP_FRAMES=<folder> writes the guest
-    // output as PPM images, one every WET_DUMP_INTERVAL ms (default 1000).
+    // Snapshots of the guest output (what the GPU produced, before the window):
+    // by default one every 5 s for the first 2 minutes into "frames/", each logged
+    // with its average brightness, to tell rendering problems from presentation
+    // problems. WET_DUMP_FRAMES=<folder> / WET_DUMP_INTERVAL=<ms> dump continuously.
     void DumpThread(void*)
     {
-        const char* dir = std::getenv("WET_DUMP_FRAMES");
-        int interval = std::getenv("WET_DUMP_INTERVAL") ? std::atoi(std::getenv("WET_DUMP_INTERVAL")) : 1000;
-        std::filesystem::create_directories(dir);
-        for (int n = 0;; n++)
+        const char* env = std::getenv("WET_DUMP_FRAMES");
+        std::filesystem::path dir = env ? env : "frames";
+        int interval = std::getenv("WET_DUMP_INTERVAL") ? std::atoi(std::getenv("WET_DUMP_INTERVAL")) : (env ? 1000 : 5000);
+        int limit = env ? 1 << 30 : 24;
+        std::error_code ec;
+        std::filesystem::create_directories(dir, ec);
+        for (int n = 0; n < limit; n++)
         {
             std::this_thread::sleep_for(std::chrono::milliseconds(interval));
             xe::ui::Presenter* presenter = s_graphics ? s_graphics->presenter() : nullptr;
             xe::ui::RawImage image;
             if (!presenter || !presenter->CaptureGuestOutput(image) || !image.width)
+            {
+                char text[96];
+                std::snprintf(text, sizeof(text), "Renderer: snapshot %d: no guest output yet", n);
+                wet::renderer_host::Log(text);
                 continue;
+            }
             char name[64];
             std::snprintf(name, sizeof(name), "frame_%05d.ppm", n);
-            FILE* f = std::fopen((std::filesystem::path(dir) / name).string().c_str(), "wb");
-            if (!f)
-                continue;
-            std::fprintf(f, "P6\n%u %u\n255\n", image.width, image.height);
+            FILE* f = std::fopen((dir / name).string().c_str(), "wb");
+            uint64_t sum = 0;
             std::vector<uint8_t> row(size_t(image.width) * 3);
+            if (f)
+                std::fprintf(f, "P6\n%u %u\n255\n", image.width, image.height);
             for (uint32_t y = 0; y < image.height; y++)
             {
                 const uint8_t* src = image.data.data() + y * image.stride;
                 for (uint32_t x = 0; x < image.width; x++)
+                {
                     std::memcpy(&row[x * 3], src + x * 4, 3);
-                std::fwrite(row.data(), 1, row.size(), f);
+                    sum += src[x * 4] + src[x * 4 + 1] + src[x * 4 + 2];
+                }
+                if (f)
+                    std::fwrite(row.data(), 1, row.size(), f);
             }
-            std::fclose(f);
+            if (f)
+                std::fclose(f);
+            char text[160];
+            std::snprintf(text, sizeof(text), "Renderer: snapshot %d: %ux%u guest output, average brightness %.1f/255 (%s)", n,
+                          image.width, image.height, double(sum) / (3.0 * image.width * image.height),
+                          (dir / name).string().c_str());
+            wet::renderer_host::Log(text);
         }
     }
 }
@@ -309,8 +329,7 @@ namespace wet::renderer
         char text[160];
         std::snprintf(text, sizeof(text), "Renderer: Xenia GPU emulation on Vulkan started (%s)", s_graphics->name().c_str());
         renderer_host::Log(text);
-        if (std::getenv("WET_DUMP_FRAMES"))
-            renderer_host::StartThread(DumpThread, nullptr, "Frame dump");
+        renderer_host::StartThread(DumpThread, nullptr, "Frame dump");
         return true;
     }
 

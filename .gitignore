@@ -15,3 +15,4 @@
 /.vscode/
 *.log
 __pycache__/
+/frames/

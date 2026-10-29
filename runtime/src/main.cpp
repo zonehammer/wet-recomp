@@ -52,6 +52,7 @@ int main(int argc, char** argv)
             LogInit("selftest.log");
             if (!g_mem.Init())
                 return 1;
+            os::InstallCrashHandler(g_mem.base, kGuestSize);
             return g_mem.SelfTest() ? 0 : 1;
         }
         else

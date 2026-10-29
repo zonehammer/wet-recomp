@@ -184,8 +184,36 @@ namespace wet
         uint32_t v = virt4k.Alloc(0x3000);
         if (v) { *Host<uint32_t>(v + 0x2000) = 0x1234; ok &= *Host<uint32_t>(v + 0x2000) == 0x1234; virt4k.Free(v); }
         else ok = false;
+        // The renderer's own mapping sees the same bytes.
+        uint8_t* hv = PhysicalHostView();
+        bool hostOk = hv != nullptr;
+        if (hostOk)
+        {
+            uint32_t got;
+            std::memcpy(&got, hv + phys + 0x1000, 4);
+            hostOk = got == *Host<uint32_t>(a + 0x1000);
+            uint32_t mark = 0xC0FFEE00u;
+            std::memcpy(hv + phys + 0x2000, &mark, 4);
+            hostOk &= *Host<uint32_t>(e + 0x2000) == mark;
+        }
+        // Write watches: a watched page faults once, reports itself and takes the write.
+        static uint32_t s_hit = 0;
+        SetPhysicalWriteCallback([](uint32_t start, uint32_t) { s_hit = start; });
+        WatchPhysical(phys + 0x3000, 0x1000);
+        *Host<uint32_t>(c + 0x3000) = 0x77777777u;
+        bool watchOk = s_hit == phys + 0x3000 && *Host<uint32_t>(a + 0x3000) == 0x77777777u;
+        s_hit = 0;
+        *Host<uint32_t>(e + 0x3004) = 1;    // unwatched now: no second report
+        watchOk &= s_hit == 0;
+        // OS writes (file reads) into watched pages need PrepareHostWrite.
+        WatchPhysical(phys + 0x4000, 0x2000);
+        PrepareHostWrite(a + 0x4800, 0x1000);
+        watchOk &= s_hit == phys + 0x4000 || s_hit == phys + 0x5000;
+        SetPhysicalWriteCallback(nullptr);
+        ok &= hostOk && watchOk;
         physical.Free(phys);
-        Log("Memory self-test: %s (views A=0x%08X C=0x%08X E=0x%08X for physical 0x%08X)", ok ? "PASS" : "FAIL", a, c, e, phys);
+        Log("Memory self-test: %s (views A=0x%08X C=0x%08X E=0x%08X for physical 0x%08X; renderer view %s; write watches %s)",
+            ok ? "PASS" : "FAIL", a, c, e, phys, hostOk ? "ok" : "BROKEN", watchOk ? "ok" : "BROKEN");
         return ok;
     }
 
