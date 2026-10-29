@@ -38,6 +38,17 @@ namespace wet::os
     void SleepNs(uint64_t ns);
     uint32_t CurrentHostThreadId();
 
+    // Auto-reset wake-up event that can be signalled from a fault handler.
+    struct WakeEvent;
+    WakeEvent* CreateWakeEvent();
+    void SignalWake(WakeEvent* e);
+    // Returns true if signalled, false on timeout.
+    bool WaitWake(WakeEvent* e, uint32_t timeoutUs);
+
+    // 1 ms scheduler/timer resolution (Windows' default is 15.6 ms, which makes every
+    // short sleep in the runtime and the game 15 ms long).
+    void RaiseTimerResolution();
+
     // Time
     uint64_t MonotonicNs();
     uint64_t SystemTimeFileTime();              // 100 ns units since 1601-01-01 UTC

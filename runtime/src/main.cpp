@@ -91,6 +91,7 @@ int main(int argc, char** argv)
 
     if (!StartMainThread(g_module.entryPoint, g_module.stackSize))
         return 1;
+    os::RaiseTimerResolution();
     StartStallMonitor(10);
     profiler::StartFromEnv();
 

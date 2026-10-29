@@ -112,4 +112,11 @@ namespace wet
     uint8_t* PhysicalHostView();
     // Write-watch counters since start: faults taken, protect (watch) calls.
     void WatchStats(uint64_t& faults, uint64_t& protectCalls);
+
+    // Write trap on one guest page outside physical memory (the GPU register page
+    // holding CP_RB_WPTR): while armed, the first write unprotects the page and calls
+    // `hook` (from the fault handler - it must only signal), so the GPU thread sees a
+    // ring buffer kick immediately instead of at its next poll.
+    void SetMmioWriteTrap(uint32_t guestPage, void (*hook)());
+    void ArmMmioWriteTrap(bool armed);
 }

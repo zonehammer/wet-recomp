@@ -346,9 +346,35 @@ namespace wet
 
     static std::atomic<uint64_t> s_watchFaults{0}, s_protectCalls{0};
 
+    static bool OnWriteFault(uintptr_t host);
+    static uint32_t s_mmioTrapPage = 0;
+    static void (*s_mmioTrapHook)() = nullptr;
+
+    void SetMmioWriteTrap(uint32_t guestPage, void (*hook)())
+    {
+        s_mmioTrapPage = guestPage & ~(kHostPage - 1);
+        s_mmioTrapHook = hook;
+        os::SetWriteFaultHandler(OnWriteFault);
+    }
+
+    void ArmMmioWriteTrap(bool armed)
+    {
+        if (!s_mmioTrapPage)
+            return;
+        void* p = g_mem.base + s_mmioTrapPage;
+        armed ? os::ProtectReadOnly(p, kHostPage) : os::ProtectReadWrite(p, kHostPage);
+    }
+
     static bool OnWriteFault(uintptr_t host)
     {
         uintptr_t base = uintptr_t(g_mem.base);
+        if (s_mmioTrapPage && host >= base + s_mmioTrapPage && host < base + s_mmioTrapPage + kHostPage)
+        {
+            os::ProtectReadWrite(g_mem.base + s_mmioTrapPage, kHostPage);
+            if (s_mmioTrapHook)
+                s_mmioTrapHook();
+            return true;
+        }
         if (host < base + 0xA0000000u || host >= base + 0x100000000ull)
             return false;
         uint32_t guest = uint32_t(host - base);

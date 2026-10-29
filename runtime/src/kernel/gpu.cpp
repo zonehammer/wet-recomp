@@ -601,29 +601,39 @@ namespace
             std::vector<uint32_t> seen(kMirror);
             for (uint32_t i = 0; i < kMirror; i++)
                 seen[i] = Reg(i);
-            for (uint64_t tick = 0;; tick++)
+            // A write to the register page holding CP_RB_WPTR wakes this thread at
+            // once (write trap); otherwise it looks every millisecond. Polling alone
+            // made every ring buffer kick wait for the next poll, and the game blocks
+            // on GPU fences several times a frame.
+            static os::WakeEvent* s_kick = os::CreateWakeEvent();
+            SetMmioWriteTrap(kGpuRegisterBase + kRegCpRbWptr * 4, [] { os::SignalWake(s_kick); });
+            for (;;)
             {
-                os::SleepNs(250000);
+                os::WaitWake(s_kick, 1000);
+                // Registers the title polls; written with the trap disarmed, then
+                // re-armed before reading so no title write is missed.
+                ArmMmioWriteTrap(false);
+                SetReg(0x1951, 1);
+                SetReg(0x194C, 0x000002D0);
+                SetReg(kRegCpRbRptr, renderer::ReadRegister(kRegCpRbRptr));
+                ArmMmioWriteTrap(true);
                 uint32_t wptr = Reg(kRegCpRbWptr);
                 if (wptr != seen[kRegCpRbWptr])
                 {
                     seen[kRegCpRbWptr] = wptr;
                     renderer::UpdateWritePointer(wptr);
                 }
-                if ((tick & 3) == 0)
-                    for (uint32_t i = 0; i < kMirror; i++)
+                for (uint32_t i = 0; i < kMirror; i++)
+                {
+                    if (i == kRegCpRbWptr || i == kRegCpRbRptr || i == 0x1951 || i == 0x194C)
+                        continue;
+                    uint32_t v = Reg(i);
+                    if (v != seen[i])
                     {
-                        uint32_t v = Reg(i);
-                        if (v != seen[i] && i != kRegCpRbWptr)
-                        {
-                            seen[i] = v;
-                            renderer::WriteRegister(i, v);
-                        }
+                        seen[i] = v;
+                        renderer::WriteRegister(i, v);
                     }
-                // Display registers the title polls.
-                SetReg(0x1951, 1);
-                SetReg(0x194C, 0x000002D0);
-                SetReg(kRegCpRbRptr, renderer::ReadRegister(kRegCpRbRptr));
+                }
             }
         }
 

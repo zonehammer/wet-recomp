@@ -14,6 +14,8 @@
 #include <signal.h>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/eventfd.h>
+#include <poll.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 #endif
@@ -187,6 +189,23 @@ namespace wet::os
     void ExitCurrentThread() { ExitThread(0); }
     uint32_t CurrentHostThreadId() { return GetCurrentThreadId(); }
 
+    struct WakeEvent { HANDLE h; };
+    WakeEvent* CreateWakeEvent() { return new WakeEvent{ CreateEventW(nullptr, FALSE, FALSE, nullptr) }; }
+    void SignalWake(WakeEvent* e) { SetEvent(e->h); }
+    bool WaitWake(WakeEvent* e, uint32_t timeoutUs)
+    {
+        DWORD ms = timeoutUs / 1000;
+        if (!ms && timeoutUs) ms = 1;
+        return WaitForSingleObject(e->h, ms) == WAIT_OBJECT_0;
+    }
+    void RaiseTimerResolution()
+    {
+        // winmm's timeBeginPeriod, loaded dynamically so nothing else needs linking.
+        if (HMODULE m = LoadLibraryW(L"winmm.dll"))
+            if (auto fn = reinterpret_cast<UINT(WINAPI*)(UINT)>((void*)GetProcAddress(m, "timeBeginPeriod")))
+                fn(1);
+    }
+
     // Called only for exceptions nothing else handled, i.e. real crashes.
     static LONG WINAPI UnhandledFilter(PEXCEPTION_POINTERS info)
     {
@@ -311,6 +330,25 @@ namespace wet::os
 
     void ExitCurrentThread() { pthread_exit(nullptr); }
     uint32_t CurrentHostThreadId() { return uint32_t(syscall(SYS_gettid)); }
+
+    struct WakeEvent { int fd; };
+    WakeEvent* CreateWakeEvent() { return new WakeEvent{ eventfd(0, EFD_NONBLOCK) }; }
+    void SignalWake(WakeEvent* e)
+    {
+        uint64_t one = 1;
+        (void)!write(e->fd, &one, sizeof(one));   // async-signal-safe
+    }
+    bool WaitWake(WakeEvent* e, uint32_t timeoutUs)
+    {
+        pollfd p{ e->fd, POLLIN, 0 };
+        timespec ts{ time_t(timeoutUs / 1000000), long(timeoutUs % 1000000) * 1000 };
+        if (ppoll(&p, 1, &ts, nullptr) <= 0)
+            return false;
+        uint64_t v;
+        (void)!read(e->fd, &v, sizeof(v));
+        return true;
+    }
+    void RaiseTimerResolution() {}
 
     static void SignalHandler(int sig, siginfo_t* info, void*)
     {
