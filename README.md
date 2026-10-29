@@ -14,7 +14,7 @@ extracts it and generates the C++ from it locally. Nothing under `game/` or
 
 ## How it works
 
-1. `tools/prepare_game.py` extracts the disc image into `game/extracted/`.
+1. `tools/prepare_game.py` extracts the disc image into `game/extracted/` (`tools/build.py` runs every step for you).
 2. CMake builds a patched XenonRecomp from `thirdparty/` and the `recompile` target
    translates `default.xex` (PowerPC) into ~440 C++ files in `generated/ppc/`, using
    `config/WET_config.toml` and `config/WET_switch_tables.toml`.
@@ -24,30 +24,33 @@ extracts it and generates the C++ from it locally. Nothing under `game/` or
 
 ## Building (Windows)
 
-Requirements:
+You need your WET disc image (title ID `425307DB`) and a Clang toolchain. Visual Studio is
+**not** required.
 
-- **Visual Studio 2022** with the *Desktop development with C++* workload **and** the
-  *C++ Clang tools for Windows* component (the generated code needs Clang).
-- **CMake 3.20+**, **Ninja**, **Python 3.10+** and **Git** on your `PATH`
-  (all included with Visual Studio's "C++ CMake tools", except Python).
-- Your WET disc image (`.iso`), title ID `425307DB`.
+**1. Install the tools** (once):
 
-From an **x64 Native Tools Command Prompt for VS 2022**:
+- [Python 3](https://www.python.org/downloads/) (tick "Add python.exe to PATH") and
+  [Git for Windows](https://git-scm.com).
+- CMake and Ninja: `pip install cmake ninja`
+- Clang: download the latest **llvm-mingw** release
+  (`llvm-mingw-<date>-ucrt-x86_64.zip` from
+  [github.com/mstorsjo/llvm-mingw/releases](https://github.com/mstorsjo/llvm-mingw/releases)),
+  unzip it somewhere like `C:\llvm-mingw`, and add its `bin` folder to your `PATH`.
+
+**2. Build** (in a normal Command Prompt or PowerShell):
 
 ```bat
 git clone --recursive https://github.com/zonehammer/Claudtest1.git wet-recomp
 cd wet-recomp
-
-python tools\prepare_game.py "D:\path\to\WET (USA, Europe) (En,Fr,De,Es,It).iso"
-
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
-cmake --build build --target recompile
-cmake build
-cmake --build build
+python tools\build.py --iso "D:\path\to\WET (USA, Europe) (En,Fr,De,Es,It).iso"
 ```
 
-The last step compiles ~250 MB of generated C++; expect 5–15 minutes on a modern CPU.
-Then run it from the repository folder:
+That extracts the disc into `game\extracted`, recompiles `default.xex` into `generated\ppc`
+and compiles everything. The first build compiles ~250 MB of generated C++; expect
+5–15 minutes on a modern CPU. Later, just run `python tools\build.py` again; it only redoes
+what changed.
+
+**3. Run** from the repository folder:
 
 ```bat
 build\runtime\WetRecomp.exe
@@ -56,7 +59,17 @@ build\runtime\WetRecomp.exe
 It finds `game\extracted` automatically (or pass `--game <folder>`), writes save data to
 `game\hdd`, and logs to `wet.log`.
 
-Linux builds the same way with `clang`/`clang++` and is used for testing the runtime.
+*Already have Visual Studio 2022 with "C++ Clang tools for Windows"?* Run
+`python tools\build.py --toolchain clang-cl` from an x64 Native Tools prompt instead of
+installing llvm-mingw. Linux works with the system `clang`; it's used for testing the runtime.
+
+### Continuous integration
+
+Every push is built on GitHub's Windows machines with both llvm-mingw and clang-cl
+(`.github/workflows/windows.yml`). CI has no game files, so it links the runtime against
+`ci/stub_ppc`, a small stand-in that uses the same constructs as the generated code.
+Each llvm-mingw run also publishes the patched `XenonRecomp.exe`/`XenonAnalyse.exe` as a
+download on the run's page.
 
 ## What the log tells you
 
@@ -79,7 +92,8 @@ runtime/      the host program
   include/    hooks force-included into the generated code (50 MHz timebase, checked indirect calls)
   src/        memory, threads, loader, logging
   src/kernel/ host implementations of xboxkrnl/XAM imports
-tools/        disc extraction and analysis scripts
+tools/        build.py (one-command build), disc extraction and analysis scripts
+ci/           stand-in for the generated code, used by the Windows CI build
 thirdparty/   XenonRecomp (git submodule)
 game/         YOUR game files (ignored by git)
 generated/    generated C++ (ignored by git)
