@@ -117,6 +117,12 @@ namespace wet
     // Adaptive watching of pages rewritten every frame (see memory.cpp): call at
     // every ring buffer kick, before the GPU sees the new commands.
     void FlushHotPages();
+    // Write-watch event trace for diagnosing races (F8 burst capture): faults,
+    // watches (= GPU uploads), unwatches, host writes, hot-page invalidations,
+    // guest swaps and fence waits, with microsecond times.
+    void StartWatchTrace();
+    void StopWatchTrace(const char* path);
+    void TraceEvent(char type, uint32_t a, uint32_t b = 0);
     void SetAdaptiveWatch(bool enabled);
     void HotWatchStats(uint32_t& hotPages, uint64_t& checks, uint64_t& invalidations, uint64_t& cooled);
 

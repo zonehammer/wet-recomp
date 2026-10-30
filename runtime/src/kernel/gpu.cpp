@@ -815,6 +815,7 @@ GUEST_IMPORT(VdSwap)
             St32(o, 0x80000000);    // type-2 no-op
     }
     uint64_t n = ++s_swaps;
+    TraceEvent('S', uint32_t(n));
     if (n <= 3 || (n & (n - 1)) == 0)
     {
         uint64_t faults, protects, checks, inval, cooled;

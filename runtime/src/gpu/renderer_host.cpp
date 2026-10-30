@@ -9,6 +9,10 @@
 
 namespace wet::renderer_host
 {
+    void StartWatchTrace() { wet::StartWatchTrace(); }
+    void StopWatchTrace(const char* path) { wet::StopWatchTrace(path); }
+    void TraceEvent(char type, uint32_t a, uint32_t b) { wet::TraceEvent(type, a, b); }
+
     void StartThread(void (*entry)(void*), void* arg, const char*)
     {
         if (!os::StartThread(entry, arg, 16 << 20))

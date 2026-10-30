@@ -10,6 +10,7 @@
 // a 2 ms limit so nothing can hang on a signal we don't send.
 #include "gpu/renderer.h"
 #include "log.h"
+#include "memory.h"
 #include "options.h"
 #include "ppc_context.h"
 
@@ -61,6 +62,7 @@ namespace
         }
         if (waited)
         {
+            wet::TraceEvent('G', fence);
             uint64_t n = s_waits.fetch_add(1, std::memory_order_relaxed) + 1;
             if ((n & (n - 1)) == 0 && n >= 1024)
                 wet::Log("GPU fence waits: %llu, %llu reached the 2 ms limit", (unsigned long long)n,

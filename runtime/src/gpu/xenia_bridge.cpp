@@ -668,6 +668,7 @@ namespace
         static int run = 0;
         run++;
         struct Shot { uint32_t swap; xe::ui::RawImage image; };
+        wet::renderer_host::StartWatchTrace();
         std::vector<Shot> shots;
         uint32_t last = 0xFFFFFFFF;
         auto start = std::chrono::steady_clock::now();
@@ -682,12 +683,18 @@ namespace
                 continue;
             }
             last = swap;
+            wet::renderer_host::TraceEvent('C', swap, uint32_t(shots.size()));
             Shot shot{ swap, {} };
             if (presenter->CaptureGuestOutput(shot.image) && shot.image.width)
                 shots.push_back(std::move(shot));
         }
         std::error_code ec;
         std::filesystem::create_directories("frames", ec);
+        {
+            char traceName[64];
+            std::snprintf(traceName, sizeof(traceName), "frames/burst_%d_trace.txt", run);
+            wet::renderer_host::StopWatchTrace(traceName);
+        }
         for (size_t i = 0; i < shots.size(); i++)
         {
             auto& img = shots[i].image;

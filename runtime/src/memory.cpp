@@ -338,6 +338,50 @@ namespace wet
     static std::atomic<uint32_t> s_hotPages{ 0 };
     static uint64_t HashPage(uint32_t page);
 
+    // ---- Trace (see memory.h) ----
+    struct TraceRec { uint64_t ns; char type; uint32_t a, b, thread; };
+    static std::atomic<bool> s_tracing{ false };
+    static std::mutex s_traceLock;
+    static std::vector<TraceRec> s_trace;
+    static uint64_t s_traceStart = 0;
+
+    void TraceEvent(char type, uint32_t a, uint32_t b)
+    {
+        if (!s_tracing.load(std::memory_order_relaxed))
+            return;
+        GuestThread* t = CurrentThread();
+        std::lock_guard lock(s_traceLock);
+        if (s_trace.size() < 4000000)
+            s_trace.push_back({ os::MonotonicNs(), type, a, b, t ? t->id : 0 });
+    }
+
+    void StartWatchTrace()
+    {
+        std::lock_guard lock(s_traceLock);
+        s_trace.clear();
+        s_trace.reserve(1 << 20);
+        s_traceStart = os::MonotonicNs();
+        s_tracing = true;
+    }
+
+    void StopWatchTrace(const char* path)
+    {
+        s_tracing = false;
+        std::vector<TraceRec> recs;
+        {
+            std::lock_guard lock(s_traceLock);
+            recs.swap(s_trace);
+        }
+        FILE* f = std::fopen(path, "w");
+        if (!f)
+            return;
+        std::fprintf(f, "# us type a b thread  (F fault page; W watch start len (after GPU upload); U unwatch start len;\n"
+                        "# P host write start len; H hot page invalidated; S guest swap n; G fence wait done fence; C captured frame: GPU swap count, burst index)\n");
+        for (auto& r : recs)
+            std::fprintf(f, "%llu %c %08X %X %u\n", (unsigned long long)((r.ns - s_traceStart) / 1000), r.type, r.a, r.b, r.thread);
+        std::fclose(f);
+    }
+
     // Host addresses of a physical page in the three guest views (nullptr if absent).
     static void PageViews(uint32_t page, uint8_t* out[3])
     {
@@ -411,6 +455,7 @@ namespace wet
                 return true; // another thread got here first and unprotected it: retry
             SetPageProtection(page, false);
             s_watched[page] = 0;
+            TraceEvent('F', page * kHostPage);
             uint32_t frame = uint32_t(PresentedFrameCount());
             if (frame != s_lastFaultFrame[page])
             {
@@ -441,6 +486,7 @@ namespace wet
     {
         if (!length || guest < 0xA0000000u || s_watched.empty())
             return;
+        TraceEvent('P', ViewToPhysical(guest), length);
         uint64_t end = uint64_t(guest) + length;
         if (end > 0x100000000ull)
             end = 0x100000000ull;
@@ -474,6 +520,7 @@ namespace wet
     {
         if (!length || s_watched.empty())
             return;
+        TraceEvent('U', physStart, length);
         uint32_t first = (physStart & 0x1FFFFFFF) / kHostPage;
         uint64_t end = (uint64_t(physStart & 0x1FFFFFFF) + length + kHostPage - 1) / kHostPage;
         if (end > kPhysPages)
@@ -513,6 +560,7 @@ namespace wet
     {
         if (!length)
             return;
+        TraceEvent('W', physStart, length);
         uint32_t first = (physStart & 0x1FFFFFFF) / kHostPage;
         uint64_t end = (uint64_t(physStart & 0x1FFFFFFF) + length + kHostPage - 1) / kHostPage;
         if (end > kPhysPages)
@@ -581,6 +629,7 @@ namespace wet
                     s_watched[page] = 0;
                     s_inPending[page] = 0;
                     changed.push_back(page);
+                    TraceEvent('H', page * kHostPage);
                 }
                 else if (!adaptive || frame - s_watchFrame[page] >= kColdFrames)
                 {
