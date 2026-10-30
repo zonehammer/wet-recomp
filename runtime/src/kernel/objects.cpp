@@ -2,6 +2,7 @@
 #include "kernel.h"
 #include "threads.h"
 
+#include <algorithm>
 #include <cstdio>
 
 #include <unordered_map>
@@ -12,11 +13,71 @@ namespace wet
     // Dispatcher
     // ------------------------------------------------------------------
     static std::mutex s_dispatchLock;
-    static std::condition_variable s_dispatchCv;
+
+    struct Waiter
+    {
+        std::condition_variable cv;
+        std::vector<KObject*> objs;
+        KObject* thread = nullptr;
+        bool notified = false;
+    };
+    static std::vector<Waiter*> s_waiters;   // threads blocked right now (dispatcher lock)
+    static thread_local Waiter t_waiter;
 
     std::mutex& DispatchLock() { return s_dispatchLock; }
-    void DispatchNotify() { s_dispatchCv.notify_all(); }
-    std::condition_variable& DispatchCv() { return s_dispatchCv; }
+
+    void DispatchNotifyLocked(KObject* obj)
+    {
+        for (Waiter* w : s_waiters)
+        {
+            bool match = !obj || w->thread == obj;
+            for (size_t i = 0; !match && i < w->objs.size(); i++)
+                match = w->objs[i] == obj;
+            if (match && !w->notified)
+            {
+                w->notified = true;
+                w->cv.notify_one();
+            }
+        }
+    }
+
+    void DispatchNotify(KObject* obj)
+    {
+        std::lock_guard lock(s_dispatchLock);
+        DispatchNotifyLocked(obj);
+    }
+
+    bool DispatchWait(std::unique_lock<std::mutex>& lock, KObject* const* objs, size_t count,
+                      std::optional<std::chrono::steady_clock::time_point> until)
+    {
+        Waiter& w = t_waiter;
+        w.objs.assign(objs, objs + count);
+        w.thread = CurrentThread();
+        w.notified = false;
+        s_waiters.push_back(&w);
+        bool timedOut = false;
+        while (!w.notified)
+        {
+            if (until)
+            {
+                if (w.cv.wait_until(lock, *until) == std::cv_status::timeout)
+                {
+                    timedOut = !w.notified;
+                    break;
+                }
+            }
+            else
+                w.cv.wait(lock);
+        }
+        for (size_t i = 0; i < s_waiters.size(); i++)
+            if (s_waiters[i] == &w)
+            {
+                s_waiters[i] = s_waiters.back();
+                s_waiters.pop_back();
+                break;
+            }
+        return !timedOut;
+    }
 
     void KEvent::Set(bool s)
     {
@@ -149,7 +210,14 @@ namespace wet
             auto next = now + std::chrono::milliseconds(5);
             if (deadline && *deadline < next)
                 next = *deadline;
-            s_dispatchCv.wait_until(lock, next);
+            KObject* raw[8];
+            size_t n = std::min<size_t>(objects.size(), 8);
+            for (size_t i = 0; i < n; i++)
+                raw[i] = objects[i].get();
+            if (objects.size() > 8)
+                n = 0;   // unusual: any notification wakes it (DispatchWait with no objects
+                         // still matches nullptr notifies; the 5 ms recheck covers the rest)
+            DispatchWait(lock, raw, n, next);
         }
     }
 

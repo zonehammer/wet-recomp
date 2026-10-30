@@ -327,8 +327,8 @@ namespace wet
     // back to protection.
     // s_watched: 0 = not watched, 1 = watched by protection, 2 = watched hot.
     static constexpr uint8_t kWatchProtected = 1, kWatchHot = 2;
-    static constexpr uint8_t kHotStreak = 3;          // faults in this many frames in a row
-    static constexpr uint32_t kColdFrames = 8;        // unchanged this many frames: re-protect
+    static constexpr uint8_t kHotStreak = 3;          // faults in this many frames running (gaps up to 3)
+    static constexpr uint32_t kColdFrames = 30;       // unchanged this many frames: re-protect
     static std::atomic<bool> s_adaptive{ true };
     static std::vector<uint8_t> s_hot, s_streak, s_inPending;
     static std::vector<uint32_t> s_lastFaultFrame, s_watchFrame;
@@ -414,7 +414,7 @@ namespace wet
             uint32_t frame = uint32_t(PresentedFrameCount());
             if (frame != s_lastFaultFrame[page])
             {
-                s_streak[page] = frame - s_lastFaultFrame[page] <= 2 && s_streak[page] < 255 ? s_streak[page] + 1 : 1;
+                s_streak[page] = frame - s_lastFaultFrame[page] <= 3 && s_streak[page] < 255 ? s_streak[page] + 1 : 1;
                 s_lastFaultFrame[page] = frame;
             }
             if (s_streak[page] >= kHotStreak && !s_hot[page] && s_adaptive.load(std::memory_order_relaxed))

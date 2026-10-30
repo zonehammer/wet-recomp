@@ -1,9 +1,10 @@
 // Kernel objects, the handle table and waiting.
 //
 // All dispatcher state (event signalled, semaphore count, mutant owner, thread
-// exited, ...) is guarded by one global lock and one condition variable. That is
-// slow under heavy contention but simple and obviously correct, which is what a
-// first boot needs.
+// exited, ...) is guarded by one global lock. Each waiting thread has its own
+// condition variable and is woken only when an object it waits on changes (a
+// single shared one woke every waiting thread on every SetEvent, and the game's
+// main thread spent half its time in that).
 #pragma once
 #include <chrono>
 #include <condition_variable>
@@ -126,8 +127,16 @@ namespace wet
 
     // ---- Dispatcher ----
     std::mutex& DispatchLock();
-    void DispatchNotify();      // wake all waiters (call after changing state)
-    std::condition_variable& DispatchCv();
+    // Wakes the threads waiting on `obj` (and, for a thread object, that thread's own
+    // alertable/suspended waits); nullptr wakes every waiter. Call after changing
+    // state, without the dispatcher lock (DispatchNotifyLocked: with it).
+    void DispatchNotify(KObject* obj = nullptr);
+    void DispatchNotifyLocked(KObject* obj = nullptr);
+    // Waits (dispatcher lock held through `lock`) until notified for one of `objs` or
+    // for the current thread, or `until`. Returns false on timeout. Spurious wakes
+    // happen: re-check the state.
+    bool DispatchWait(std::unique_lock<std::mutex>& lock, KObject* const* objs, size_t count,
+                      std::optional<std::chrono::steady_clock::time_point> until);
 
     // Deadline from an Xbox LARGE_INTEGER timeout pointer (0 = wait forever).
     std::optional<std::chrono::steady_clock::time_point> DeadlineFromTimeout(uint32_t timeoutPtr);

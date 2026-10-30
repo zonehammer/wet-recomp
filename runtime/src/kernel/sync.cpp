@@ -41,7 +41,7 @@ static uint32_t SetEventState(const std::shared_ptr<KEvent>& e, int op /* 0 clea
         {
             // Pulse: release whoever is waiting right now, then reset.
             e->Set(true);
-            DispatchNotify();
+            DispatchNotifyLocked(e.get());
             e->Set(false);
         }
         else
@@ -49,7 +49,8 @@ static uint32_t SetEventState(const std::shared_ptr<KEvent>& e, int op /* 0 clea
             e->Set(op == 1);
         }
     }
-    DispatchNotify();
+    if (op == 1)
+        DispatchNotify(e.get());
     return prev;
 }
 
@@ -136,7 +137,7 @@ GUEST_IMPORT(NtReleaseSemaphore)
             return Ret(ctx, STATUS_SEMAPHORE_LIMIT_EXCEEDED);
         s->SetCount(s->count + release);
     }
-    DispatchNotify();
+    DispatchNotify(s.get());
     if (Arg(ctx, 2))
         St32(Arg(ctx, 2), uint32_t(prev));
     Ret(ctx, STATUS_SUCCESS);
@@ -170,7 +171,7 @@ GUEST_IMPORT(NtReleaseMutant)
         if (--m->recursion == 0)
             m->owner = nullptr;
     }
-    DispatchNotify();
+    DispatchNotify(m.get());
     Ret(ctx, STATUS_SUCCESS);
 }
 
@@ -241,7 +242,7 @@ GUEST_IMPORT(NtSetIoCompletion)
         std::lock_guard lock(DispatchLock());
         port->queue.push_back({ Arg(ctx, 1), Arg(ctx, 2), Arg(ctx, 3), Arg(ctx, 4) });
     }
-    DispatchNotify();
+    DispatchNotify(port.get());
     Ret(ctx, STATUS_SUCCESS);
 }
 
@@ -254,17 +255,11 @@ GUEST_IMPORT(NtRemoveIoCompletion)
     auto deadline = DeadlineFromTimeout(Arg(ctx, 4));
     WaitScope ws("I/O completion port");
     std::unique_lock lock(DispatchLock());
+    KObject* raw = port.get();
     while (port->queue.empty())
     {
-        if (deadline)
-        {
-            if (DispatchCv().wait_until(lock, *deadline) == std::cv_status::timeout && port->queue.empty())
-                return Ret(ctx, STATUS_TIMEOUT);
-        }
-        else
-        {
-            DispatchCv().wait(lock);
-        }
+        if (!DispatchWait(lock, &raw, 1, deadline) && port->queue.empty())
+            return Ret(ctx, STATUS_TIMEOUT);
     }
     auto e = port->queue.front();
     port->queue.pop_front();

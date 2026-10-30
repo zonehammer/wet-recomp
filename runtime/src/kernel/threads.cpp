@@ -99,7 +99,7 @@ namespace wet
     {
         std::unique_lock lock(DispatchLock());
         while (t.suspendCount > 0)
-            DispatchCv().wait(lock);
+            DispatchWait(lock, nullptr, 0, std::nullopt);
     }
 
     [[noreturn]] void ExitGuestThread(uint32_t exitCode)
@@ -110,7 +110,7 @@ namespace wet
             t->exited = true;
             t->exitCode = exitCode;
         }
-        DispatchNotify();
+        DispatchNotify(t.get());
         Log("Thread %u exited (code 0x%X)", t->id, exitCode);
         os::ExitCurrentThread();
     }
@@ -426,7 +426,7 @@ GUEST_IMPORT(NtResumeThread)
         if (t->suspendCount > 0)
             t->suspendCount--;
     }
-    DispatchNotify();
+    DispatchNotify(t.get());
     if (Arg(ctx, 1))
         St32(Arg(ctx, 1), uint32_t(prev));
     Ret(ctx, STATUS_SUCCESS);
@@ -553,7 +553,7 @@ GUEST_IMPORT(NtQueueApcThread)
             return Ret(ctx, STATUS_UNSUCCESSFUL);
         t->apcs.push_back({ Arg(ctx, 1), Arg(ctx, 2), Arg(ctx, 3), Arg(ctx, 4) });
     }
-    DispatchNotify();
+    DispatchNotify(t.get());
     Ret(ctx, STATUS_SUCCESS);
 }
 

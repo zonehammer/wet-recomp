@@ -232,7 +232,7 @@ namespace
                     std::lock_guard lock(DispatchLock());
                     e->Set(true);
                 }
-                DispatchNotify();
+                DispatchNotify(e.get());
             }
         }
         if (apc)
