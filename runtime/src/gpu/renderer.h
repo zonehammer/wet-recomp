@@ -30,6 +30,8 @@ namespace wet::renderer
     void AchievementUnlocked();
     // F8: saves the next 48 presented frames to frames/burst_*.png (diagnostics).
     void RequestBurstCapture();
+    // Hides the cursor over the game window while the mouse aims (any thread).
+    void SetCursorHidden(bool hidden);
     // Guest vblank rate (60 Hz normally).
     void SetVsyncRate(uint32_t hz);
     // Rendering resolution scale (1 = 720p, 2 = 1440p, 3 = 2160p); before Start.

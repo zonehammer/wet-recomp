@@ -43,6 +43,12 @@ Share/Create or touchpad click = Back. Or the keyboard while the game window is 
 | Esc | B | X / Y | X / Y |
 | Q / E | LB / RB | Z / C | LT / RT |
 
+Mouse aim (on by default): while the game window is active the mouse turns the
+camera and aims (it drives the right stick), WASD moves, left click is RT and right
+click LT. The cursor is hidden and kept in the window; F1 (the overlay) or Alt+Tab
+frees it. Sensitivity and invert-Y are in the overlay; the five mouse buttons can be
+bound to any pad button in wet.ini (`mouse_left = RT` ...).
+
 **F1** opens a settings overlay (frame rate, resolution, fullscreen, FPS counter,
 anti-aliasing, AMD CAS/FSR or NVIDIA Image Scaling with a sharpness slider). **F6** cycles the frame rate: 30 (the game's own), 60, 120 and 144 FPS; the choice is
 saved in `wet.ini` (`fps = 60`). Above 30 the game's 1/30 s world step is scaled to match,

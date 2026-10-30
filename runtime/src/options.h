@@ -1,6 +1,7 @@
 // Player options, kept in wet.ini next to the logs (key = value lines).
 // Changed in game with the F1 settings overlay (gpu/xenia_bridge.cpp) or hotkeys.
 #pragma once
+#include <string>
 
 namespace wet::options
 {
@@ -43,6 +44,15 @@ namespace wet::options
     bool AdaptiveWatch();
     void SetAdaptiveWatchOption(bool v);
     // The game's film grain, 0-100 % (wet.ini film_grain).
+    // Mouse aim (input.cpp): the mouse drives the right stick; buttons are bound
+    // to pad buttons by name (0 left, 1 right, 2 middle, 3 back, 4 forward).
+    bool MouseAim();
+    void SetMouseAim(bool v);
+    int MouseSensitivity();
+    void SetMouseSensitivity(int v);
+    bool MouseInvertY();
+    void SetMouseInvertY(bool v);
+    std::string MouseBinding(int button);
     int FilmGrain();
     void SetFilmGrain(int v);
     int Sharpness();

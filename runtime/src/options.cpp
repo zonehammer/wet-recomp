@@ -5,6 +5,7 @@
 #include "ppc_context.h"
 
 #include <atomic>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -19,8 +20,11 @@ namespace wet::options
         std::atomic<int> s_fpsOverride{ 0 };   // video mode: temporary 30 FPS (not saved)
         std::atomic<int> s_videoMode{ 1 };
         int s_scale = 1, s_scaleRunning = 1;
-        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 };
+        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_mouseAim{ 1 }, s_mouseSens{ 50 }, s_mouseInvert{ 0 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 };
         constexpr const char* kFile = "wet.ini";
+        // Mouse button bindings: left, right, middle, back (X1), forward (X2).
+        constexpr const char* kMouseKeys[5] = { "mouse_left", "mouse_right", "mouse_middle", "mouse_back", "mouse_forward" };
+        std::string s_mouseBind[5] = { "RT", "LT", "RTHUMB", "LB", "RB" };
 
         int Clamp(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
@@ -68,6 +72,14 @@ namespace wet::options
             std::fprintf(f, "video_mode = %d\n", s_videoMode.load());
             std::fprintf(f, "# film_grain: the game's film grain, 0 (off) to 100 (as designed)\n");
             std::fprintf(f, "film_grain = %d\n", s_filmGrain.load());
+            std::fprintf(f, "# mouse_aim: 1 = the mouse turns the camera / aims (right stick) while the game window is active\n");
+            std::fprintf(f, "mouse_aim = %d\n", s_mouseAim.load());
+            std::fprintf(f, "# mouse_sensitivity: 1-100; mouse_invert_y: 1 = up/down inverted\n");
+            std::fprintf(f, "mouse_sensitivity = %d\n", s_mouseSens.load());
+            std::fprintf(f, "mouse_invert_y = %d\n", s_mouseInvert.load());
+            std::fprintf(f, "# mouse buttons: A B X Y LB RB LT RT LTHUMB RTHUMB START BACK UP DOWN LEFT RIGHT or NONE\n");
+            for (int i = 0; i < 5; i++)
+                std::fprintf(f, "%s = %s\n", kMouseKeys[i], s_mouseBind[i].c_str());
             std::fprintf(f, "fullscreen = %d\n", s_fullscreen.load());
             std::fprintf(f, "show_fps = %d\n", s_showFps.load());
             std::fclose(f);
@@ -81,8 +93,16 @@ namespace wet::options
             char line[256];
             while (std::fgets(line, sizeof(line), f))
             {
-                char key[64];
+                char key[64], text[64];
                 int value;
+                if (std::sscanf(line, " %63[a-z0-9_] = %63s", key, text) == 2)
+                    for (int i = 0; i < 5; i++)
+                        if (!std::strcmp(key, kMouseKeys[i]))
+                        {
+                            s_mouseBind[i] = text;
+                            for (auto& c : s_mouseBind[i])
+                                c = char(std::toupper((unsigned char)c));
+                        }
                 if (std::sscanf(line, " %63[a-z0-9_] = %d", key, &value) != 2)
                     continue;
                 if (!std::strcmp(key, "fps")) s_fps = Valid(value);
@@ -91,6 +111,9 @@ namespace wet::options
                 else if (!std::strcmp(key, "filter")) s_filter = Clamp(value, 0, 3);
                 else if (!std::strcmp(key, "achievement_popups")) s_achievementPopups = value != 0;
                 else if (!std::strcmp(key, "video_mode")) s_videoMode = value != 0;
+                else if (!std::strcmp(key, "mouse_aim")) s_mouseAim = value != 0;
+                else if (!std::strcmp(key, "mouse_sensitivity")) s_mouseSens = Clamp(value, 1, 100);
+                else if (!std::strcmp(key, "mouse_invert_y")) s_mouseInvert = value != 0;
                 else if (!std::strcmp(key, "film_grain")) s_filmGrain = Clamp(value, 0, 100);
                 else if (!std::strcmp(key, "vibration")) s_vibration = value != 0;
                 else if (!std::strcmp(key, "gpu_wait")) s_gpuWait = value != 0;
@@ -154,6 +177,13 @@ namespace wet::options
     int Filter() { return s_filter; }
     void SetFilter(int v) { s_filter = Clamp(v, 0, 3); Save(); }
     int FilmGrain() { return s_filmGrain; }
+    bool MouseAim() { return s_mouseAim.load(std::memory_order_relaxed) != 0; }
+    void SetMouseAim(bool v) { s_mouseAim = v; Save(); }
+    int MouseSensitivity() { return s_mouseSens.load(std::memory_order_relaxed); }
+    void SetMouseSensitivity(int v) { s_mouseSens = Clamp(v, 1, 100); Save(); }
+    bool MouseInvertY() { return s_mouseInvert.load(std::memory_order_relaxed) != 0; }
+    void SetMouseInvertY(bool v) { s_mouseInvert = v; Save(); }
+    std::string MouseBinding(int button) { return button >= 0 && button < 5 ? s_mouseBind[button] : std::string(); }
     void SetFilmGrain(int v) { s_filmGrain = Clamp(v, 0, 100); Save(); }
     int Sharpness() { return s_sharpness; }
     void SetSharpness(int v) { s_sharpness = Clamp(v, 0, 100); Save(); }

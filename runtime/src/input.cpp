@@ -5,6 +5,8 @@
 #include "options.h"
 
 #include <atomic>
+#include <cmath>
+#include <algorithm>
 #include <cctype>
 #include <chrono>
 #include <cstdlib>
@@ -116,10 +118,131 @@ namespace wet
             return pid == GetCurrentProcessId();
         }
 
-        uint16_t KeyboardButtons(uint8_t& lt, uint8_t& rt)
+        // ---- Mouse aim: mouse movement drives the right stick ----
+        // While the game window is in front (and the F1 overlay closed) the cursor
+        // is hidden, kept in the window and re-centred after every read; the
+        // movement since the last read, as a speed, becomes a stick deflection.
+        struct MouseState
+        {
+            bool captured = false;
+            POINT center{};
+            double accX = 0, accY = 0;
+            std::chrono::steady_clock::time_point last = std::chrono::steady_clock::now();
+            double stickX = 0, stickY = 0;
+        };
+        MouseState s_mouse;
+        std::mutex s_mouseLock;
+
+        uint16_t BindingBits(const std::string& name, uint8_t& lt, uint8_t& rt)
+        {
+            if (name == "LT") { lt = 255; return 0; }
+            if (name == "RT") { rt = 255; return 0; }
+            for (auto& n : kNames)
+                if (name == n.name)
+                    return n.bit;
+            return 0;
+        }
+
+        void ReleaseMouse()
+        {
+            if (!s_mouse.captured)
+                return;
+            ClipCursor(nullptr);
+            renderer::SetCursorHidden(false);
+            s_mouse.captured = false;
+            s_mouse.stickX = s_mouse.stickY = 0;
+        }
+
+        // Fills the right stick and mouse-button presses; false if not aiming.
+        bool MouseAim(int16_t& rx, int16_t& ry, uint16_t& buttons, uint8_t& lt, uint8_t& rt)
+        {
+            std::lock_guard lock(s_mouseLock);
+            HWND fg = GetForegroundWindow();
+            bool game = fg && fg != GetConsoleWindow() && options::MouseAim() && !renderer::OverlayOpen();
+            if (game)
+            {
+                DWORD pid = 0;
+                GetWindowThreadProcessId(fg, &pid);
+                game = pid == GetCurrentProcessId();
+            }
+            if (!game)
+            {
+                ReleaseMouse();
+                return false;
+            }
+            RECT rc;
+            GetClientRect(fg, &rc);
+            POINT tl{ rc.left, rc.top }, br{ rc.right, rc.bottom };
+            ClientToScreen(fg, &tl);
+            ClientToScreen(fg, &br);
+            RECT clip{ tl.x, tl.y, br.x, br.y };
+            POINT center{ (tl.x + br.x) / 2, (tl.y + br.y) / 2 };
+            if (!s_mouse.captured)
+            {
+                s_mouse.captured = true;
+                renderer::SetCursorHidden(true);
+                SetCursorPos(center.x, center.y);
+                s_mouse.center = center;
+                s_mouse.accX = s_mouse.accY = 0;
+                s_mouse.last = std::chrono::steady_clock::now();
+            }
+            ClipCursor(&clip);
+            POINT p;
+            if (GetCursorPos(&p))
+            {
+                s_mouse.accX += p.x - s_mouse.center.x;
+                s_mouse.accY += p.y - s_mouse.center.y;
+            }
+            SetCursorPos(center.x, center.y);
+            s_mouse.center = center;
+            // Turn the movement into a speed every few ms, so several reads in one
+            // frame don't see zero and make the stick jitter.
+            auto now = std::chrono::steady_clock::now();
+            double dt = std::chrono::duration<double>(now - s_mouse.last).count();
+            if (dt >= 0.004)
+            {
+                dt = std::min(dt, 0.05);
+                double vx = s_mouse.accX / dt, vy = s_mouse.accY / dt;   // pixels per second
+                s_mouse.accX = s_mouse.accY = 0;
+                s_mouse.last = now;
+                // Sensitivity 50: 1200 px/s is a full deflection; 100: 600 px/s.
+                double k = options::MouseSensitivity() / 100.0 / 600.0;
+                double tx = vx * k, ty = -vy * k;
+                if (options::MouseInvertY())
+                    ty = -ty;
+                double mag = std::sqrt(tx * tx + ty * ty);
+                if (mag > 0.002)
+                {
+                    // Past the game's dead zone (~24%) so slow movements still turn.
+                    constexpr double kDeadZone = 0.24;
+                    double out = std::min(1.0, kDeadZone + (1.0 - kDeadZone) * mag);
+                    tx = tx / mag * out;
+                    ty = ty / mag * out;
+                }
+                else
+                    tx = ty = 0;
+                s_mouse.stickX = 0.5 * s_mouse.stickX + 0.5 * tx;
+                s_mouse.stickY = 0.5 * s_mouse.stickY + 0.5 * ty;
+                if (std::abs(s_mouse.stickX) < 0.01) s_mouse.stickX = 0;
+                if (std::abs(s_mouse.stickY) < 0.01) s_mouse.stickY = 0;
+            }
+            rx = int16_t(std::clamp(s_mouse.stickX, -1.0, 1.0) * 32767);
+            ry = int16_t(std::clamp(s_mouse.stickY, -1.0, 1.0) * 32767);
+            static constexpr int kButtons[5] = { VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2 };
+            for (int i = 0; i < 5; i++)
+                if (GetAsyncKeyState(kButtons[i]) & 0x8000)
+                    buttons |= BindingBits(options::MouseBinding(i), lt, rt);
+            return true;
+        }
+
+        uint16_t KeyboardButtons(uint8_t& lt, uint8_t& rt, int16_t& lx, int16_t& ly, int16_t& rx, int16_t& ry)
         {
             if (!OurWindowFocused())
+            {
+                std::lock_guard lock(s_mouseLock);
+                ReleaseMouse();
                 return 0;
+            }
             // F1: settings overlay.
             static bool f1 = false;
             bool f1Now = (GetAsyncKeyState(VK_F1) & 0x8000) != 0;
@@ -127,13 +250,27 @@ namespace wet
                 renderer::ToggleOverlay();
             f1 = f1Now;
             if (renderer::OverlayOpen())
+            {
+                std::lock_guard lock(s_mouseLock);
+                ReleaseMouse();
                 return 0;
+            }
             uint16_t b = 0;
             for (auto& k : kKeyMap)
                 if (GetAsyncKeyState(k.vk) & 0x8000)
                     b |= k.bit;
             if (GetAsyncKeyState('Z') & 0x8000) lt = 255;
             if (GetAsyncKeyState('C') & 0x8000) rt = 255;
+            // WASD: left stick.
+            int mx = ((GetAsyncKeyState('D') & 0x8000) ? 1 : 0) - ((GetAsyncKeyState('A') & 0x8000) ? 1 : 0);
+            int my = ((GetAsyncKeyState('W') & 0x8000) ? 1 : 0) - ((GetAsyncKeyState('S') & 0x8000) ? 1 : 0);
+            if (mx || my)
+            {
+                double scale = (mx && my) ? 0.7071 : 1.0;
+                lx = int16_t(mx * 32767 * scale);
+                ly = int16_t(my * 32767 * scale);
+            }
+            MouseAim(rx, ry, b, lt, rt);
             // F9: trace the next two frames' draws to xenia_gpu.log.
             static bool f9 = false;
             bool f9Now = (GetAsyncKeyState(VK_F9) & 0x8000) != 0;
@@ -453,13 +590,26 @@ namespace wet
             return connected;
 
         uint16_t extra = Auto().Buttons();
+        int16_t klx = 0, kly = 0, krx = 0, kry = 0;
 #ifdef _WIN32
-        extra |= KeyboardButtons(out.leftTrigger, out.rightTrigger);
+        extra |= KeyboardButtons(out.leftTrigger, out.rightTrigger, klx, kly, krx, kry);
 #endif
+        // Keyboard / mouse sticks win over a resting controller stick.
+        auto merge = [](int16_t& pad, int16_t kb) {
+            if (kb && std::abs(int(kb)) > std::abs(int(pad)))
+                pad = kb;
+        };
+        merge(out.lx, klx);
+        merge(out.ly, kly);
+        merge(out.rx, krx);
+        merge(out.ry, kry);
         // The packet number must change whenever the state does.
-        static std::atomic<uint16_t> s_lastExtra{ 0 };
+        static std::atomic<uint64_t> s_lastExtra{ 0 };
         static std::atomic<uint32_t> s_extraPackets{ 0 };
-        if (s_lastExtra.exchange(extra) != extra)
+        uint64_t extraState = (uint64_t(extra) | uint64_t(uint16_t(klx)) << 16 | uint64_t(uint16_t(kly)) << 32 |
+                               uint64_t(uint16_t(krx ^ (kry << 3))) << 48) ^
+                              (uint64_t(out.leftTrigger) << 8) ^ (uint64_t(out.rightTrigger) << 24);
+        if (s_lastExtra.exchange(extraState) != extraState)
             s_extraPackets++;
         out.packet += s_extraPackets.load() << 20;
         out.buttons |= extra;

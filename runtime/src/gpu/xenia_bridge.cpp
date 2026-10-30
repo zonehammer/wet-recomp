@@ -568,10 +568,25 @@ namespace
                         any = true;
                     }
                 if (!any)
-                    ImGui::TextDisabled("No controller connected (keyboard: arrows, Space, Esc, X, Y, Q, E, Z, C, Enter)");
+                    ImGui::TextDisabled("No controller connected (keyboard: WASD, arrows, Space, Esc, X, Y, Q, E, Z, C, Enter)");
                 bool vibration = wet::options::Vibration();
                 if (ImGui::Checkbox("Vibration", &vibration))
                     wet::options::SetVibration(vibration);
+            }
+
+            Section("Mouse");
+            {
+                bool aim = wet::options::MouseAim();
+                if (ImGui::Checkbox("Mouse aim (camera / aiming; F1 or Alt+Tab frees the cursor)", &aim))
+                    wet::options::SetMouseAim(aim);
+                int sens = wet::options::MouseSensitivity(), sensPick = sens;
+                ImGui::SliderInt("Mouse sensitivity", &sensPick, 1, 100);
+                if (sensPick != sens)
+                    wet::options::SetMouseSensitivity(sensPick);
+                bool invert = wet::options::MouseInvertY();
+                if (ImGui::Checkbox("Invert mouse Y", &invert))
+                    wet::options::SetMouseInvertY(invert);
+                ImGui::TextDisabled("WASD move, left click RT, right click LT (buttons: wet.ini mouse_*)");
             }
 
             Section("Resolution");
@@ -1011,6 +1026,17 @@ namespace wet::renderer
                 bool on = !s_window->window->IsFullscreen();
                 s_window->window->SetFullscreen(on);
                 options::SetFullscreen(on);
+            });
+#endif
+    }
+
+    void SetCursorHidden(bool hidden)
+    {
+#if XE_PLATFORM_WIN32
+        if (s_window && s_window->app && s_window->window)
+            s_window->app->CallInUIThread([hidden] {
+                s_window->window->SetCursorVisibility(hidden ? xe::ui::Window::CursorVisibility::kHidden
+                                                             : xe::ui::Window::CursorVisibility::kVisible);
             });
 #endif
     }
