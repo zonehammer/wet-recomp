@@ -53,6 +53,14 @@ function(wet_apply_patch dir patch)
         WORKING_DIRECTORY ${dir} RESULT_VARIABLE present OUTPUT_QUIET ERROR_QUIET)
     if(NOT present EQUAL 0)
         execute_process(COMMAND ${GIT_EXECUTABLE} checkout -- . WORKING_DIRECTORY ${dir} OUTPUT_QUIET ERROR_QUIET)
+        # checkout doesn't remove files an earlier version of the patch added.
+        file(READ ${file} text)
+        string(REGEX MATCHALL "\n--- /dev/null\n\\+\\+\\+ b/[^\n]+" added "\n${text}")
+        foreach(entry ${added})
+            string(REGEX REPLACE ".*\\+\\+\\+ b/" "" path "${entry}")
+            string(STRIP "${path}" path)
+            file(REMOVE ${dir}/${path})
+        endforeach()
         execute_process(
             COMMAND ${GIT_EXECUTABLE} apply --whitespace=nowarn ${file}
             WORKING_DIRECTORY ${dir} RESULT_VARIABLE result)
