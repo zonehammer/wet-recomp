@@ -15,10 +15,12 @@
 #include <cctype>
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <map>
 #include <mutex>
 #include <set>
+#include <vector>
 
 namespace fs = std::filesystem;
 using namespace wet;
@@ -215,6 +217,29 @@ namespace
         size_t next = 0;
         std::string pattern;
     };
+
+    // Reads into guest memory through a host buffer. The OS can't take our
+    // write-watch faults: reading straight into guest memory fails part-way
+    // (a short read) if the GPU emulation re-protects a page in the meantime,
+    // which PrepareHostWrite alone can't prevent. Copying ourselves takes the
+    // faults like any guest write.
+    size_t ReadToGuest(std::FILE* fp, uint32_t guest, size_t length)
+    {
+        static thread_local std::vector<uint8_t> bounce;
+        if (bounce.size() < (1u << 20))
+            bounce.resize(1u << 20);
+        size_t total = 0;
+        while (total < length)
+        {
+            size_t want = std::min(length - total, bounce.size());
+            size_t got = std::fread(bounce.data(), 1, want, fp);
+            std::memcpy(HostPtr(guest + uint32_t(total)), bounce.data(), got);
+            total += got;
+            if (got < want)
+                break;
+        }
+        return total;
+    }
 
     bool SeekTo(std::FILE* fp, uint64_t pos)
     {
@@ -507,7 +532,7 @@ GUEST_IMPORT(NtReadFile)
         }
         SeekTo(f->fp, f->position);
         PrepareHostWrite(buffer, length);
-        got = std::fread(HostPtr(buffer), 1, length, f->fp);
+        got = ReadToGuest(f->fp, buffer, length);
         f->position += got;
     }
     uint32_t status = (got == 0 && length > 0) ? STATUS_END_OF_FILE : STATUS_SUCCESS;
@@ -534,7 +559,7 @@ GUEST_IMPORT(NtReadFileScatter)
             uint32_t page = Ld32(segs + i * 8 + 4);
             size_t want = std::min<size_t>(0x1000, length - total);
             PrepareHostWrite(page, want);
-            size_t got = std::fread(HostPtr(page), 1, want, f->fp);
+            size_t got = ReadToGuest(f->fp, page, want);
             total += got;
             if (got < want)
                 break;
