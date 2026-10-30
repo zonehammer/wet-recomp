@@ -2,7 +2,9 @@
 #include "memory.h"
 #include "log.h"
 #include "os.h"
+#include "kernel/threads.h"
 
+#include <algorithm>
 #include <iterator>
 #include <mutex>
 #include <vector>
@@ -316,6 +318,26 @@ namespace wet
     static PhysicalWriteCallback s_watchCallback = nullptr;
     static uint8_t* s_physHostView = nullptr;
 
+    // Adaptive watching: pages that take a write fault frame after frame (dynamic
+    // vertex/constant buffers the game rewrites every frame) are "hot". Protecting
+    // and faulting them every frame cost the GPU thread a quarter of its time, so a
+    // hot page is watched without protection (state 2): at every ring buffer kick
+    // FlushHotPages compares its contents with what they were when it was watched
+    // and invalidates it if they changed. A hot page found unchanged for a while goes
+    // back to protection.
+    // s_watched: 0 = not watched, 1 = watched by protection, 2 = watched hot.
+    static constexpr uint8_t kWatchProtected = 1, kWatchHot = 2;
+    static constexpr uint8_t kHotStreak = 3;          // faults in this many frames in a row
+    static constexpr uint32_t kColdFrames = 8;        // unchanged this many frames: re-protect
+    static std::atomic<bool> s_adaptive{ true };
+    static std::vector<uint8_t> s_hot, s_streak, s_inPending;
+    static std::vector<uint32_t> s_lastFaultFrame, s_watchFrame;
+    static std::vector<uint64_t> s_hash;
+    static std::vector<uint32_t> s_pending;
+    static std::atomic<uint64_t> s_hotChecks{ 0 }, s_hotInvalidations{ 0 }, s_hotCooled{ 0 };
+    static std::atomic<uint32_t> s_hotPages{ 0 };
+    static uint64_t HashPage(uint32_t page);
+
     // Host addresses of a physical page in the three guest views (nullptr if absent).
     static void PageViews(uint32_t page, uint8_t* out[3])
     {
@@ -385,10 +407,21 @@ namespace wet
             std::lock_guard lock(s_watchLock);
             if (s_watched.empty())
                 return false;
-            if (!s_watched[page])
+            if (s_watched[page] != kWatchProtected)
                 return true; // another thread got here first and unprotected it: retry
             SetPageProtection(page, false);
             s_watched[page] = 0;
+            uint32_t frame = uint32_t(PresentedFrameCount());
+            if (frame != s_lastFaultFrame[page])
+            {
+                s_streak[page] = frame - s_lastFaultFrame[page] <= 2 && s_streak[page] < 255 ? s_streak[page] + 1 : 1;
+                s_lastFaultFrame[page] = frame;
+            }
+            if (s_streak[page] >= kHotStreak && !s_hot[page] && s_adaptive.load(std::memory_order_relaxed))
+            {
+                s_hot[page] = 1;
+                s_hotPages.fetch_add(1, std::memory_order_relaxed);
+            }
         }
         // Outside the lock: the callback takes the renderer's own locks, and the
         // renderer may be adding watches meanwhile.
@@ -423,9 +456,11 @@ namespace wet
             {
                 if (!s_watched[p]) { p++; continue; }
                 uint32_t run = p;
-                while (run <= last && s_watched[run])
+                uint8_t kind = s_watched[p];
+                while (run <= last && s_watched[run] == kind)
                     s_watched[run++] = 0;
-                SetRangeProtection(p, run - p, false);
+                if (kind == kWatchProtected)
+                    SetRangeProtection(p, run - p, false);
                 runs.push_back({ p, run - p });
                 p = run;
             }
@@ -447,8 +482,9 @@ namespace wet
         for (uint32_t p = first; p < end;)
         {
             if (!s_watched[p]) { p++; continue; }
+            if (s_watched[p] == kWatchHot) { s_watched[p++] = 0; continue; }
             uint32_t run = p;
-            while (run < end && s_watched[run])
+            while (run < end && s_watched[run] == kWatchProtected)
                 s_watched[run++] = 0;
             SetRangeProtection(p, run - p, false);
             s_protectCalls.fetch_add(1, std::memory_order_relaxed);
@@ -463,6 +499,12 @@ namespace wet
         if (s_watched.empty())
         {
             s_watched.assign(kPhysPages, 0);
+            s_hot.assign(kPhysPages, 0);
+            s_streak.assign(kPhysPages, 0);
+            s_watchFrame.assign(kPhysPages, 0);
+            s_inPending.assign(kPhysPages, 0);
+            s_lastFaultFrame.assign(kPhysPages, 0);
+            s_hash.assign(kPhysPages, 0);
             os::SetWriteFaultHandler(OnWriteFault);
         }
     }
@@ -478,16 +520,112 @@ namespace wet
         std::lock_guard lock(s_watchLock);
         if (s_watched.empty())
             return;
+        bool adaptive = s_adaptive.load(std::memory_order_relaxed);
         for (uint32_t p = first; p < end;)
         {
             if (s_watched[p]) { p++; continue; }
+            if (adaptive && s_hot[p])
+            {
+                s_watched[p] = kWatchHot;
+                s_hash[p] = HashPage(p);
+                s_watchFrame[p] = uint32_t(PresentedFrameCount());
+                if (!s_inPending[p])
+                {
+                    s_inPending[p] = 1;
+                    s_pending.push_back(p);
+                }
+                p++;
+                continue;
+            }
             uint32_t run = p;
-            while (run < end && !s_watched[run])
-                s_watched[run++] = 1;
+            while (run < end && !s_watched[run] && !(adaptive && s_hot[run]))
+                s_watched[run++] = kWatchProtected;
             SetRangeProtection(p, run - p, true);
             s_protectCalls.fetch_add(1, std::memory_order_relaxed);
             p = run;
         }
+    }
+
+    static uint64_t HashPage(uint32_t page)
+    {
+        const uint64_t* w = reinterpret_cast<const uint64_t*>(PhysicalHostView() + size_t(page) * kHostPage);
+        uint64_t a = 0x9E3779B97F4A7C15ull, b = 0xC2B2AE3D27D4EB4Full;
+        for (uint32_t i = 0; i < kHostPage / 8; i += 2)
+        {
+            a = (a ^ w[i]) * 0x100000001B3ull;
+            b = (b ^ w[i + 1]) * 0x100000001B3ull;
+        }
+        return a ^ (b << 1) ^ (b >> 63);
+    }
+
+    void FlushHotPages()
+    {
+        std::vector<uint32_t> changed;
+        {
+            std::lock_guard lock(s_watchLock);
+            if (s_pending.empty())
+                return;
+            bool adaptive = s_adaptive.load(std::memory_order_relaxed);
+            uint32_t frame = uint32_t(PresentedFrameCount());
+            size_t keep = 0;
+            for (uint32_t page : s_pending)
+            {
+                if (s_watched[page] != kWatchHot)
+                {
+                    s_inPending[page] = 0;
+                    continue;
+                }
+                s_hotChecks.fetch_add(1, std::memory_order_relaxed);
+                if (HashPage(page) != s_hash[page])
+                {
+                    s_watched[page] = 0;
+                    s_inPending[page] = 0;
+                    changed.push_back(page);
+                }
+                else if (!adaptive || frame - s_watchFrame[page] >= kColdFrames)
+                {
+                    // Not changing any more (or the option was turned off): back to
+                    // watching by protection.
+                    if (s_hot[page])
+                    {
+                        s_hot[page] = 0;
+                        s_hotPages.fetch_sub(1, std::memory_order_relaxed);
+                    }
+                    s_streak[page] = 0;
+                    s_watched[page] = kWatchProtected;
+                    s_inPending[page] = 0;
+                    SetPageProtection(page, true);
+                    s_hotCooled.fetch_add(1, std::memory_order_relaxed);
+                }
+                else
+                    s_pending[keep++] = page;
+            }
+            s_pending.resize(keep);
+        }
+        if (changed.empty())
+            return;
+        s_hotInvalidations.fetch_add(changed.size(), std::memory_order_relaxed);
+        std::sort(changed.begin(), changed.end());
+        if (!s_watchCallback)
+            return;
+        for (size_t i = 0; i < changed.size();)
+        {
+            size_t j = i + 1;
+            while (j < changed.size() && changed[j] == changed[j - 1] + 1)
+                j++;
+            s_watchCallback(changed[i] * kHostPage, uint32_t(j - i) * kHostPage);
+            i = j;
+        }
+    }
+
+    void SetAdaptiveWatch(bool enabled) { s_adaptive = enabled; }
+
+    void HotWatchStats(uint32_t& hotPages, uint64_t& checks, uint64_t& invalidations, uint64_t& cooled)
+    {
+        hotPages = s_hotPages.load();
+        checks = s_hotChecks.load();
+        invalidations = s_hotInvalidations.load();
+        cooled = s_hotCooled.load();
     }
 
     uint8_t* PhysicalHostView()

@@ -143,6 +143,8 @@ namespace wet::profiler
             uint64_t samples = 0, rounds = 0;
             uint64_t faults0, protects0;
             WatchStats(faults0, protects0);
+            uint32_t hot0; uint64_t checks0, inval0, cooled0;
+            HotWatchStats(hot0, checks0, inval0, cooled0);
             uint64_t t0 = os::MonotonicNs(), lastList = 0;
             // Written every few seconds as well as at the end, so a crash or hang
             // doesn't lose the data.
@@ -157,6 +159,10 @@ namespace wet::profiler
                                  (unsigned long long)rounds, rounds / elapsed, (unsigned long long)samples);
                     std::fprintf(f, "# write-watch faults %.0f/s, watch calls %.0f/s\n",
                                  (faults1 - faults0) / elapsed, (protects1 - protects0) / elapsed);
+                    uint32_t hot; uint64_t checks1, inval1, cooled1;
+                    HotWatchStats(hot, checks1, inval1, cooled1);
+                    std::fprintf(f, "# adaptive watch: %u hot pages, checks %.0f/s, invalidations %.0f/s, re-protected %.0f/s\n",
+                                 hot, (checks1 - checks0) / elapsed, (inval1 - inval0) / elapsed, (cooled1 - cooled0) / elapsed);
                     std::fprintf(f, "# threads: samples tid name\n");
                     for (auto& [tid, n] : perThread)
                         std::fprintf(f, "T %llu %u %s\n", (unsigned long long)n, tid, names[tid].c_str());

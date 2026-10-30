@@ -1,6 +1,7 @@
 #include "options.h"
 #include "log.h"
 #include "gpu/renderer.h"
+#include "memory.h"
 #include "ppc_context.h"
 
 #include <atomic>
@@ -16,7 +17,7 @@ namespace wet::options
         constexpr int kRates[] = { 30, 60, 120, 144 };
         std::atomic<int> s_fps{ 30 };
         int s_scale = 1, s_scaleRunning = 1;
-        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 };
+        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_adaptiveWatch{ 1 };
         constexpr const char* kFile = "wet.ini";
 
         int Clamp(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -51,6 +52,8 @@ namespace wet::options
             std::fprintf(f, "filter = %d\n", s_filter.load());
             std::fprintf(f, "# sharpness (NVIDIA Image Scaling): 0 to 100\n");
             std::fprintf(f, "sharpness = %d\n", s_sharpness.load());
+            std::fprintf(f, "# adaptive_watch: 1 = skip write traps on memory the game rewrites every frame (faster), 0 = trap every write\n");
+            std::fprintf(f, "adaptive_watch = %d\n", s_adaptiveWatch.load());
             std::fprintf(f, "fullscreen = %d\n", s_fullscreen.load());
             std::fprintf(f, "show_fps = %d\n", s_showFps.load());
             std::fclose(f);
@@ -72,6 +75,7 @@ namespace wet::options
                 else if (!std::strcmp(key, "resolution_scale")) s_scale = Clamp(value, 1, 3);
                 else if (!std::strcmp(key, "antialiasing")) s_aa = Clamp(value, 0, 2);
                 else if (!std::strcmp(key, "filter")) s_filter = Clamp(value, 0, 3);
+                else if (!std::strcmp(key, "adaptive_watch")) s_adaptiveWatch = value != 0;
                 else if (!std::strcmp(key, "sharpness")) s_sharpness = Clamp(value, 0, 100);
                 else if (!std::strcmp(key, "fullscreen")) s_fullscreen = value != 0;
                 else if (!std::strcmp(key, "show_fps")) s_showFps = value != 0;
@@ -85,6 +89,9 @@ namespace wet::options
             s_scale = Clamp(std::atoi(v), 1, 3);
         s_scaleRunning = s_scale;
         renderer::SetResolutionScale(uint32_t(s_scale));
+        if (const char* v = std::getenv("WET_ADAPTIVE_WATCH"))
+            s_adaptiveWatch = std::atoi(v) != 0;
+        SetAdaptiveWatch(s_adaptiveWatch != 0);
         Save();
         ApplyFps();
         Log("Options: %d FPS, rendering at %dx%d (resolution_scale %d), antialiasing %d, filter %d; saved in %s",
@@ -120,6 +127,8 @@ namespace wet::options
     void SetSharpness(int v) { s_sharpness = Clamp(v, 0, 100); Save(); }
     bool Fullscreen() { return s_fullscreen; }
     void SetFullscreen(bool v) { s_fullscreen = v; Save(); }
+    bool AdaptiveWatch() { return s_adaptiveWatch; }
+    void SetAdaptiveWatchOption(bool v) { s_adaptiveWatch = v; SetAdaptiveWatch(v); Save(); }
     bool ShowFps() { return s_showFps; }
     void SetShowFps(bool v) { s_showFps = v; Save(); }
 }

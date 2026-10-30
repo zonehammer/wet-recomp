@@ -25,6 +25,9 @@ namespace wet::options
     int Filter();
     void SetFilter(int v);
     // NVIDIA Image Scaling sharpness, 0-100.
+    // Adaptive write watching (memory.cpp), wet.ini adaptive_watch.
+    bool AdaptiveWatch();
+    void SetAdaptiveWatchOption(bool v);
     int Sharpness();
     void SetSharpness(int v);
 

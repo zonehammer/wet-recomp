@@ -623,6 +623,7 @@ namespace
                 if (wptr != seen[kRegCpRbWptr])
                 {
                     seen[kRegCpRbWptr] = wptr;
+                    FlushHotPages();   // hot pages the title changed before this kick
                     renderer::UpdateWritePointer(wptr);
                 }
                 for (uint32_t i = 0; i < kMirror; i++)
@@ -815,7 +816,15 @@ GUEST_IMPORT(VdSwap)
     }
     uint64_t n = ++s_swaps;
     if (n <= 3 || (n & (n - 1)) == 0)
-        Log("VdSwap: frame %llu presented (front buffer %08X, %ux%u)", (unsigned long long)n, front, width, height);
+    {
+        uint64_t faults, protects, checks, inval, cooled;
+        uint32_t hot;
+        WatchStats(faults, protects);
+        HotWatchStats(hot, checks, inval, cooled);
+        Log("VdSwap: frame %llu presented (front buffer %08X, %ux%u); write traps %llu, hot pages %u (%llu invalidated, %llu re-protected)",
+            (unsigned long long)n, front, width, height, (unsigned long long)faults, hot, (unsigned long long)inval,
+            (unsigned long long)cooled);
+    }
     Ret(ctx, 0);
 }
 

@@ -393,6 +393,9 @@ namespace
             bool showFps = wet::options::ShowFps();
             if (ImGui::Checkbox("Show FPS counter", &showFps))
                 wet::options::SetShowFps(showFps);
+            bool adaptive = wet::options::AdaptiveWatch();
+            if (ImGui::Checkbox("Fast memory tracking (turn off if textures or models glitch)", &adaptive))
+                wet::options::SetAdaptiveWatchOption(adaptive);
 
             Section("Resolution");
             int res = wet::options::ResolutionScale();

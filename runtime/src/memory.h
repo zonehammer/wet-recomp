@@ -114,6 +114,11 @@ namespace wet
     uint8_t* PhysicalHostView();
     // Write-watch counters since start: faults taken, protect (watch) calls.
     void WatchStats(uint64_t& faults, uint64_t& protectCalls);
+    // Adaptive watching of pages rewritten every frame (see memory.cpp): call at
+    // every ring buffer kick, before the GPU sees the new commands.
+    void FlushHotPages();
+    void SetAdaptiveWatch(bool enabled);
+    void HotWatchStats(uint32_t& hotPages, uint64_t& checks, uint64_t& invalidations, uint64_t& cooled);
 
     // Write trap on one guest page outside physical memory (the GPU register page
     // holding CP_RB_WPTR): while armed, the first write unprotects the page and calls
