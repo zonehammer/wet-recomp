@@ -57,3 +57,11 @@ functions = [
     { address = 0x8331EB50, size = 0x16C },
     { address = 0x8322E068, size = 0x80 },
 ]
+
+# 60 FPS option: the D3D present interval (vblanks per frame) as Present computes
+# it - 2 for the game's 30 FPS. The runtime turns 2 into 1 when 60 FPS is on
+# (same change as Xenia Canary's "60 FPS" game patch, 0x83066E67 = 1).
+[[midasm_hook]]
+name = "WetPresentIntervalHook"
+address = 0x83066E70
+registers = ["r11"]

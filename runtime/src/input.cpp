@@ -2,6 +2,7 @@
 #include "log.h"
 #include "gpu/renderer.h"
 #include "profiler.h"
+#include "options.h"
 
 #include <atomic>
 #include <cctype>
@@ -124,6 +125,12 @@ namespace wet
                 renderer::RequestDrawTrace(2);
             }
             f9 = f9Now;
+            // F6: 30 / 60 FPS.
+            static bool f6 = false;
+            bool f6Now = (GetAsyncKeyState(VK_F6) & 0x8000) != 0;
+            if (f6Now && !f6)
+                options::ToggleFps60();
+            f6 = f6Now;
             // F10: start / stop the sampling profiler (profile.txt).
             static bool f10 = false;
             bool f10Now = (GetAsyncKeyState(VK_F10) & 0x8000) != 0;

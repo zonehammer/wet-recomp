@@ -40,6 +40,9 @@ game window is focused:
 | Esc | B | X / Y | X / Y |
 | Q / E | LB / RB | Z / C | LT / RT |
 
+**F6** switches between the game's 30 FPS and 60 FPS (the same change as Xenia Canary's
+"60 FPS" patch); the choice is saved in `wet.ini`.
+
 Saves go to `game\hdd\content\`. Logs: `wet.log` (the game and kernel) and
 `xenia_gpu.log` (the renderer). `WET_RENDERER=0` falls back to the old stand-in GPU
 (no picture), which helps tell renderer problems from game problems. F9 writes every
