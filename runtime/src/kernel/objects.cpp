@@ -1,6 +1,7 @@
 #include "objects.h"
 #include "kernel.h"
 #include "threads.h"
+#include "../log.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -31,7 +32,10 @@ namespace wet
     // per-object wakes (diagnostic).
     static const bool s_broadcastWake = [] {
         const char* v = std::getenv("WET_BROADCAST_WAKE");
-        return v && *v == '1';
+        bool on = v && *v == '1';
+        if (on)
+            Log("Kernel: WET_BROADCAST_WAKE=1 - every change wakes every waiting thread");
+        return on;
     }();
 
     void DispatchNotifyLocked(KObject* obj)
