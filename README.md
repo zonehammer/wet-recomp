@@ -120,6 +120,8 @@ generated/    generated C++ (ignored by git)
 - Achievements earned in saves from before achievement support aren't shown as unlocked.
 - Tested on one game copy and a few PCs; please report problems with `wet.log` attached.
 
+Planned work is in [ROADMAP.md](ROADMAP.md).
+
 ## Credits
 
 - [XenonRecomp](https://github.com/hedge-dev/XenonRecomp) (hedge-dev) — the recompiler;
