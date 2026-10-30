@@ -17,7 +17,7 @@ namespace wet::apu
 
     // Audio output (XAudio2 on Windows); null if there is none.
     struct Output;
-    Output* OpenOutput();
+    Output* OpenOutput(uint8_t* membase, uint8_t* physicalView);
     // Waits until the output can take another 256-sample frame.
     bool WaitForFrameSlot(Output* out, uint32_t timeoutMs);
     // Queues the title's frame: 6 channels x 256 big-endian floats at `guest`.

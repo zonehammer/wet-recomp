@@ -46,7 +46,8 @@ namespace wet::apu
 
     bool XmaStart(uint8_t* membase, uint8_t* physicalView, uint32_t firstContextGuest, uint32_t count)
     {
-        s_memory = std::make_unique<xe::Memory>(membase, physicalView);
+        if (!s_memory)
+            s_memory = std::make_unique<xe::Memory>(membase, physicalView);
         s_contexts.resize(count);
         for (uint32_t i = 0; i < count; i++)
         {
@@ -105,10 +106,12 @@ namespace wet::apu
         std::unique_ptr<xe::apu::xaudio2::XAudio2AudioDriver> driver;
     };
 
-    Output* OpenOutput()
+    Output* OpenOutput(uint8_t* membase, uint8_t* physicalView)
     {
+        // Audio output starts before the first XMA context, so the memory view
+        // may not exist yet.
         if (!s_memory)
-            return nullptr;
+            s_memory = std::make_unique<xe::Memory>(membase, physicalView);
         auto out = new Output();
         // Xenia's AudioSystem: up to 64 frames queued; the driver releases one
         // per frame played.
@@ -135,7 +138,7 @@ namespace wet::apu
     void SubmitFrame(Output* out, uint32_t guest) { out->driver->SubmitFrame(guest); }
 #else
     struct Output {};
-    Output* OpenOutput() { return nullptr; }
+    Output* OpenOutput(uint8_t*, uint8_t*) { return nullptr; }
     bool WaitForFrameSlot(Output*, uint32_t) { return false; }
     void SubmitFrame(Output*, uint32_t) {}
 #endif

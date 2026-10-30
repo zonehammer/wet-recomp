@@ -10,7 +10,7 @@ namespace wet::apu
     void XmaLock(uint32_t) {}
     void XmaClear(uint32_t) {}
     struct Output {};
-    Output* OpenOutput() { return nullptr; }
+    Output* OpenOutput(uint8_t*, uint8_t*) { return nullptr; }
     bool WaitForFrameSlot(Output*, uint32_t) { return false; }
     void SubmitFrame(Output*, uint32_t) {}
 }

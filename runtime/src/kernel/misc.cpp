@@ -3,6 +3,7 @@
 #include "threads.h"
 #include "xma.h"
 #include "apu/apu.h"
+#include "gpu/renderer.h"
 #include "os.h"
 
 #include <algorithm>
@@ -125,10 +126,12 @@ namespace
                 }
                 if (!c.active)
                     continue;
-                if (!c.triedOutput)
+                // Xenia's audio driver logs through the renderer's log, so wait
+                // for the renderer (it starts within the first second).
+                if (!c.triedOutput && renderer::Running())
                 {
                     c.triedOutput = true;
-                    c.output = apu::OpenOutput();
+                    c.output = apu::OpenOutput(g_mem.base, PhysicalHostView());
                     Log("Audio client %d: %s", i, c.output ? "playing through XAudio2" : "no output device - silent");
                 }
                 uint64_t now = os::MonotonicNs();
