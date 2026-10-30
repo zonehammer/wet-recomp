@@ -51,10 +51,6 @@ namespace wet
         ObjType type;
         uint32_t guestPtr = 0;      // guest object (DISPATCHER_HEADER first), 0 if none yet
         bool guestOwned = false;    // lives in game memory (e.g. a KEVENT inside a game struct)
-        // Seen signalled by a periodic re-check rather than a wake-up: its state
-        // changes somewhere that doesn't notify (game code writing it directly), so
-        // its waiters are woken by every change, as before per-object wakes.
-        bool lateWake = false;
 
         // Called with the dispatcher lock held.
         virtual bool IsSignaled(GuestThread* waiter) { return false; }
