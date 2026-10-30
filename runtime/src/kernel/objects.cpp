@@ -22,6 +22,7 @@ namespace wet
         std::vector<KObject*> objs;
         KObject* thread = nullptr;
         bool notified = false;
+        bool anyLate = false;       // waits on an object with lateWake
     };
     static std::vector<Waiter*> s_waiters;   // threads blocked right now (dispatcher lock)
     static thread_local Waiter t_waiter;
@@ -48,7 +49,7 @@ namespace wet
             obj = nullptr;
         for (Waiter* w : s_waiters)
         {
-            bool match = !obj || w->thread == obj;
+            bool match = !obj || w->thread == obj || w->anyLate;
             for (size_t i = 0; !match && i < w->objs.size(); i++)
                 match = w->objs[i] == obj;
             if (match && !w->notified)
@@ -72,6 +73,9 @@ namespace wet
         w.objs.assign(objs, objs + count);
         w.thread = CurrentThread();
         w.notified = false;
+        w.anyLate = false;
+        for (size_t i = 0; i < count; i++)
+            w.anyLate = w.anyLate || objs[i]->lateWake;
         s_waiters.push_back(&w);
         bool timedOut = false;
         while (!w.notified)
@@ -165,6 +169,25 @@ namespace wet
         GuestThread* self = CurrentThread();
         std::optional<WaitScope> scope;
         std::unique_lock lock(s_dispatchLock);
+        bool afterTick = false;     // the last wait ended at the periodic re-check
+        auto late = [&](KObject* o) {
+            if (!afterTick || o->lateWake)
+                return;
+            o->lateWake = true;
+            static int logged = 0;
+            if (logged++ < 40)
+            {
+                static const char* kTypes[] = { "event", "semaphore", "mutant", "thread", "iocompletion", "file", "notify", "object" };
+                std::string name;
+                if (self)
+                {
+                    std::lock_guard g(self->statusLock);
+                    name = self->name;
+                }
+                Log("Kernel: %s@%08X became signalled without a wake-up (thread %u %s); its waiters now wake on every change",
+                    kTypes[int(o->type)], o->guestPtr, self ? self->id : 0, name.c_str());
+            }
+        };
         for (bool first = true;; first = false)
         {
             for (auto& o : objects)
@@ -178,7 +201,10 @@ namespace wet
                 if (all)
                 {
                     for (auto& o : objects)
+                    {
+                        late(o.get());
                         o->Acquire(self);
+                    }
                     return STATUS_SUCCESS;
                 }
             }
@@ -188,6 +214,7 @@ namespace wet
                 {
                     if (objects[i]->IsSignaled(self))
                     {
+                        late(objects[i].get());
                         objects[i]->Acquire(self);
                         return uint32_t(i);
                     }
@@ -225,9 +252,16 @@ namespace wet
 
             // Wake periodically too: guest-owned objects can be changed by game
             // code writing memory directly, which never notifies us.
-            auto next = now + std::chrono::milliseconds(5);
+            bool anyLate = false;
+            for (auto& o : objects)
+                anyLate = anyLate || o->lateWake;
+            auto next = now + (anyLate ? std::chrono::milliseconds(1) : std::chrono::milliseconds(5));
+            bool tick = true;
             if (deadline && *deadline < next)
+            {
                 next = *deadline;
+                tick = false;
+            }
             KObject* raw[8];
             size_t n = std::min<size_t>(objects.size(), 8);
             for (size_t i = 0; i < n; i++)
@@ -235,7 +269,7 @@ namespace wet
             if (objects.size() > 8)
                 n = 0;   // unusual: any notification wakes it (DispatchWait with no objects
                          // still matches nullptr notifies; the 5 ms recheck covers the rest)
-            DispatchWait(lock, raw, n, next);
+            afterTick = !DispatchWait(lock, raw, n, next) && tick;
         }
     }
 
