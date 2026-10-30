@@ -26,6 +26,8 @@ namespace wet::renderer
     uint32_t ReadRegister(uint32_t index);
     // Logs every draw of the next `frames` frames (diagnostics, F9).
     void RequestDrawTrace(int frames);
+    // Guest vblank rate (60 Hz normally).
+    void SetVsyncRate(uint32_t hz);
 }
 
 // Provided by the kernel for the renderer's threads.

@@ -4,7 +4,7 @@
 namespace wet::options
 {
     void Load();
-    // 60 FPS instead of the game's 30 (present every vblank). F6 toggles it.
-    bool Fps60();
-    void ToggleFps60();
+    // Frame rate: 30 (the game's own), 60, 120 or 144. F6 cycles through them.
+    int Fps();
+    void CycleFps();
 }

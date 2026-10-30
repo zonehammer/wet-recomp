@@ -400,6 +400,76 @@ index 0ec70a7d1..cc9bb402f 100644
    return true;
  }
  
+diff --git a/src/xenia/gpu/graphics_system.cc b/src/xenia/gpu/graphics_system.cc
+index aa96166ef..80caacb94 100644
+--- a/src/xenia/gpu/graphics_system.cc
++++ b/src/xenia/gpu/graphics_system.cc
+@@ -9,6 +9,9 @@
+ 
+ #include "xenia/gpu/graphics_system.h"
+ 
++#include <algorithm>
++#include <chrono>
++
+ #include <cstdint>
+ #include <functional>
+ #include <memory>
+@@ -36,6 +39,10 @@ DEFINE_bool(
+ namespace xe {
+ namespace gpu {
+ 
++#if XE_WET_RUNTIME
++std::atomic<uint32_t> wet_vsync_hz{60};
++#endif
++
+ // Nvidia Optimus/AMD PowerXpress support.
+ // These exports force the process to trigger the discrete GPU in multi-GPU
+ // systems.
+@@ -98,6 +105,28 @@ X_STATUS GraphicsSystem::Setup(cpu::Processor* processor,
+   vsync_worker_running_ = true;
+   vsync_worker_thread_ = kernel::object_ref<kernel::XHostThread>(
+       new kernel::XHostThread(kernel_state_, 128 * 1024, 0, [this]() {
++#if XE_WET_RUNTIME
++        // WET: vblanks at wet_vsync_hz (60 normally; the high frame rate modes
++        // raise it), timed in microseconds rather than whole milliseconds.
++        auto next = std::chrono::steady_clock::now();
++        while (vsync_worker_running_) {
++          uint32_t hz = std::max<uint32_t>(wet_vsync_hz.load(), 1);
++          next += std::chrono::microseconds(1000000 / hz);
++          auto now = std::chrono::steady_clock::now();
++          if (next < now - std::chrono::milliseconds(100)) {
++            next = now;  // fell far behind (debugger, stall): don't burst
++          }
++          while ((now = std::chrono::steady_clock::now()) < next) {
++            if (next - now > std::chrono::milliseconds(2)) {
++              xe::threading::Sleep(std::chrono::milliseconds(1));
++            } else {
++              xe::threading::MaybeYield();
++            }
++          }
++          MarkVblank();
++        }
++        return 0;
++#endif
+         uint64_t vsync_duration = cvars::vsync ? 16 : 1;
+         uint64_t last_frame_time = Clock::QueryGuestTickCount();
+         while (vsync_worker_running_) {
+diff --git a/src/xenia/gpu/graphics_system.h b/src/xenia/gpu/graphics_system.h
+index 8994b20bc..aab0798df 100644
+--- a/src/xenia/gpu/graphics_system.h
++++ b/src/xenia/gpu/graphics_system.h
+@@ -34,6 +34,11 @@ class Emulator;
+ namespace xe {
+ namespace gpu {
+ 
++#if XE_WET_RUNTIME
++// WET: guest vblank rate in Hz (set by the runtime's frame rate option).
++extern std::atomic<uint32_t> wet_vsync_hz;
++#endif
++
+ class CommandProcessor;
+ 
+ class GraphicsSystem {
 diff --git a/src/xenia/gpu/spirv_shader_translator_fetch.cc b/src/xenia/gpu/spirv_shader_translator_fetch.cc
 index e0fd8440d..15115f823 100644
 --- a/src/xenia/gpu/spirv_shader_translator_fetch.cc

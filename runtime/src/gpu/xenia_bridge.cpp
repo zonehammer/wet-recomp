@@ -518,6 +518,8 @@ namespace wet::renderer
         }
     }
 
+    void SetVsyncRate(uint32_t hz) { xe::gpu::wet_vsync_hz = hz; }
+
     void RequestDrawTrace(int frames)
     {
         xe::gpu::wet_draw_trace_frames = frames;

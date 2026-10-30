@@ -125,11 +125,11 @@ namespace wet
                 renderer::RequestDrawTrace(2);
             }
             f9 = f9Now;
-            // F6: 30 / 60 FPS.
+            // F6: 30 / 60 / 120 / 144 FPS.
             static bool f6 = false;
             bool f6Now = (GetAsyncKeyState(VK_F6) & 0x8000) != 0;
             if (f6Now && !f6)
-                options::ToggleFps60();
+                options::CycleFps();
             f6 = f6Now;
             // F10: start / stop the sampling profiler (profile.txt).
             static bool f10 = false;

@@ -12,5 +12,6 @@ namespace wet::renderer
     void UpdateWritePointer(uint32_t) {}
     void WriteRegister(uint32_t, uint32_t) {}
     void RequestDrawTrace(int) {}
+    void SetVsyncRate(uint32_t) {}
     uint32_t ReadRegister(uint32_t) { return 0; }
 }
