@@ -69,6 +69,10 @@ add_executable(WetRecomp ${WET_RUNTIME_SOURCES} ${WET_STUBS_CPP})
 # ppc_context.h wins over the template of the same name).
 target_include_directories(WetRecomp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${XR_DIR}/thirdparty/TinySHA1)
 target_link_libraries(WetRecomp PRIVATE WetPPC WetRenderer XenonUtils Threads::Threads)
+if(WET_HAVE_SDL)
+    target_link_libraries(WetRecomp PRIVATE SDL2::SDL2-static)
+    target_compile_definitions(WetRecomp PRIVATE WET_HAVE_SDL=1)
+endif()
 
 if(WIN32)
     target_compile_definitions(WetRecomp PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)

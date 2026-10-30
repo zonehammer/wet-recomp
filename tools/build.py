@@ -104,7 +104,8 @@ def main():
     step("Submodules (XenonRecomp, Xenia's GPU code and its libraries)")
     have = os.path.exists(os.path.join(REPO, "thirdparty", "XenonRecomp", "thirdparty", "simde", "x86", "sse.h")) and \
         os.path.exists(os.path.join(REPO, "thirdparty", "xenia", "third_party", "SPIRV-Tools", "include")) and \
-        os.path.exists(os.path.join(REPO, "thirdparty", "xenia", "third_party", "FFmpeg", "libavcodec", "avcodec.h"))
+        os.path.exists(os.path.join(REPO, "thirdparty", "xenia", "third_party", "FFmpeg", "libavcodec", "avcodec.h")) and \
+        os.path.exists(os.path.join(REPO, "thirdparty", "xenia", "third_party", "SDL2", "include", "SDL.h"))
     if not have:
         run([sys.executable, os.path.join(REPO, "tools", "fetch_deps.py")])
     else:

@@ -27,6 +27,9 @@ namespace wet::options
     // NVIDIA Image Scaling sharpness, 0-100.
     // Adaptive write watching (memory.cpp), wet.ini adaptive_watch.
     // Render thread sleeps instead of spinning on GPU fences (gpu_wait.cpp).
+    // Controller rumble (wet.ini vibration).
+    bool Vibration();
+    void SetVibration(bool v);
     bool GpuWait();
     void SetGpuWait(bool v);
     bool AdaptiveWatch();

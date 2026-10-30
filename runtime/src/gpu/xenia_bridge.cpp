@@ -10,6 +10,7 @@
 // first CPU write invalidates the GPU copy (Xenia's scheme, see xe::Memory).
 #include "gpu/renderer.h"
 #include "options.h"
+#include "input.h"
 
 #include <algorithm>
 #include <atomic>
@@ -399,6 +400,23 @@ namespace
             bool gpuWait = wet::options::GpuWait();
             if (ImGui::Checkbox("Low-CPU GPU wait (render thread sleeps instead of spinning)", &gpuWait))
                 wet::options::SetGpuWait(gpuWait);
+
+            Section("Controllers");
+            {
+                auto pads = wet::ConnectedControllers();
+                bool any = false;
+                for (size_t i = 0; i < pads.size(); i++)
+                    if (!pads[i].empty())
+                    {
+                        ImGui::Text("Player %zu: %s", i + 1, pads[i].c_str());
+                        any = true;
+                    }
+                if (!any)
+                    ImGui::TextDisabled("No controller connected (keyboard: arrows, Space, Esc, X, Y, Q, E, Z, C, Enter)");
+                bool vibration = wet::options::Vibration();
+                if (ImGui::Checkbox("Vibration", &vibration))
+                    wet::options::SetVibration(vibration);
+            }
 
             Section("Resolution");
             int res = wet::options::ResolutionScale();

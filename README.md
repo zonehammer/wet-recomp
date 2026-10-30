@@ -30,8 +30,11 @@ extracts it and generates the C++ from it locally. Nothing under `game/` or
 
 Run `build\runtime\WetRecomp.exe`. It renders with Direct3D 12 (Xenia's most complete
 backend) and falls back to Vulkan 1.1 if D3D12 isn't available; `set WET_GPU=vulkan`
-forces Vulkan. Controls: an Xbox controller, or the keyboard while the
-game window is focused:
+forces Vulkan. Controls: up to four controllers - PlayStation 4/5 (DualShock 4,
+DualSense; USB or Bluetooth), Xbox, Switch Pro and others SDL2 supports - in the order
+they connect, with rumble (F1 overlay: Controllers). PlayStation buttons map by
+position: Cross = A, Circle = B, Square = X, Triangle = Y, Options = Start,
+Share/Create or touchpad click = Back. Or the keyboard while the game window is focused:
 
 | Key | Button | Key | Button |
 |---|---|---|---|

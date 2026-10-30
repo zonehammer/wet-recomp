@@ -2,6 +2,8 @@
 // Kept free of <windows.h> so it never collides with the kernel's status constants.
 #pragma once
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace wet
 {
@@ -16,4 +18,6 @@ namespace wet
     bool HostPadConnected(uint32_t user);
     bool HostPadGetState(uint32_t user, HostPadState& out);
     bool HostPadSetVibration(uint32_t user, uint16_t left, uint16_t right);
+    // Names of the controllers in guest slots 0-3 (empty = none), for the overlay.
+    std::vector<std::string> ConnectedControllers();
 }

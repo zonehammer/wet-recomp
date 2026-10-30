@@ -92,6 +92,8 @@ if(WET_RENDERER)
     include(cmake/xenia.cmake)
 endif()
 
+include(cmake/sdl.cmake)
+
 # ---------------------------------------------------------------------------
 # Runtime (only once the generated code exists)
 # ---------------------------------------------------------------------------

@@ -16,6 +16,7 @@ XENIA_DEPS = [
     "third_party/utfcpp", "third_party/xbyak", "third_party/disruptorplus",
     "third_party/cpptoml", "third_party/date", "third_party/cxxopts", "third_party/imgui",
     "third_party/DirectX-Headers", "third_party/SPIRV-Tools", "third_party/FFmpeg",
+    "third_party/SDL2",
 ]
 
 

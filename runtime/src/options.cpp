@@ -17,7 +17,7 @@ namespace wet::options
         constexpr int kRates[] = { 30, 60, 120, 144 };
         std::atomic<int> s_fps{ 30 };
         int s_scale = 1, s_scaleRunning = 1;
-        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 };
+        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 };
         constexpr const char* kFile = "wet.ini";
 
         int Clamp(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -56,6 +56,8 @@ namespace wet::options
             std::fprintf(f, "adaptive_watch = %d\n", s_adaptiveWatch.load());
             std::fprintf(f, "# gpu_wait: 1 = the render thread sleeps while waiting for the GPU (less CPU), 0 = spins like the console\n");
             std::fprintf(f, "gpu_wait = %d\n", s_gpuWait.load());
+            std::fprintf(f, "# vibration: controller rumble on (1) or off (0)\n");
+            std::fprintf(f, "vibration = %d\n", s_vibration.load());
             std::fprintf(f, "fullscreen = %d\n", s_fullscreen.load());
             std::fprintf(f, "show_fps = %d\n", s_showFps.load());
             std::fclose(f);
@@ -77,6 +79,7 @@ namespace wet::options
                 else if (!std::strcmp(key, "resolution_scale")) s_scale = Clamp(value, 1, 3);
                 else if (!std::strcmp(key, "antialiasing")) s_aa = Clamp(value, 0, 2);
                 else if (!std::strcmp(key, "filter")) s_filter = Clamp(value, 0, 3);
+                else if (!std::strcmp(key, "vibration")) s_vibration = value != 0;
                 else if (!std::strcmp(key, "gpu_wait")) s_gpuWait = value != 0;
                 else if (!std::strcmp(key, "adaptive_watch")) s_adaptiveWatch = value != 0;
                 else if (!std::strcmp(key, "sharpness")) s_sharpness = Clamp(value, 0, 100);
@@ -132,6 +135,8 @@ namespace wet::options
     void SetSharpness(int v) { s_sharpness = Clamp(v, 0, 100); Save(); }
     bool Fullscreen() { return s_fullscreen; }
     void SetFullscreen(bool v) { s_fullscreen = v; Save(); }
+    bool Vibration() { return s_vibration.load(std::memory_order_relaxed) != 0; }
+    void SetVibration(bool v) { s_vibration = v; Save(); }
     bool GpuWait() { return s_gpuWait.load(std::memory_order_relaxed) != 0; }
     void SetGpuWait(bool v) { s_gpuWait = v; Save(); }
     bool AdaptiveWatch() { return s_adaptiveWatch; }
