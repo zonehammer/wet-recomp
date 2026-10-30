@@ -10,7 +10,7 @@ Steps (each skipped when already done):
   3. extract the disc into game/extracted
   4. configure CMake
   5. recompile default.xex into generated/ppc (again whenever config/ changes)
-  6. build build/runtime/WetRecomp(.exe)
+  6. build build/runtime/WetRecomp(.exe) and WetLauncher.exe (Windows)
 
 Windows without Visual Studio: install Python and Git, then
     pip install cmake ninja

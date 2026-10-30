@@ -190,6 +190,14 @@ off in the overlay or with `achievement_popups = 0` in wet.ini. Achievements
 earned before this feature existed aren't known - the game only reports each one
 once, when it is earned.
 
+## Launcher
+
+`build\runtime\WetLauncher.exe` (in a package: "WET Launcher.exe") is a small settings
+window - frame rate, resolution, fullscreen, scaling, anti-aliasing, film grain, mouse,
+vibration, shader cache, video mode, pop-ups - with buttons to open the saves folder,
+clear the shader cache and Play. It edits the same wet.ini as the F1 overlay and starts
+WetRecomp.exe from its own folder.
+
 ## Packaged build
 
 `python tools\package.py` puts a ready-to-run folder in `dist\WET-Recomp`:

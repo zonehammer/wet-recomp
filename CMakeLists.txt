@@ -95,6 +95,20 @@ endif()
 include(cmake/sdl.cmake)
 
 # ---------------------------------------------------------------------------
+# WET Launcher: settings window that edits wet.ini and starts the game (Windows)
+# ---------------------------------------------------------------------------
+if(WIN32)
+    enable_language(RC)
+    add_executable(WetLauncher WIN32 launcher/launcher.cpp launcher/launcher.rc)
+    set_target_properties(WetLauncher PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/runtime)
+    target_compile_definitions(WetLauncher PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
+    target_link_libraries(WetLauncher PRIVATE comctl32 shell32)
+    if(MINGW)
+        target_link_options(WetLauncher PRIVATE -municode)
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
 # Runtime (only once the generated code exists)
 # ---------------------------------------------------------------------------
 if(EXISTS ${WET_GENERATED_DIR}/ppc_func_mapping.cpp)

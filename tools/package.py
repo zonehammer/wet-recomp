@@ -7,7 +7,8 @@
 
 Layout of the folder:
     WET-Recomp/
-      WetRecomp.exe            the game (double-click to play)
+      WET Launcher.exe         settings window with a Play button (start here)
+      WetRecomp.exe            the game (starts straight away, skipping the launcher)
       README.txt               how to run it, controls, settings
       THIRD-PARTY-NOTICES.txt  licences of the libraries inside the exe
       game/extracted/          your extracted WET disc (default.xex, lu0, media, ...)
@@ -58,7 +59,8 @@ Put your extracted WET disc in game\\extracted, so that this file exists:
     game\\extracted\\default.xex
 (tools\\prepare_game.py in the source tree extracts it from your disc image.)
 
-Then double-click WetRecomp.exe.
+Then double-click "WET Launcher.exe": choose your settings and press Play.
+(WetRecomp.exe starts the game directly with the last settings.)
 
 Requirements: a DirectX 12 graphics card (Vulkan 1.1 is the fallback) and an
 up-to-date graphics driver.
@@ -142,6 +144,11 @@ def main():
     os.makedirs(os.path.join(out, "game", "extracted"), exist_ok=True)
     os.makedirs(os.path.join(out, "game", "hdd"), exist_ok=True)
     shutil.copy2(exe, os.path.join(out, os.path.basename(exe)))
+    launcher = os.path.join(os.path.dirname(exe), "WetLauncher.exe")
+    if os.path.exists(launcher):
+        shutil.copy2(launcher, os.path.join(out, "WET Launcher.exe"))
+    else:
+        print("   (no WetLauncher.exe in the build - the package has the game only)")
 
     with open(os.path.join(out, "README.txt"), "w", newline="\r\n") as f:
         f.write(README)
@@ -191,9 +198,9 @@ def main():
     print("\n== Done: " + out)
     if not has_game:
         print("   Put your extracted disc in game\\extracted (default.xex and the folders next to it),")
-        print("   or run again with --with-game. Then double-click WetRecomp.exe.")
+        print("   or run again with --with-game. Then double-click \"WET Launcher.exe\".")
     else:
-        print("   Double-click WetRecomp.exe to play.")
+        print("   Double-click \"WET Launcher.exe\" to play.")
 
 
 if __name__ == "__main__":
