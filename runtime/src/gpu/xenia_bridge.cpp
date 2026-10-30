@@ -346,7 +346,7 @@ namespace
         void UpdateFps()
         {
             auto now = std::chrono::steady_clock::now();
-            uint32_t frames = s_graphics && s_graphics->command_processor() ? s_graphics->command_processor()->counter() : 0;
+            uint32_t frames = s_graphics && s_graphics->command_processor() ? s_graphics->command_processor()->wet_swap_count() : 0;
             double dt = std::chrono::duration<double>(now - fpsStart_).count();
             if (dt >= 0.5)
             {
