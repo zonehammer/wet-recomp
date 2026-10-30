@@ -338,6 +338,7 @@ namespace
     // Post-processing from the options (UI thread).
     void ApplyPostProcessing()
     {
+        xe::gpu::wet_film_grain = float(wet::options::FilmGrain()) / 100.0f;
         if (!s_graphics)
             return;
         if (auto* cp = s_graphics->command_processor())
@@ -594,6 +595,14 @@ namespace
                     s_window->window->SetFullscreen(fullscreen);
                 });
                 wet::options::SetFullscreen(fullscreen);
+            }
+
+            int grain = wet::options::FilmGrain(), grainPick = grain;
+            ImGui::SliderInt("Film grain", &grainPick, 0, 100, "%d%%");
+            if (grainPick != grain)
+            {
+                wet::options::SetFilmGrain(grainPick);
+                ApplyPostProcessing();
             }
 
             int aa = wet::options::Antialiasing(), aaPick = aa;
@@ -857,6 +866,19 @@ namespace wet::renderer
             return false;
         s_memory = std::make_unique<xe::Memory>(membase, physical);
         renderer_host::SetPhysicalWriteCallback(OnPhysicalWrite);
+        // Diagnostics: which shader / constant the film grain slider scales.
+        if (const char* v = std::getenv("WET_GRAIN_PS"))
+            xe::gpu::wet_grain_ps_hash = std::strtoull(v, nullptr, 16);
+        if (const char* v = std::getenv("WET_GRAIN_CONST"))   // "<constant><component>", e.g. 14x
+        {
+            uint32_t c = uint32_t(std::atoi(v));
+            const char* comp = v;
+            while (*comp >= '0' && *comp <= '9')
+                comp++;
+            uint32_t k = *comp == 'y' ? 1 : *comp == 'z' ? 2 : *comp == 'w' ? 3 : 0;
+            xe::gpu::wet_grain_const = (256 + c) * 4 + k;
+        }
+        xe::gpu::wet_film_grain = float(options::FilmGrain()) / 100.0f;
         xe::gpu::wet_gpu_progress = renderer_host::GpuProgress;
         xe::gpu::wet_register_sync_hook = [] { renderer_host::RequestRegisterSync(); };
         s_processor = std::make_unique<xe::cpu::Processor>(s_memory.get());

@@ -19,7 +19,7 @@ namespace wet::options
         std::atomic<int> s_fpsOverride{ 0 };   // video mode: temporary 30 FPS (not saved)
         std::atomic<int> s_videoMode{ 1 };
         int s_scale = 1, s_scaleRunning = 1;
-        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 };
+        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 };
         constexpr const char* kFile = "wet.ini";
 
         int Clamp(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -66,6 +66,8 @@ namespace wet::options
             std::fprintf(f, "achievement_popups = %d\n", s_achievementPopups.load());
             std::fprintf(f, "# video_mode: 1 = while a video plays, run at 30 FPS with the slower thread wake-ups (avoids video flicker)\n");
             std::fprintf(f, "video_mode = %d\n", s_videoMode.load());
+            std::fprintf(f, "# film_grain: the game's film grain, 0 (off) to 100 (as designed)\n");
+            std::fprintf(f, "film_grain = %d\n", s_filmGrain.load());
             std::fprintf(f, "fullscreen = %d\n", s_fullscreen.load());
             std::fprintf(f, "show_fps = %d\n", s_showFps.load());
             std::fclose(f);
@@ -89,6 +91,7 @@ namespace wet::options
                 else if (!std::strcmp(key, "filter")) s_filter = Clamp(value, 0, 3);
                 else if (!std::strcmp(key, "achievement_popups")) s_achievementPopups = value != 0;
                 else if (!std::strcmp(key, "video_mode")) s_videoMode = value != 0;
+                else if (!std::strcmp(key, "film_grain")) s_filmGrain = Clamp(value, 0, 100);
                 else if (!std::strcmp(key, "vibration")) s_vibration = value != 0;
                 else if (!std::strcmp(key, "gpu_wait")) s_gpuWait = value != 0;
                 else if (!std::strcmp(key, "adaptive_watch")) s_adaptiveWatch = value != 0;
@@ -150,6 +153,8 @@ namespace wet::options
     void SetAntialiasing(int v) { s_aa = Clamp(v, 0, 2); Save(); }
     int Filter() { return s_filter; }
     void SetFilter(int v) { s_filter = Clamp(v, 0, 3); Save(); }
+    int FilmGrain() { return s_filmGrain; }
+    void SetFilmGrain(int v) { s_filmGrain = Clamp(v, 0, 100); Save(); }
     int Sharpness() { return s_sharpness; }
     void SetSharpness(int v) { s_sharpness = Clamp(v, 0, 100); Save(); }
     bool Fullscreen() { return s_fullscreen; }

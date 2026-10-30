@@ -42,6 +42,9 @@ namespace wet::options
     void SetGpuWait(bool v);
     bool AdaptiveWatch();
     void SetAdaptiveWatchOption(bool v);
+    // The game's film grain, 0-100 % (wet.ini film_grain).
+    int FilmGrain();
+    void SetFilmGrain(int v);
     int Sharpness();
     void SetSharpness(int v);
 
