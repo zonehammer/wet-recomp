@@ -406,7 +406,11 @@ namespace
             bool fullscreen = s_window && s_window->window && s_window->window->IsFullscreen();
             if (ImGui::Checkbox("Fullscreen (F11)", &fullscreen))
             {
-                s_window->window->SetFullscreen(fullscreen);
+                // Not while painting: switching resizes the swap chain the
+                // presenter is drawing into (that crashed in the driver).
+                s_window->app->CallInUIThreadDeferred([fullscreen] {
+                    s_window->window->SetFullscreen(fullscreen);
+                });
                 wet::options::SetFullscreen(fullscreen);
             }
 
@@ -463,7 +467,7 @@ namespace
         s_imgui->SetPresenterAndImmediateDrawer(presenter, s_immediateDrawer.get());
         ApplyPostProcessing();
         if (wet::options::Fullscreen())
-            s_window->window->SetFullscreen(true);
+            s_window->app->CallInUIThreadDeferred([] { s_window->window->SetFullscreen(true); });
         UpdateOverlay();
     }
 #endif
@@ -734,7 +738,7 @@ namespace wet::renderer
     {
 #if XE_PLATFORM_WIN32
         if (s_window && s_window->app && s_window->window)
-            s_window->app->CallInUIThread([] {
+            s_window->app->CallInUIThreadDeferred([] {
                 bool on = !s_window->window->IsFullscreen();
                 s_window->window->SetFullscreen(on);
                 options::SetFullscreen(on);
