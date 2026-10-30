@@ -26,6 +26,8 @@ namespace wet::renderer
     uint32_t ReadRegister(uint32_t index);
     // Logs every draw of the next `frames` frames (diagnostics, F9).
     void RequestDrawTrace(int frames);
+    // An achievement pop-up is waiting (achievements.cpp); any thread.
+    void AchievementUnlocked();
     // Guest vblank rate (60 Hz normally).
     void SetVsyncRate(uint32_t hz);
     // Rendering resolution scale (1 = 720p, 2 = 1440p, 3 = 2160p); before Start.

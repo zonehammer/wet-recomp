@@ -28,6 +28,9 @@ namespace wet::options
     // Adaptive write watching (memory.cpp), wet.ini adaptive_watch.
     // Render thread sleeps instead of spinning on GPU fences (gpu_wait.cpp).
     // Controller rumble (wet.ini vibration).
+    // "Achievement unlocked" pop-ups (wet.ini achievement_popups).
+    bool AchievementPopups();
+    void SetAchievementPopups(bool v);
     bool Vibration();
     void SetVibration(bool v);
     bool GpuWait();

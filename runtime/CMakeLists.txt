@@ -52,7 +52,7 @@ if(WET_RENDERER)
     add_library(WetRenderer STATIC ${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/xenia_bridge.cpp
                             ${CMAKE_CURRENT_SOURCE_DIR}/src/apu/xenia_apu_bridge.cpp)
     xe_target(WetRenderer)
-    target_include_directories(WetRenderer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_include_directories(WetRenderer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${XE_TP}/stb)
     target_link_libraries(WetRenderer PUBLIC xe_gpu xe_apu)
     if(WIN32)
         target_link_libraries(WetRenderer PUBLIC xe_gpu_d3d12 dxguid)

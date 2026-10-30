@@ -11,6 +11,14 @@
 #include "gpu/renderer.h"
 #include "options.h"
 #include "input.h"
+#include "achievements.h"
+#include <map>
+#include <ctime>
+#define STB_IMAGE_STATIC
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ONLY_PNG
+#define STBI_NO_STDIO
+#include "stb_image.h"
 
 #include <algorithm>
 #include <atomic>
@@ -292,6 +300,38 @@ namespace
     OverlayDialog* s_overlay = nullptr;   // UI thread only
     bool s_nisUnsupported = false;        // UI thread only
 
+    // Achievement pop-ups and icons (UI thread only).
+    constexpr double kPopupSeconds = 6.0;
+    bool s_popupActive = false;
+    wet::achievements::Achievement s_popup;
+    std::chrono::steady_clock::time_point s_popupStart;
+    std::map<uint32_t, std::unique_ptr<xe::ui::ImmediateTexture>> s_icons;
+
+    xe::ui::ImmediateTexture* AchievementIcon(uint32_t imageId)
+    {
+        auto it = s_icons.find(imageId);
+        if (it != s_icons.end())
+            return it->second.get();
+        std::unique_ptr<xe::ui::ImmediateTexture> texture;
+        auto png = wet::achievements::Image(imageId);
+        int w = 0, h = 0, n = 0;
+        if (!png.empty() && s_immediateDrawer)
+            if (stbi_uc* rgba = stbi_load_from_memory(png.data(), int(png.size()), &w, &h, &n, 4))
+            {
+                texture = s_immediateDrawer->CreateTexture(uint32_t(w), uint32_t(h),
+                                                           xe::ui::ImmediateTextureFilter::kLinear, false, rgba);
+                stbi_image_free(rgba);
+            }
+        auto* raw = texture.get();
+        s_icons[imageId] = std::move(texture);
+        return raw;
+    }
+
+    bool PopupPending()
+    {
+        return s_popupActive || (wet::options::AchievementPopups() && wet::achievements::HasPopup());
+    }
+
     // Post-processing from the options (UI thread).
     void ApplyPostProcessing()
     {
@@ -336,10 +376,12 @@ namespace
                 ImGui::End();
             }
 
+            DrawPopup(io, scale);
+
             if (s_overlayOpen)
                 DrawSettings(io, scale);
 
-            if (!s_overlayOpen && !wet::options::ShowFps())
+            if (!s_overlayOpen && !wet::options::ShowFps() && !PopupPending())
                 Close();
         }
 
@@ -355,6 +397,108 @@ namespace
                 fpsFrames_ = frames;
                 fpsStart_ = now;
             }
+        }
+
+        void DrawPopup(ImGuiIO& io, float scale)
+        {
+            if (!s_popupActive)
+            {
+                if (!wet::options::AchievementPopups())
+                {
+                    wet::achievements::Achievement skip;
+                    while (wet::achievements::PopPopup(skip)) {}
+                    return;
+                }
+                if (!wet::achievements::PopPopup(s_popup))
+                    return;
+                s_popupActive = true;
+                s_popupStart = std::chrono::steady_clock::now();
+            }
+            double t = std::chrono::duration<double>(std::chrono::steady_clock::now() - s_popupStart).count();
+            if (t >= kPopupSeconds)
+            {
+                s_popupActive = false;
+                return;
+            }
+            float alpha = float(std::min({ t / 0.3, (kPopupSeconds - t) / 0.5, 1.0 }));
+            ImGui::PushStyleVar(ImGuiStyleVar_Alpha, alpha);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 8 * scale);
+            ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, 24 * scale), ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+            ImGui::SetNextWindowBgAlpha(0.85f);
+            ImGui::Begin("##achievement", nullptr,
+                         ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs |
+                             ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
+                             ImGuiWindowFlags_NoSavedSettings);
+            if (auto* icon = AchievementIcon(s_popup.imageId))
+            {
+                float size = 40 * scale;
+                ImGui::Image(reinterpret_cast<ImTextureID>(icon), ImVec2(size, size));
+                ImGui::SameLine();
+            }
+            ImGui::BeginGroup();
+            ImGui::TextColored(ImVec4(0.55f, 0.85f, 0.35f, 1.0f), "Achievement unlocked - %uG", s_popup.gamerscore);
+            ImGui::TextUnformatted(s_popup.name.c_str());
+            if (!s_popup.description.empty())
+                ImGui::TextDisabled("%s", s_popup.description.c_str());
+            ImGui::EndGroup();
+            ImGui::End();
+            ImGui::PopStyleVar(2);
+        }
+
+        void DrawAchievements(float scale)
+        {
+            auto list = wet::achievements::List();
+            if (list.empty())
+            {
+                ImGui::TextDisabled("No achievement data found in default.xex");
+                return;
+            }
+            uint32_t unlocked = 0, score = 0, total = 0;
+            for (auto& a : list)
+            {
+                total += a.gamerscore;
+                if (a.unlocked)
+                {
+                    unlocked++;
+                    score += a.gamerscore;
+                }
+            }
+            ImGui::Text("%u of %zu unlocked, %u / %uG", unlocked, list.size(), score, total);
+            bool popups = wet::options::AchievementPopups();
+            if (ImGui::Checkbox("Show pop-ups", &popups))
+                wet::options::SetAchievementPopups(popups);
+            if (!ImGui::CollapsingHeader("Achievement list"))
+                return;
+            ImGui::BeginChild("##achievements", ImVec2(560 * scale / 1.5f, 220 * scale / 1.5f), true);
+            for (auto& a : list)
+            {
+                if (auto* icon = AchievementIcon(a.imageId))
+                {
+                    ImVec4 tint = a.unlocked ? ImVec4(1, 1, 1, 1) : ImVec4(0.35f, 0.35f, 0.35f, 1);
+                    ImGui::Image(reinterpret_cast<ImTextureID>(icon), ImVec2(28 * scale, 28 * scale), ImVec2(0, 0),
+                                 ImVec2(1, 1), tint);
+                    ImGui::SameLine();
+                }
+                ImGui::BeginGroup();
+                bool hide = !a.unlocked && a.secret;
+                if (a.unlocked)
+                    ImGui::Text("%s  (%uG)", a.name.c_str(), a.gamerscore);
+                else
+                    ImGui::TextDisabled("%s  (%uG)", hide ? "Secret achievement" : a.name.c_str(), a.gamerscore);
+                const std::string& text = a.unlocked ? a.description : a.lockedDescription;
+                if (!hide && !text.empty())
+                    ImGui::TextDisabled("%s", text.c_str());
+                if (a.unlocked && a.unlockTime)
+                {
+                    std::time_t t = std::time_t(a.unlockTime);
+                    char when[32] = {};
+                    if (std::tm* tm = std::localtime(&t))
+                        std::strftime(when, sizeof(when), "%d %b %Y %H:%M", tm);
+                    ImGui::TextDisabled("Unlocked %s", when);
+                }
+                ImGui::EndGroup();
+            }
+            ImGui::EndChild();
         }
 
         static void Section(const char* title)
@@ -400,6 +544,9 @@ namespace
             bool gpuWait = wet::options::GpuWait();
             if (ImGui::Checkbox("Low-CPU GPU wait (render thread sleeps instead of spinning)", &gpuWait))
                 wet::options::SetGpuWait(gpuWait);
+
+            Section("Achievements");
+            DrawAchievements(scale);
 
             Section("Controllers");
             {
@@ -484,7 +631,7 @@ namespace
     {
         if (!s_imgui)
             return;
-        if (!s_overlay && (s_overlayOpen || wet::options::ShowFps()))
+        if (!s_overlay && (s_overlayOpen || wet::options::ShowFps() || PopupPending()))
             s_overlay = new OverlayDialog(s_imgui.get());
     }
 
@@ -780,6 +927,14 @@ namespace wet::renderer
                 s_window->window->SetFullscreen(on);
                 options::SetFullscreen(on);
             });
+#endif
+    }
+
+    void AchievementUnlocked()
+    {
+#if XE_PLATFORM_WIN32
+        if (s_window && s_window->app && s_imgui)
+            s_window->app->CallInUIThread([] { UpdateOverlay(); });
 #endif
     }
 

@@ -13,6 +13,7 @@
 #include "log.h"
 #include "profiler.h"
 #include "options.h"
+#include "achievements.h"
 #include "kernel/xma.h"
 #include "memory.h"
 #include "module.h"
@@ -92,6 +93,7 @@ int main(int argc, char** argv)
     InitKernelVariables();
     InitXma();
     InitFileSystem(gameDir, hddDir);
+    achievements::Load(hddDir);
 
     if (!StartMainThread(g_module.entryPoint, g_module.stackSize))
         return 1;

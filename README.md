@@ -34,7 +34,7 @@ forces Vulkan. Controls: up to four controllers - PlayStation 4/5 (DualShock 4,
 DualSense; USB or Bluetooth), Xbox, Switch Pro and others SDL2 supports - in the order
 they connect, with rumble (F1 overlay: Controllers). PlayStation buttons map by
 position: Cross = A, Circle = B, Square = X, Triangle = Y, Options = Start,
-Share/Create or touchpad click = Back. Or the keyboard while the game window is focused:
+Share/Create or touchpad click = Back. Or the keyboard while the game window is focused (achievements: see below):
 
 | Key | Button | Key | Button |
 |---|---|---|---|
@@ -172,3 +172,14 @@ reference for how a finished recompilation project is structured.
 This project contains no copyrighted game code or assets. It is intended for people who
 own a legitimate copy of WET. Not affiliated with Bethesda Softworks or Artificial Mind
 and Movement.
+
+## Achievements
+
+The game's achievements (names, descriptions, gamerscore and icons, read from
+default.xex) are tracked when the game awards them: an "Achievement unlocked"
+pop-up appears at the top of the screen, and the F1 overlay's Achievements
+section lists them all with unlock dates. Unlocks are saved in
+`game\hdd\achievements.ini` (delete a line to re-lock one); pop-ups can be turned
+off in the overlay or with `achievement_popups = 0` in wet.ini. Achievements
+earned before this feature existed aren't known - the game only reports each one
+once, when it is earned.

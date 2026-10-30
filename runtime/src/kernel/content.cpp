@@ -9,6 +9,7 @@
 #include "log.h"
 #include "module.h"
 #include "objects.h"
+#include "../achievements.h"
 
 #include <chrono>
 #include <cstdio>
@@ -307,6 +308,30 @@ GUEST_IMPORT(XamContentCreateEnumerator)
     Log("XamContentCreateEnumerator(device %u, type %08X): %zu items", device, type, e->items.size());
     Ret(ctx, CreateEnumeratorHandle(e, Arg(ctx, 5), Arg(ctx, 6)));
 }
+
+// ---------------------------------------------------------------------------
+// XMsg requests to the system apps. Only XUserWriteAchievements (XGI app 0xFB,
+// message 0x000B0008: buffer { be32 count; be32 XUSER_ACHIEVEMENT* } with
+// XUSER_ACHIEVEMENT { be32 user_index; be32 achievement_id }) is handled; the rest
+// are logged and succeed without completing, as before.
+// ---------------------------------------------------------------------------
+static void XMsgRequest(PPCContext& ctx, const char* name)
+{
+    uint32_t app = Arg(ctx, 0), message = Arg(ctx, 1), ov = Arg(ctx, 2), buffer = Arg(ctx, 3);
+    if (app == 0xFB && message == 0x000B0008 && buffer)
+    {
+        uint32_t count = Ld32(buffer), list = Ld32(buffer + 4);
+        for (uint32_t i = 0; i < count && i < 256 && list; i++)
+            achievements::Unlock(Ld32(list + i * 8 + 4));
+        return Ret(ctx, Finish(ov, ERROR_SUCCESS));
+    }
+    StubCall(name, ctx);
+}
+
+// XMsgStartIORequest(app, message, overlapped, buffer, buffer_length)
+GUEST_IMPORT(XMsgStartIORequest) { XMsgRequest(ctx, "XMsgStartIORequest"); }
+// XMsgStartIORequestEx(app, message, overlapped, buffer, buffer_length, unknown)
+GUEST_IMPORT(XMsgStartIORequestEx) { XMsgRequest(ctx, "XMsgStartIORequestEx"); }
 
 // XamUserCreateAchievementEnumerator(title_id, user, xuid, flags, offset, count, buffer_size*, handle*)
 GUEST_IMPORT(XamUserCreateAchievementEnumerator)
