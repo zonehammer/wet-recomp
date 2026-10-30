@@ -227,6 +227,41 @@ namespace wet::achievements
         renderer::AchievementUnlocked();
     }
 
+    void UnlockMany(const std::vector<uint32_t>& ids)
+    {
+        std::vector<Achievement> fresh;
+        {
+            std::lock_guard lock(s_lock);
+            for (uint32_t id : ids)
+                for (auto& a : s_list)
+                    if (a.id == id && !a.unlocked)
+                    {
+                        a.unlocked = true;
+                        a.unlockTime = uint64_t(std::time(nullptr));
+                        fresh.push_back(a);
+                        Log("Achievements: unlocked \"%s\" (%uG)", a.name.c_str(), a.gamerscore);
+                    }
+            if (fresh.empty())
+                return;
+            SaveLocked();
+            if (fresh.size() <= 2)
+                for (auto& a : fresh)
+                    s_popups.push_back(a);
+            else
+            {
+                Achievement summary = fresh.front();
+                uint32_t score = 0;
+                for (auto& a : fresh)
+                    score += a.gamerscore;
+                summary.name = std::to_string(fresh.size()) + " achievements unlocked";
+                summary.description = "Earned in earlier play - see the F1 overlay";
+                summary.gamerscore = score;
+                s_popups.push_back(summary);
+            }
+        }
+        renderer::AchievementUnlocked();
+    }
+
     std::vector<Achievement> List()
     {
         std::lock_guard lock(s_lock);

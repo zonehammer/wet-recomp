@@ -118,6 +118,10 @@ namespace wet
         uint32_t itemSize, itemsPerCall;
         std::vector<std::vector<uint8_t>> items;
         size_t next = 0;
+        // Achievements: X_ACHIEVEMENT_DETAILS records first, then the UTF-16 strings
+        // they point to, so items are written straight into the guest buffer.
+        bool achievements = false;
+        uint32_t flags = 0;
     };
 
     // Queues a notification (XN_SYS_UI, ...) for every listener whose mask covers it.

@@ -26,6 +26,8 @@ namespace wet::achievements
     void Load(const std::filesystem::path& hddDir);
     // An unlock from the game; ignored if already unlocked or unknown.
     void Unlock(uint32_t id);
+    // Several at once (more than 2 new ones get a single summary pop-up).
+    void UnlockMany(const std::vector<uint32_t>& ids);
     std::vector<Achievement> List();
     // Next pending pop-up, if any.
     bool PopPopup(Achievement& out);

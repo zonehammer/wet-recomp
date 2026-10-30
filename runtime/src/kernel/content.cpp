@@ -321,8 +321,10 @@ static void XMsgRequest(PPCContext& ctx, const char* name)
     if (app == 0xFB && message == 0x000B0008 && buffer)
     {
         uint32_t count = Ld32(buffer), list = Ld32(buffer + 4);
+        std::vector<uint32_t> ids;
         for (uint32_t i = 0; i < count && i < 256 && list; i++)
-            achievements::Unlock(Ld32(list + i * 8 + 4));
+            ids.push_back(Ld32(list + i * 8 + 4));
+        achievements::UnlockMany(ids);
         return Ret(ctx, Finish(ov, ERROR_SUCCESS));
     }
     // Every other XGI (0xFB) / XLiveBase (0xFC) request, logged in full (the
@@ -345,17 +347,78 @@ GUEST_IMPORT(XMsgStartIORequest) { XMsgRequest(ctx, "XMsgStartIORequest"); }
 // XMsgStartIORequestEx(app, message, overlapped, buffer, buffer_length, unknown)
 GUEST_IMPORT(XMsgStartIORequestEx) { XMsgRequest(ctx, "XMsgStartIORequestEx"); }
 
+// X_ACHIEVEMENT_DETAILS { be32 id, label*, description*, unachieved*, image_id,
+// gamerscore; be64 unlock FILETIME; be32 flags } for each item, then the strings
+// (UTF-16BE) after all itemsPerCall records, like the dashboard lays them out.
+static uint32_t WriteAchievements(KEnumerator& e, uint32_t buffer, uint32_t length, uint32_t room)
+{
+    auto list = achievements::List();
+    uint32_t count = 0;
+    uint32_t strings = buffer + e.itemsPerCall * 0x24, stringsEnd = buffer + length;
+    auto put = [&](const std::string& text) -> uint32_t {
+        // UTF-8 (XDBF) -> UTF-16BE, basic multilingual plane.
+        std::vector<uint16_t> u;
+        for (size_t i = 0; i < text.size();)
+        {
+            uint8_t c = uint8_t(text[i]);
+            uint32_t cp = c, extra = 0;
+            if (c >= 0xF0) { cp = c & 7; extra = 3; }
+            else if (c >= 0xE0) { cp = c & 15; extra = 2; }
+            else if (c >= 0xC0) { cp = c & 31; extra = 1; }
+            i++;
+            for (; extra && i < text.size(); extra--, i++)
+                cp = (cp << 6) | (uint8_t(text[i]) & 0x3F);
+            u.push_back(cp > 0xFFFF ? uint16_t('?') : uint16_t(cp));
+        }
+        uint32_t bytes = uint32_t(u.size() + 1) * 2;
+        if (strings + bytes > stringsEnd)
+            return 0;
+        uint32_t at = strings;
+        for (size_t i = 0; i < u.size(); i++)
+            St16(at + uint32_t(i) * 2, u[i]);
+        St16(at + uint32_t(u.size()) * 2, 0);
+        strings += bytes;
+        return at;
+    };
+    while (count < room && e.next < list.size())
+    {
+        const auto& a = list[e.next++];
+        uint32_t d = buffer + count * 0x24;
+        St32(d + 0x00, a.id);
+        St32(d + 0x04, (e.flags & 1) ? put(a.name) : 0);
+        St32(d + 0x08, (e.flags & 2) ? put(a.description) : 0);
+        St32(d + 0x0C, (e.flags & 4) ? put(a.lockedDescription) : 0);
+        St32(d + 0x10, a.imageId);
+        St32(d + 0x14, a.gamerscore);
+        // Unix seconds -> FILETIME (100 ns since 1601)
+        uint64_t ft = a.unlocked ? (a.unlockTime + 11644473600ull) * 10000000ull : 0;
+        St64(d + 0x18, ft);
+        St32(d + 0x20, a.flags | (a.unlocked ? 0x20000u : 0u));   // XACHIEVEMENT_DETAILS_ACHIEVED
+        count++;
+    }
+    return count;
+}
+
 // XamUserCreateAchievementEnumerator(title_id, user, xuid, flags, offset, count, buffer_size*, handle*)
 GUEST_IMPORT(XamUserCreateAchievementEnumerator)
 {
     uint32_t count = Arg(ctx, 5);
-    Log("XamUserCreateAchievementEnumerator(title %08X, user %u, flags %X, offset %u, count %u)", Arg(ctx, 0), Arg(ctx, 1),
-        Arg(ctx, 3), Arg(ctx, 4), count);
+    static int logged = 0;
+    if (logged++ < 5)
+        Log("XamUserCreateAchievementEnumerator(title %08X, user %u, flags %X, offset %u, count %u)%s", Arg(ctx, 0),
+            Arg(ctx, 1), Arg(ctx, 3), Arg(ctx, 4), count, logged == 5 ? " (further calls not logged)" : "");
     if (!count || !Arg(ctx, 6) || !Arg(ctx, 7))
         return Ret(ctx, ERROR_INVALID_PARAMETER);
     // X_ACHIEVEMENT_DETAILS (0x24) plus string space when details are requested.
-    uint32_t size = 0x24 + ((Arg(ctx, 3) & 7) ? 0x8A0 : 0);
-    Ret(ctx, CreateEnumeratorHandle(std::make_shared<KEnumerator>(size, count), Arg(ctx, 6), Arg(ctx, 7)));
+    // X_ACHIEVEMENT_DETAILS (0x24) plus 464 bytes of string space when strings are
+    // requested (as the dashboard does). XamEnumerate fills them (WriteAchievements).
+    uint32_t size = 0x24 + ((Arg(ctx, 3) & 7) ? 464 : 0);
+    auto e = std::make_shared<KEnumerator>(size, count);
+    e->achievements = true;
+    e->flags = Arg(ctx, 3);
+    for (size_t i = 0; i < achievements::List().size(); i++)
+        e->items.emplace_back();   // one placeholder per achievement
+    Ret(ctx, CreateEnumeratorHandle(e, Arg(ctx, 6), Arg(ctx, 7)));
 }
 
 // XamEnumerate(handle, flags, buffer, buffer_length, items_returned*, overlapped)
@@ -375,7 +438,9 @@ GUEST_IMPORT(XamEnumerate)
         uint32_t room = e->itemSize ? length / e->itemSize : 0;
         if (room > e->itemsPerCall)
             room = e->itemsPerCall;
-        while (count < room && e->next < e->items.size())
+        if (e->achievements)
+            count = WriteAchievements(*e, buffer, length, room);
+        while (!e->achievements && count < room && e->next < e->items.size())
         {
             std::memcpy(HostPtr(buffer + count * e->itemSize), e->items[e->next].data(), e->itemSize);
             e->next++;
