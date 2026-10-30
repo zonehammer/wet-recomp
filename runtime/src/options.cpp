@@ -64,3 +64,22 @@ void WetPresentIntervalHook(PPCRegister& r11)
     if (r11.u32 == 2 && wet::options::Fps60())
         r11.u64 = 1;
 }
+
+// The game world's per-frame update (A2M world, f1 = time step in seconds; it
+// stores it at +196 for everything else). The game steps 1/30 s every frame, so
+// at 60 FPS everything ran at double speed: halve the step while 60 FPS is on.
+extern "C" void __imp__sub_82C32BF8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82C32BF8)
+{
+    static uint64_t calls = 0;
+    static int lastHalved = -1;
+    double dt = ctx.f1.f64;
+    bool halve = wet::options::Fps60() && dt > 1.0 / 30.0 - 1e-4 && dt < 1.0 / 30.0 + 1e-4;
+    if (halve)
+        ctx.f1.f64 = dt * 0.5;
+    // Diagnostics: the first steps, every change, and one a minute.
+    if (calls++ < 3 || int(halve) != lastHalved || calls % 3600 == 0)
+        wet::Log("World update: step %.6f s%s", dt, halve ? " (halved for 60 FPS)" : "");
+    lastHalved = halve;
+    __imp__sub_82C32BF8(ctx, base);
+}

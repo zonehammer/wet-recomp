@@ -43,3 +43,8 @@ PPC_FUNC_IMPL(__imp__sub_82510040) {
 	PPC_FUNC_PROLOGUE();
 	ctx.r3.u64 = 0;
 }
+
+// Guest functions the runtime overrides (options.cpp) must exist.
+PPC_FUNC_IMPL(__imp__sub_82C32BF8) {
+	PPC_FUNC_PROLOGUE();
+}
