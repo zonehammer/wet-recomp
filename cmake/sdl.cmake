@@ -17,6 +17,8 @@ if(WIN32 AND EXISTS ${WET_SDL_DIR}/CMakeLists.txt)
     endforeach()
     set(SDL_STATIC ON CACHE BOOL "" FORCE)
     set(SDL_STATIC_PIC OFF CACHE BOOL "" FORCE)
+    # SDL 2.24 asks for CMake 3.0; CMake 4 refuses anything below 3.5 unless told.
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
     add_subdirectory(${WET_SDL_DIR} ${CMAKE_BINARY_DIR}/thirdparty/SDL2 EXCLUDE_FROM_ALL)
     set(WET_HAVE_SDL ON)
     message(STATUS "Controllers: SDL2 (PlayStation, Xbox and other pads)")
