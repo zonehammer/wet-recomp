@@ -107,7 +107,7 @@ index 8f6087b05..47c87eec0 100644
  
  static void set_name(HANDLE thread, const std::string_view name) {
 diff --git a/src/xenia/gpu/command_processor.cc b/src/xenia/gpu/command_processor.cc
-index ce08d19bd..958f6fae7 100644
+index ce08d19bd..9982a570e 100644
 --- a/src/xenia/gpu/command_processor.cc
 +++ b/src/xenia/gpu/command_processor.cc
 @@ -9,6 +9,9 @@
@@ -120,10 +120,14 @@ index ce08d19bd..958f6fae7 100644
  #include <algorithm>
  #include <cinttypes>
  #include <cmath>
-@@ -32,6 +35,87 @@
+@@ -32,6 +35,91 @@
  namespace xe {
  namespace gpu {
  
++#if XE_WET_RUNTIME
++void (*wet_gpu_progress)() = nullptr;
++#endif
++
 +#if XE_WET_RUNTIME
 +int wet_draw_trace_frames = 0;
 +void (*wet_register_sync_hook)() = nullptr;
@@ -208,7 +212,50 @@ index ce08d19bd..958f6fae7 100644
  using namespace xe::gpu::xenos;
  
  CommandProcessor::CommandProcessor(GraphicsSystem* graphics_system,
-@@ -932,11 +1016,44 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(RingBuffer* reader,
+@@ -244,6 +332,7 @@ void CommandProcessor::WorkerThreadMain() {
+       xe::store_and_swap<uint32_t>(
+           memory_->TranslatePhysical(read_ptr_writeback_ptr_), read_ptr_index_);
+     }
++    WET_GPU_PROGRESS();
+ 
+     // FIXME: We're supposed to process the WAIT_UNTIL register at this point,
+     // but no games seem to actually use it.
+@@ -349,6 +438,7 @@ void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
+       uint32_t scratch_addr = regs.values[XE_GPU_REG_SCRATCH_ADDR];
+       uint32_t mem_addr = scratch_addr + (scratch_reg * 4);
+       xe::store_and_swap<uint32_t>(memory_->TranslatePhysical(mem_addr), value);
++      WET_GPU_PROGRESS();
+     }
+   } else {
+     switch (index) {
+@@ -743,21 +833,26 @@ bool CommandProcessor::ExecutePacketType3(RingBuffer* reader, uint32_t packet) {
+       break;
+     case PM4_MEM_WRITE:
+       result = ExecutePacketType3_MEM_WRITE(reader, packet, count);
++      WET_GPU_PROGRESS();
+       break;
+     case PM4_COND_WRITE:
+       result = ExecutePacketType3_COND_WRITE(reader, packet, count);
++      WET_GPU_PROGRESS();
+       break;
+     case PM4_EVENT_WRITE:
+       result = ExecutePacketType3_EVENT_WRITE(reader, packet, count);
+       break;
+     case PM4_EVENT_WRITE_SHD:
+       result = ExecutePacketType3_EVENT_WRITE_SHD(reader, packet, count);
++      WET_GPU_PROGRESS();
+       break;
+     case PM4_EVENT_WRITE_EXT:
+       result = ExecutePacketType3_EVENT_WRITE_EXT(reader, packet, count);
++      WET_GPU_PROGRESS();
+       break;
+     case PM4_EVENT_WRITE_ZPD:
+       result = ExecutePacketType3_EVENT_WRITE_ZPD(reader, packet, count);
++      WET_GPU_PROGRESS();
+       break;
+     case PM4_DRAW_INDX:
+       result = ExecutePacketType3_DRAW_INDX(reader, packet, count);
+@@ -932,11 +1027,44 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(RingBuffer* reader,
    uint32_t frontbuffer_ptr = reader->ReadAndSwap<uint32_t>();
    uint32_t frontbuffer_width = reader->ReadAndSwap<uint32_t>();
    uint32_t frontbuffer_height = reader->ReadAndSwap<uint32_t>();
@@ -254,7 +301,7 @@ index ce08d19bd..958f6fae7 100644
    return true;
  }
  
-@@ -974,7 +1091,19 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -974,7 +1102,19 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
                  : register_file_->values[poll_reg_addr];
  
    bool matched = false;
@@ -274,7 +321,7 @@ index ce08d19bd..958f6fae7 100644
      uint32_t value = value_ref;
      if (is_memory) {
        trace_writer_.WriteMemoryRead(CpuToGpu(poll_reg_addr & ~uint32_t(0x3)),
-@@ -1017,12 +1146,19 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -1017,12 +1157,19 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
        // Wait.
        if (wait >= 0x100) {
          PrepareForWait();
@@ -294,7 +341,7 @@ index ce08d19bd..958f6fae7 100644
          xe::threading::SyncMemory();
          ReturnFromWait();
  
-@@ -1036,6 +1172,7 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -1036,6 +1183,7 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
      }
    } while (!matched);
  
@@ -303,13 +350,28 @@ index ce08d19bd..958f6fae7 100644
  }
  
 diff --git a/src/xenia/gpu/command_processor.h b/src/xenia/gpu/command_processor.h
-index ffc8eeffa..22d96d5b0 100644
+index ffc8eeffa..83746e146 100644
 --- a/src/xenia/gpu/command_processor.h
 +++ b/src/xenia/gpu/command_processor.h
-@@ -35,9 +35,24 @@ class ByteStream;
+@@ -35,9 +35,39 @@ class ByteStream;
  
  namespace gpu {
  
++#if XE_WET_RUNTIME
++// WET: called after the command processor writes something the title may be
++// waiting for (fences: MEM_WRITE, COND_WRITE, EVENT_WRITE*, scratch registers,
++// the read pointer write-back).
++extern void (*wet_gpu_progress)();
++inline void WetGpuProgress() {
++  if (wet_gpu_progress) {
++    wet_gpu_progress();
++  }
++}
++#define WET_GPU_PROGRESS() WetGpuProgress()
++#else
++#define WET_GPU_PROGRESS()
++#endif
++
 +
  class GraphicsSystem;
  class Shader;
@@ -331,7 +393,7 @@ index ffc8eeffa..22d96d5b0 100644
  struct SwapState {
    // Lock must be held when changing data in this structure.
    std::mutex mutex;
-@@ -78,6 +93,10 @@ class CommandProcessor {
+@@ -78,6 +108,10 @@ class CommandProcessor {
    virtual ~CommandProcessor();
  
    uint32_t counter() const { return counter_; }
@@ -342,7 +404,7 @@ index ffc8eeffa..22d96d5b0 100644
    void increment_counter() { counter_++; }
  
    Shader* active_vertex_shader() const { return active_vertex_shader_; }
-@@ -270,6 +289,9 @@ class CommandProcessor {
+@@ -270,6 +304,9 @@ class CommandProcessor {
    std::vector<uint32_t> me_bin_;
  
    uint32_t counter_ = 0;

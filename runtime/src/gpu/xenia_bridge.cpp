@@ -396,6 +396,9 @@ namespace
             bool adaptive = wet::options::AdaptiveWatch();
             if (ImGui::Checkbox("Fast memory tracking (turn off if textures or models glitch)", &adaptive))
                 wet::options::SetAdaptiveWatchOption(adaptive);
+            bool gpuWait = wet::options::GpuWait();
+            if (ImGui::Checkbox("Low-CPU GPU wait (render thread sleeps instead of spinning)", &gpuWait))
+                wet::options::SetGpuWait(gpuWait);
 
             Section("Resolution");
             int res = wet::options::ResolutionScale();
@@ -626,6 +629,7 @@ namespace wet::renderer
             return false;
         s_memory = std::make_unique<xe::Memory>(membase, physical);
         renderer_host::SetPhysicalWriteCallback(OnPhysicalWrite);
+        xe::gpu::wet_gpu_progress = renderer_host::GpuProgress;
         xe::gpu::wet_register_sync_hook = [] { renderer_host::RequestRegisterSync(); };
         s_processor = std::make_unique<xe::cpu::Processor>(s_memory.get());
         s_kernel = std::make_unique<xe::kernel::KernelState>(titleId);

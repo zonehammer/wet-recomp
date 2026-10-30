@@ -39,6 +39,8 @@ namespace wet::renderer
 // Provided by the kernel for the renderer's threads.
 namespace wet::renderer_host
 {
+    // The GPU wrote a fence or similar (gpu_wait.cpp wakes the render thread).
+    void GpuProgress();
     // Starts a host thread that can call guest code.
     void StartThread(void (*entry)(void*), void* arg, const char* name);
     // Gives the calling host thread a guest context (stack, PCR); returns it (PPCContext*).
