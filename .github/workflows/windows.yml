@@ -51,6 +51,10 @@ jobs:
           & $cxx --version
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_C_COMPILER=$cc" "-DCMAKE_CXX_COMPILER=$cxx" -DWET_CI_STUB=ON
 
+      - name: Compile the NVIDIA Image Scaling shader
+        if: matrix.toolchain == 'llvm-mingw'
+        run: python tools/check_nis_shader.py
+
       - name: Build
         shell: pwsh
         run: |

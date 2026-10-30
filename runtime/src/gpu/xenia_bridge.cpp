@@ -289,6 +289,7 @@ namespace
     std::atomic<bool> s_overlayOpen{ false };
     class OverlayDialog;
     OverlayDialog* s_overlay = nullptr;   // UI thread only
+    bool s_nisUnsupported = false;        // UI thread only
 
     // Post-processing from the options (UI thread).
     void ApplyPostProcessing()
@@ -301,7 +302,9 @@ namespace
         {
             auto config = presenter->GetGuestOutputPaintConfigFromUIThread();
             config.SetEffect(xe::ui::Presenter::GuestOutputPaintConfig::Effect(wet::options::Filter()));
+            config.SetNisSharpness(float(wet::options::Sharpness()) / 100.0f);
             presenter->SetGuestOutputPaintConfigFromUIThread(config);
+            s_nisUnsupported = !presenter->IsNisSupported();
         }
     }
 
@@ -423,11 +426,20 @@ namespace
             ImGui::TextUnformatted("Scaling to the window:");
             Radio("Bilinear", &filterPick, 0); ImGui::SameLine();
             Radio("AMD CAS (sharpen)", &filterPick, 1); ImGui::SameLine();
-            Radio("AMD FSR (upscale)", &filterPick, 2);
-            if (aaPick != aa || filterPick != filter)
+            Radio("AMD FSR (upscale)", &filterPick, 2); ImGui::SameLine();
+            Radio("NVIDIA NIS (upscale)", &filterPick, 3);
+            int sharp = wet::options::Sharpness(), sharpPick = sharp;
+            if (filter == 3)
+            {
+                if (s_nisUnsupported)
+                    ImGui::TextDisabled("NIS needs the D3D12 renderer; AMD FSR is used instead.");
+                ImGui::SliderInt("NIS sharpness", &sharpPick, 0, 100, "%d%%");
+            }
+            if (aaPick != aa || filterPick != filter || sharpPick != sharp)
             {
                 wet::options::SetAntialiasing(aaPick);
                 wet::options::SetFilter(filterPick);
+                wet::options::SetSharpness(sharpPick);
                 ApplyPostProcessing();
             }
 

@@ -24,6 +24,9 @@ namespace wet::options
     void SetAntialiasing(int v);
     int Filter();
     void SetFilter(int v);
+    // NVIDIA Image Scaling sharpness, 0-100.
+    int Sharpness();
+    void SetSharpness(int v);
 
     bool Fullscreen();
     void SetFullscreen(bool v);

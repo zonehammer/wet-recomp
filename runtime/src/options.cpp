@@ -16,7 +16,7 @@ namespace wet::options
         constexpr int kRates[] = { 30, 60, 120, 144 };
         std::atomic<int> s_fps{ 30 };
         int s_scale = 1, s_scaleRunning = 1;
-        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 };
+        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 };
         constexpr const char* kFile = "wet.ini";
 
         int Clamp(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -47,8 +47,10 @@ namespace wet::options
             std::fprintf(f, "resolution_scale = %d\n", s_scale);
             std::fprintf(f, "# antialiasing: 0 = off, 1 = FXAA, 2 = FXAA extreme\n");
             std::fprintf(f, "antialiasing = %d\n", s_aa.load());
-            std::fprintf(f, "# filter (scaling to the window): 0 = bilinear, 1 = AMD CAS sharpening, 2 = AMD FSR\n");
+            std::fprintf(f, "# filter (scaling to the window): 0 = bilinear, 1 = AMD CAS sharpening, 2 = AMD FSR, 3 = NVIDIA Image Scaling (D3D12)\n");
             std::fprintf(f, "filter = %d\n", s_filter.load());
+            std::fprintf(f, "# sharpness (NVIDIA Image Scaling): 0 to 100\n");
+            std::fprintf(f, "sharpness = %d\n", s_sharpness.load());
             std::fprintf(f, "fullscreen = %d\n", s_fullscreen.load());
             std::fprintf(f, "show_fps = %d\n", s_showFps.load());
             std::fclose(f);
@@ -69,7 +71,8 @@ namespace wet::options
                 if (!std::strcmp(key, "fps")) s_fps = Valid(value);
                 else if (!std::strcmp(key, "resolution_scale")) s_scale = Clamp(value, 1, 3);
                 else if (!std::strcmp(key, "antialiasing")) s_aa = Clamp(value, 0, 2);
-                else if (!std::strcmp(key, "filter")) s_filter = Clamp(value, 0, 2);
+                else if (!std::strcmp(key, "filter")) s_filter = Clamp(value, 0, 3);
+                else if (!std::strcmp(key, "sharpness")) s_sharpness = Clamp(value, 0, 100);
                 else if (!std::strcmp(key, "fullscreen")) s_fullscreen = value != 0;
                 else if (!std::strcmp(key, "show_fps")) s_showFps = value != 0;
                 else if (!std::strcmp(key, "fps60")) s_fps = value ? 60 : 30;   // earlier versions
@@ -112,7 +115,9 @@ namespace wet::options
     int Antialiasing() { return s_aa; }
     void SetAntialiasing(int v) { s_aa = Clamp(v, 0, 2); Save(); }
     int Filter() { return s_filter; }
-    void SetFilter(int v) { s_filter = Clamp(v, 0, 2); Save(); }
+    void SetFilter(int v) { s_filter = Clamp(v, 0, 3); Save(); }
+    int Sharpness() { return s_sharpness; }
+    void SetSharpness(int v) { s_sharpness = Clamp(v, 0, 100); Save(); }
     bool Fullscreen() { return s_fullscreen; }
     void SetFullscreen(bool v) { s_fullscreen = v; Save(); }
     bool ShowFps() { return s_showFps; }

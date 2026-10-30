@@ -41,7 +41,7 @@ game window is focused:
 | Q / E | LB / RB | Z / C | LT / RT |
 
 **F1** opens a settings overlay (frame rate, resolution, fullscreen, FPS counter,
-anti-aliasing, AMD CAS/FSR scaling). **F6** cycles the frame rate: 30 (the game's own), 60, 120 and 144 FPS; the choice is
+anti-aliasing, AMD CAS/FSR or NVIDIA Image Scaling with a sharpness slider). **F6** cycles the frame rate: 30 (the game's own), 60, 120 and 144 FPS; the choice is
 saved in `wet.ini` (`fps = 60`). Above 30 the game's 1/30 s world step is scaled to match,
 and above 60 the emulated vblank runs at the chosen rate.
 
