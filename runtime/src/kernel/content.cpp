@@ -325,6 +325,18 @@ static void XMsgRequest(PPCContext& ctx, const char* name)
             achievements::Unlock(Ld32(list + i * 8 + 4));
         return Ret(ctx, Finish(ov, ERROR_SUCCESS));
     }
+    // Every other XGI (0xFB) / XLiveBase (0xFC) request, logged in full (the
+    // generic stub log is rate-limited), to see how the title reports progress.
+    static int logged = 0;
+    if ((app == 0xFB || app == 0xFC) && message != 0x000B0006 && message != 0x000B0007 && logged < 300)
+    {
+        logged++;
+        uint32_t len = Arg(ctx, 4);
+        char words[96] = {};
+        for (uint32_t i = 0; buffer && i < 4 && i * 4 < len; i++)
+            std::snprintf(words + std::strlen(words), sizeof(words) - std::strlen(words), " %08X", Ld32(buffer + i * 4));
+        Log("%s(app %X, message %08X, buffer %08X len %u:%s)", name, app, message, buffer, len, words);
+    }
     StubCall(name, ctx);
 }
 
@@ -337,6 +349,8 @@ GUEST_IMPORT(XMsgStartIORequestEx) { XMsgRequest(ctx, "XMsgStartIORequestEx"); }
 GUEST_IMPORT(XamUserCreateAchievementEnumerator)
 {
     uint32_t count = Arg(ctx, 5);
+    Log("XamUserCreateAchievementEnumerator(title %08X, user %u, flags %X, offset %u, count %u)", Arg(ctx, 0), Arg(ctx, 1),
+        Arg(ctx, 3), Arg(ctx, 4), count);
     if (!count || !Arg(ctx, 6) || !Arg(ctx, 7))
         return Ret(ctx, ERROR_INVALID_PARAMETER);
     // X_ACHIEVEMENT_DETAILS (0x24) plus string space when details are requested.
