@@ -4,6 +4,7 @@
 #include "log.h"
 #include "memory.h"
 #include "module.h"
+#include "ppc_context.h"
 
 #include <cstdio>
 #include <cstring>
@@ -257,4 +258,24 @@ namespace wet::achievements
         const uint8_t* p = HostPtr(it->second.first);
         return std::vector<uint8_t>(p, p + it->second.second);
     }
+}
+
+// Diagnostics: the title's achievement flush (a Lua-side queue of
+// { user, achievement id } pairs handed to XUserWriteAchievements). Logs each
+// call, so a missing pop-up can be told apart from the game never awarding.
+extern "C" void __imp__sub_82CDDE00(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82CDDE00)
+{
+    static int logged = 0;
+    uint32_t queue = PPC_LOAD_U32(ctx.r3.u32 + 64);
+    uint32_t count = queue ? (PPC_LOAD_U32(queue + 8) - PPC_LOAD_U32(queue + 4)) / 8 : 0;
+    if (logged < 200)
+    {
+        logged++;
+        std::string ids;
+        for (uint32_t i = 0; i < count && i < 8; i++)
+            ids += " " + std::to_string(PPC_LOAD_U32(PPC_LOAD_U32(queue + 4) + i * 8 + 4));
+        wet::Log("Achievements: the game is writing %u achievement(s):%s", count, ids.c_str());
+    }
+    __imp__sub_82CDDE00(ctx, base);
 }
