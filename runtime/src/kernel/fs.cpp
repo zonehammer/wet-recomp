@@ -7,6 +7,8 @@
 //   \Device\Harddisk0\Partition1    -> game/hdd       (read/write)
 //   \Device\Harddisk0\Cache0        -> game/hdd/cache (read/write)
 #include "fs.h"
+#include "../options.h"
+#include <atomic>
 #include "kernel.h"
 #include "objects.h"
 
@@ -157,10 +159,45 @@ namespace
         return { host, best, true };
     }
 
+    // Video mode: while a Bink movie (.bik) is open the game runs at 30 FPS with
+    // every kernel change waking every waiter. At full speed the movie decoder and
+    // the GPU emulation race, and the top of the video flickers; this timing
+    // avoids it. wet.ini video_mode = 0 turns it off.
+    std::atomic<int> s_openVideos{ 0 };
+
+    void VideoFileOpened(const std::string& name)
+    {
+        if (!options::VideoMode())
+            return;
+        if (s_openVideos.fetch_add(1) == 0)
+        {
+            options::SetFpsOverride(30);
+            SetBroadcastWake(true);
+            Log("Video mode on (%s): 30 FPS, broadcast wake-ups", name.c_str());
+        }
+    }
+
+    void VideoFileClosed()
+    {
+        if (s_openVideos.fetch_sub(1) == 1)
+        {
+            options::SetFpsOverride(0);
+            SetBroadcastWake(false);
+            Log("Video mode off: back to %d FPS", options::Fps());
+        }
+    }
+
     struct KFile : KObject
     {
         KFile() : KObject(ObjType::File) {}
-        ~KFile() override { if (fp) std::fclose(fp); }
+        ~KFile() override
+        {
+            if (fp)
+                std::fclose(fp);
+            if (video)
+                VideoFileClosed();
+        }
+        bool video = false;     // a .bik movie: video mode while open
 
         std::string guestPath;
         fs::path hostPath;
@@ -332,6 +369,17 @@ namespace
                 return fail(STATUS_ACCESS_DENIED);
         }
 
+        if (!f->isDirectory)
+        {
+            std::string ext = r.host.extension().string();
+            for (auto& c : ext)
+                c = char(std::tolower((unsigned char)c));
+            if (ext == ".bik" && options::VideoMode())
+            {
+                f->video = true;
+                VideoFileOpened(r.host.filename().string());
+            }
+        }
         St32(handlePtr, CreateHandle(f));
         if (ioStatus) { St32(ioStatus, STATUS_SUCCESS); St32(ioStatus + 4, info); }
         Log("open \"%s\" -> %s%s", guest.c_str(), r.host.string().c_str(), f->isDirectory ? " (dir)" : "");

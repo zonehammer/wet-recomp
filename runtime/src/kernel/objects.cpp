@@ -4,6 +4,7 @@
 #include "../log.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 
@@ -30,8 +31,13 @@ namespace wet
 
     // WET_BROADCAST_WAKE=1: wake every waiter on every change, like before
     // per-object wakes (diagnostic).
+    static std::atomic<bool> s_videoBroadcast{ false };
+    void SetBroadcastWake(bool on) { s_videoBroadcast = on; }
+
     static bool BroadcastWake()
     {
+        if (s_videoBroadcast.load(std::memory_order_relaxed))
+            return true;
         static const bool on = [] {
         const char* v = std::getenv("WET_BROADCAST_WAKE");
             bool b = v && *v == '1';

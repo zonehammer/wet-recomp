@@ -132,6 +132,8 @@ namespace wet
     // state, without the dispatcher lock (DispatchNotifyLocked: with it).
     void DispatchNotify(KObject* obj = nullptr);
     void DispatchNotifyLocked(KObject* obj = nullptr);
+    // Every change wakes every waiter (video mode; WET_BROADCAST_WAKE=1 does it always).
+    void SetBroadcastWake(bool on);
     // Waits (dispatcher lock held through `lock`) until notified for one of `objs` or
     // for the current thread, or `until`. Returns false on timeout. Spurious wakes
     // happen: re-check the state.

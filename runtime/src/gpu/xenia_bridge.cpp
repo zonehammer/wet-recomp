@@ -530,7 +530,7 @@ namespace
             }
 
             Section("Frame rate");
-            int fps = wet::options::Fps();
+            int fps = wet::options::ConfiguredFps();
             int pick = fps;
             Radio("30 (original)", &pick, 30); ImGui::SameLine();
             Radio("60", &pick, 60); ImGui::SameLine();
@@ -538,6 +538,11 @@ namespace
             Radio("144", &pick, 144);
             if (pick != fps)
                 wet::options::SetFps(pick);
+            bool videoMode = wet::options::VideoMode();
+            if (ImGui::Checkbox("Videos at 30 FPS (avoids video flicker)", &videoMode))
+                wet::options::SetVideoMode(videoMode);
+            if (wet::options::Fps() != wet::options::ConfiguredFps())
+                ImGui::TextDisabled("A video is playing: %d FPS until it ends", wet::options::Fps());
             bool showFps = wet::options::ShowFps();
             if (ImGui::Checkbox("Show FPS counter", &showFps))
                 wet::options::SetShowFps(showFps);
