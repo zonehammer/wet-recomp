@@ -18,3 +18,7 @@ __pycache__/
 /frames/
 /wet.ini
 /profile.txt
+
+# ---- Packaged builds (contain code translated from the game) ----
+/dist/
+/shaders/

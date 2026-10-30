@@ -28,10 +28,10 @@
 namespace fs = std::filesystem;
 using namespace wet;
 
-static fs::path FindDefaultGameDir()
+static fs::path FindGameDirFrom(fs::path start)
 {
     std::error_code ec;
-    for (fs::path dir = fs::current_path(ec); !dir.empty(); dir = dir.parent_path())
+    for (fs::path dir = start; !dir.empty(); dir = dir.parent_path())
     {
         fs::path candidate = dir / "game" / "extracted";
         if (fs::exists(candidate / "default.xex", ec))
@@ -40,6 +40,17 @@ static fs::path FindDefaultGameDir()
             break;
     }
     return {};
+}
+
+// game/extracted above the current folder, or above the exe's folder (a
+// packaged build started from a shortcut or another folder).
+static fs::path FindDefaultGameDir(const char* argv0)
+{
+    std::error_code ec;
+    fs::path found = FindGameDirFrom(fs::current_path(ec));
+    if (found.empty() && argv0 && *argv0)
+        found = FindGameDirFrom(fs::absolute(fs::path(argv0), ec).parent_path());
+    return found;
 }
 
 int main(int argc, char** argv)
@@ -71,7 +82,7 @@ int main(int argc, char** argv)
     Log("WET Recomp (first-boot runtime)");
 
     if (gameDir.empty())
-        gameDir = FindDefaultGameDir();
+        gameDir = FindDefaultGameDir(argv[0]);
     if (gameDir.empty() || !fs::exists(gameDir / "default.xex"))
     {
         LogFatal("Could not find the game. Run tools/prepare_game.py first, or pass --game <folder containing default.xex>.");

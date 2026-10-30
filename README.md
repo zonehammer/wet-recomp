@@ -189,3 +189,13 @@ section lists them all with unlock dates. Unlocks are saved in
 off in the overlay or with `achievement_popups = 0` in wet.ini. Achievements
 earned before this feature existed aren't known - the game only reports each one
 once, when it is earned.
+
+## Packaged build
+
+`python tools\package.py` puts a ready-to-run folder in `dist\WET-Recomp`:
+WetRecomp.exe (no extra DLLs - everything it needs is part of Windows 10/11), a
+README.txt for players and the third-party licence notices. Put the extracted disc
+in its `game\extracted` folder, or add `--with-game` to copy it in; `--with-saves`
+also copies saves, achievements and the shader cache, and `--zip` makes a zip.
+The exe contains code translated from your copy of WET, so the package is for your
+own machines - `dist/` is git-ignored and must never be committed or shared.
