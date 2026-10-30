@@ -155,6 +155,12 @@ namespace wet
             if (f11Now && !f11)
                 renderer::ToggleFullscreen();
             f11 = f11Now;
+            // F8: save the next 48 frames (frames/burst_*.png) for diagnosing glitches.
+            static bool f8 = false;
+            bool f8Now = (GetAsyncKeyState(VK_F8) & 0x8000) != 0;
+            if (f8Now && !f8)
+                renderer::RequestBurstCapture();
+            f8 = f8Now;
             // F10: start / stop the sampling profiler (profile.txt).
             static bool f10 = false;
             bool f10Now = (GetAsyncKeyState(VK_F10) & 0x8000) != 0;

@@ -28,6 +28,8 @@ namespace wet::renderer
     void RequestDrawTrace(int frames);
     // An achievement pop-up is waiting (achievements.cpp); any thread.
     void AchievementUnlocked();
+    // F8: saves the next 48 presented frames to frames/burst_*.png (diagnostics).
+    void RequestBurstCapture();
     // Guest vblank rate (60 Hz normally).
     void SetVsyncRate(uint32_t hz);
     // Rendering resolution scale (1 = 720p, 2 = 1440p, 3 = 2160p); before Start.

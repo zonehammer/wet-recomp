@@ -13,6 +13,7 @@ namespace wet::renderer
     void WriteRegister(uint32_t, uint32_t) {}
     void RequestDrawTrace(int) {}
     void AchievementUnlocked() {}
+    void RequestBurstCapture() {}
     void SetVsyncRate(uint32_t) {}
     void SetResolutionScale(uint32_t) {}
     void ToggleFullscreen() {}

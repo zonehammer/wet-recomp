@@ -19,6 +19,9 @@
 #define STBI_ONLY_PNG
 #define STBI_NO_STDIO
 #include "stb_image.h"
+#define STB_IMAGE_WRITE_STATIC
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
 
 #include <algorithm>
 #include <atomic>
@@ -655,6 +658,54 @@ namespace
     }
 #endif
 
+    // F8 burst capture: every newly presented frame for the next 48 frames, kept in
+    // memory while capturing (so saving doesn't slow the capture), then written as
+    // frames/burst_<run>_<index>_swap<count>.png.
+    std::atomic<bool> s_burstRunning{ false };
+
+    void BurstThread(void*)
+    {
+        static int run = 0;
+        run++;
+        struct Shot { uint32_t swap; xe::ui::RawImage image; };
+        std::vector<Shot> shots;
+        uint32_t last = 0xFFFFFFFF;
+        auto start = std::chrono::steady_clock::now();
+        while (shots.size() < 48 && std::chrono::steady_clock::now() - start < std::chrono::seconds(10))
+        {
+            auto* cp = s_graphics ? s_graphics->command_processor() : nullptr;
+            xe::ui::Presenter* presenter = s_graphics ? s_graphics->presenter() : nullptr;
+            uint32_t swap = cp ? cp->wet_swap_count() : 0;
+            if (!presenter || swap == last)
+            {
+                std::this_thread::sleep_for(std::chrono::microseconds(500));
+                continue;
+            }
+            last = swap;
+            Shot shot{ swap, {} };
+            if (presenter->CaptureGuestOutput(shot.image) && shot.image.width)
+                shots.push_back(std::move(shot));
+        }
+        std::error_code ec;
+        std::filesystem::create_directories("frames", ec);
+        for (size_t i = 0; i < shots.size(); i++)
+        {
+            auto& img = shots[i].image;
+            // RawImage is RGBA (alpha ignored); stb wants tightly packed RGB.
+            std::vector<uint8_t> rgb(size_t(img.width) * img.height * 3);
+            for (uint32_t y = 0; y < img.height; y++)
+                for (uint32_t x = 0; x < img.width; x++)
+                    std::memcpy(&rgb[(size_t(y) * img.width + x) * 3], img.data.data() + y * img.stride + x * 4, 3);
+            char name[96];
+            std::snprintf(name, sizeof(name), "frames/burst_%d_%02zu_swap%u.png", run, i, shots[i].swap);
+            stbi_write_png(name, int(img.width), int(img.height), 3, rgb.data(), int(img.width) * 3);
+        }
+        char text[128];
+        std::snprintf(text, sizeof(text), "Renderer: F8 burst %d: saved %zu frames to frames\\burst_%d_*.png", run, shots.size(), run);
+        wet::renderer_host::Log(text);
+        s_burstRunning = false;
+    }
+
     // Snapshots of the guest output (what the GPU produced, before the window):
     // by default one every 5 s for the first 2 minutes into "frames/", each logged
     // with its average brightness, to tell rendering problems from presentation
@@ -928,6 +979,14 @@ namespace wet::renderer
                 options::SetFullscreen(on);
             });
 #endif
+    }
+
+    void RequestBurstCapture()
+    {
+        if (!s_graphics || s_burstRunning.exchange(true))
+            return;
+        wet::renderer_host::Log("Renderer: F8 - capturing the next 48 frames");
+        wet::renderer_host::StartThread(BurstThread, nullptr, "Burst capture");
     }
 
     void AchievementUnlocked()
