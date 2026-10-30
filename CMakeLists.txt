@@ -137,6 +137,12 @@ if(WIN32)
     target_compile_definitions(WetLauncher PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
     target_include_directories(WetLauncher PRIVATE ${WET_VERSION_INCLUDE})
     target_link_libraries(WetLauncher PRIVATE comctl32 shell32)
+    # Optional icon (launcher/launcher.ico, not in git: use your own image).
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/launcher/launcher.ico)
+        set_source_files_properties(launcher/launcher.rc PROPERTIES COMPILE_DEFINITIONS WET_LAUNCHER_ICON
+                                    OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/launcher/launcher.ico)
+    endif()
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/launcher)
     if(MINGW)
         target_link_options(WetLauncher PRIVATE -municode)
     endif()

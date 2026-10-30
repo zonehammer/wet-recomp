@@ -22,3 +22,6 @@ __pycache__/
 # ---- Packaged builds (contain code translated from the game) ----
 /dist/
 /shaders/
+
+# Your own launcher icon (may be game artwork: keep it out of git)
+/launcher/launcher.ico

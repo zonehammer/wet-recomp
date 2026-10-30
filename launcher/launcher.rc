@@ -1,3 +1,9 @@
 // Visual styles (Common Controls 6) and DPI awareness.
 #include <winuser.h>
 CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "launcher.manifest"
+
+// The launcher's icon: put an .ico file at launcher/launcher.ico (CMake defines
+// WET_LAUNCHER_ICON when it exists). Resource 1 is also the window icon.
+#ifdef WET_LAUNCHER_ICON
+1 ICON "launcher.ico"
+#endif
