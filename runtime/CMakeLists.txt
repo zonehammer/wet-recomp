@@ -52,7 +52,7 @@ if(WET_RENDERER)
     add_library(WetRenderer STATIC ${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/xenia_bridge.cpp
                             ${CMAKE_CURRENT_SOURCE_DIR}/src/apu/xenia_apu_bridge.cpp)
     xe_target(WetRenderer)
-    target_include_directories(WetRenderer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${XE_TP}/stb)
+    target_include_directories(WetRenderer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${XE_TP}/stb ${WET_VERSION_INCLUDE})
     target_link_libraries(WetRenderer PUBLIC xe_gpu xe_apu)
     if(WIN32)
         target_link_libraries(WetRenderer PUBLIC xe_gpu_d3d12 dxguid)
@@ -67,7 +67,7 @@ endif()
 add_executable(WetRecomp ${WET_RUNTIME_SOURCES} ${WET_STUBS_CPP})
 # XenonUtils headers come via the XenonUtils link (after WetPPC, so the generated
 # ppc_context.h wins over the template of the same name).
-target_include_directories(WetRecomp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${XR_DIR}/thirdparty/TinySHA1)
+target_include_directories(WetRecomp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${XR_DIR}/thirdparty/TinySHA1 ${WET_VERSION_INCLUDE})
 target_link_libraries(WetRecomp PRIVATE WetPPC WetRenderer XenonUtils Threads::Threads)
 if(WET_HAVE_SDL)
     target_link_libraries(WetRecomp PRIVATE SDL2::SDL2-static)

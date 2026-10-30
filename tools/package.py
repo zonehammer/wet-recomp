@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Makes a ready-to-run WET Recomp folder (no Python, CMake or compiler needed to play).
 
-    python tools/package.py                       # dist/WET-Recomp, without game files
+    python tools/package.py                       # dist/WET-Recomp-<version>, without game files
     python tools/package.py --with-game           # also copies game/extracted (about 4.3 GB)
     python tools/package.py --with-saves --zip    # also copies saves/achievements/shader cache, and zips it
 
 Layout of the folder:
-    WET-Recomp/
+    WET-Recomp-<version>/
       WET Launcher.exe         settings window with a Play button (start here)
       WetRecomp.exe            the game (starts straight away, skipping the launcher)
       README.txt               how to run it, controls, settings
@@ -127,7 +127,9 @@ def copy_tree(src, dst):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--out", default=os.path.join(REPO, "dist", "WET-Recomp"), help="output folder")
+    with open(os.path.join(REPO, "VERSION")) as v:
+        version = v.read().strip()
+    ap.add_argument("--out", default=os.path.join(REPO, "dist", "WET-Recomp-" + version), help="output folder")
     ap.add_argument("--with-game", action="store_true", help="copy game/extracted into the package (about 4.3 GB)")
     ap.add_argument("--with-saves", action="store_true",
                     help="copy game/hdd (saves, achievements, shader cache) into the package")

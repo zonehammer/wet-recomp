@@ -1,6 +1,39 @@
 cmake_minimum_required(VERSION 3.20)
 project(WetRecomp C CXX)
 
+# Release version (VERSION file) plus the git commit, e.g. "0.1.0 (f421997)".
+file(READ ${CMAKE_CURRENT_SOURCE_DIR}/VERSION WET_VERSION)
+string(STRIP "${WET_VERSION}" WET_VERSION)
+find_package(Git QUIET)
+set(WET_COMMIT "")
+if(GIT_FOUND)
+    execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                    OUTPUT_VARIABLE WET_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+endif()
+set(WET_VERSION_STRING "${WET_VERSION}")
+if(WET_COMMIT)
+    set(WET_VERSION_STRING "${WET_VERSION} (${WET_COMMIT})")
+endif()
+# A generated header (only the files that show the version include it, so a new
+# commit doesn't rebuild everything).
+file(WRITE ${CMAKE_BINARY_DIR}/wet_version.h.tmp "#pragma once\n#define WET_VERSION \"${WET_VERSION_STRING}\"\n")
+configure_file(${CMAKE_BINARY_DIR}/wet_version.h.tmp ${CMAKE_BINARY_DIR}/generated_include/wet_version.h COPYONLY)
+set(WET_VERSION_INCLUDE ${CMAKE_BINARY_DIR}/generated_include)
+# Re-run configure when the version or the checked-out commit changes.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/VERSION)
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/.git/HEAD)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/.git/HEAD)
+    file(READ ${CMAKE_CURRENT_SOURCE_DIR}/.git/HEAD WET_GIT_HEAD)
+    if(WET_GIT_HEAD MATCHES "^ref: (.*)\n?$")
+        string(STRIP "${CMAKE_MATCH_1}" WET_GIT_REF)
+        if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/.git/${WET_GIT_REF})
+            set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/.git/${WET_GIT_REF})
+        endif()
+    endif()
+endif()
+message(STATUS "WET Recomp ${WET_VERSION_STRING}")
+
 # The generated code relies on GNU extensions (weak/alias attributes, __int128,
 # __builtin_*), so the whole project is built with Clang. On Windows that means
 # clang-cl from Visual Studio's "C++ Clang tools for Windows" component.
@@ -102,6 +135,7 @@ if(WIN32)
     add_executable(WetLauncher WIN32 launcher/launcher.cpp launcher/launcher.rc)
     set_target_properties(WetLauncher PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/runtime)
     target_compile_definitions(WetLauncher PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
+    target_include_directories(WetLauncher PRIVATE ${WET_VERSION_INCLUDE})
     target_link_libraries(WetLauncher PRIVATE comctl32 shell32)
     if(MINGW)
         target_link_options(WetLauncher PRIVATE -municode)

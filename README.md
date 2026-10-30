@@ -200,7 +200,7 @@ WetRecomp.exe from its own folder.
 
 ## Packaged build
 
-`python tools\package.py` puts a ready-to-run folder in `dist\WET-Recomp`:
+`python tools\package.py` puts a ready-to-run folder in `dist\WET-Recomp-<version>` (the version is in the VERSION file):
 WetRecomp.exe (no extra DLLs - everything it needs is part of Windows 10/11), a
 README.txt for players and the third-party licence notices. Put the extracted disc
 in its `game\extracted` folder, or add `--with-game` to copy it in; `--with-saves`

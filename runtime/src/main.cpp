@@ -6,6 +6,7 @@
 //         Default: game/extracted, searched from the current folder upwards.
 // --hdd   writable folder for save data and cache. Default: <game>/../hdd
 // --log   log file. Default: wet.log in the current folder.
+#include "wet_version.h"
 #include <cstdlib>
 #include "kernel/fs.h"
 #include "kernel/init.h"
@@ -89,7 +90,7 @@ int main(int argc, char** argv)
     }
 
     LogInit(logPath.c_str());
-    Log("WET Recomp (first-boot runtime)");
+    Log("WET Recomp %s", WET_VERSION);
 
     if (gameDir.empty())
         gameDir = FindDefaultGameDir(argv[0]);

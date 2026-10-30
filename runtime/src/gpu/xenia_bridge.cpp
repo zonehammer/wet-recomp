@@ -8,6 +8,7 @@
 // The renderer reads and writes physical memory through its own mapping, which is
 // never protected. Pages it caches are write-watched in the title's views: the
 // first CPU write invalidates the GPU copy (Xenia's scheme, see xe::Memory).
+#include "wet_version.h"
 #include "gpu/renderer.h"
 #include "options.h"
 #include "input.h"
@@ -523,7 +524,7 @@ namespace
                                     ImVec2(0.5f, 0.5f));
             ImGui::SetNextWindowBgAlpha(0.88f);
             bool open = true;
-            if (!ImGui::Begin("WET Recomp settings (F1 to close)", &open,
+            if (!ImGui::Begin("WET Recomp " WET_VERSION " - settings (F1 to close)###settings", &open,
                               ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize))
             {
                 ImGui::End();
