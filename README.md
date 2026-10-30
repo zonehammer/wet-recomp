@@ -44,6 +44,9 @@ game window is focused:
 saved in `wet.ini` (`fps = 60`). Above 30 the game's 1/30 s world step is scaled to match,
 and above 60 the emulated vblank runs at the chosen rate.
 
+`resolution_scale` in `wet.ini` sets the rendering resolution (restart to apply):
+1 = 1280x720 (the game's own), 2 = 2560x1440, 3 = 3840x2160 (4K). **F11** toggles fullscreen.
+
 Saves go to `game\hdd\content\`. Logs: `wet.log` (the game and kernel) and
 `xenia_gpu.log` (the renderer). `WET_RENDERER=0` falls back to the old stand-in GPU
 (no picture), which helps tell renderer problems from game problems. F9 writes every

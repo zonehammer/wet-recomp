@@ -13,5 +13,7 @@ namespace wet::renderer
     void WriteRegister(uint32_t, uint32_t) {}
     void RequestDrawTrace(int) {}
     void SetVsyncRate(uint32_t) {}
+    void SetResolutionScale(uint32_t) {}
+    void ToggleFullscreen() {}
     uint32_t ReadRegister(uint32_t) { return 0; }
 }

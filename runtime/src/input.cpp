@@ -131,6 +131,12 @@ namespace wet
             if (f6Now && !f6)
                 options::CycleFps();
             f6 = f6Now;
+            // F11: fullscreen.
+            static bool f11 = false;
+            bool f11Now = (GetAsyncKeyState(VK_F11) & 0x8000) != 0;
+            if (f11Now && !f11)
+                renderer::ToggleFullscreen();
+            f11 = f11Now;
             // F10: start / stop the sampling profiler (profile.txt).
             static bool f10 = false;
             bool f10Now = (GetAsyncKeyState(VK_F10) & 0x8000) != 0;

@@ -50,6 +50,8 @@
 DECLARE_bool(log_to_stdout);
 DECLARE_bool(host_present_from_non_ui_thread);
 DECLARE_int32(log_level);
+DECLARE_int32(draw_resolution_scale_x);
+DECLARE_int32(draw_resolution_scale_y);
 DECLARE_path(dump_shaders);
 DECLARE_path(log_file);
 
@@ -202,6 +204,7 @@ namespace
     std::unique_ptr<xe::cpu::Processor> s_processor;
     std::unique_ptr<xe::kernel::KernelState> s_kernel;
     std::unique_ptr<xe::gpu::GraphicsSystem> s_graphics;
+    uint32_t s_resolutionScale = 1;   // rendering resolution = 1280x720 x this
     const char* s_backend = "Vulkan";
     std::atomic<bool> s_running{ false };
 
@@ -228,7 +231,8 @@ namespace
             bool ok = self->app->Initialize();
             if (ok)
             {
-                self->window = xe::ui::Window::Create(*self->app, "WET (recompiled)", 1280, 720);
+                self->window = xe::ui::Window::Create(*self->app, "WET (recompiled)", s_resolutionScale >= 2 ? 1920 : 1280,
+                                                      s_resolutionScale >= 2 ? 1080 : 720);
                 ok = self->window && (self->window->AddListener(self), self->window->Open());
             }
             {
@@ -247,9 +251,18 @@ namespace
         static void RepaintThread(void* p)
         {
             auto* self = static_cast<GameWindow*>(p);
+            // Repaint at (a little above) the guest vblank rate, so the window
+            // shows every frame at 120/144 FPS too (it was a fixed 16 ms).
+            auto next = std::chrono::steady_clock::now();
             for (;;)
             {
-                std::this_thread::sleep_for(std::chrono::milliseconds(16));
+                uint32_t hz = std::max<uint32_t>(xe::gpu::wet_vsync_hz.load(), 60);
+                next += std::chrono::microseconds(1000000 / (hz + hz / 8));
+                auto now = std::chrono::steady_clock::now();
+                if (next < now)
+                    next = now;
+                else
+                    std::this_thread::sleep_until(next);
                 if (self->window)
                     self->window->RequestPaint();
             }
@@ -393,6 +406,9 @@ namespace wet::renderer
         // Warnings and errors only by default: at the info level Xenia logs every
         // texture upload and shader, megabytes a minute.
         cvars::log_level = 1;
+        // Rendering resolution: the game's 1280x720 times the option's scale.
+        cvars::draw_resolution_scale_x = int32_t(s_resolutionScale);
+        cvars::draw_resolution_scale_y = int32_t(s_resolutionScale);
         if (const char* level = std::getenv("WET_GPU_LOG_LEVEL"))
             cvars::log_level = std::atoi(level);
         xe::InitializeLogging("xenia_gpu");
@@ -519,6 +535,18 @@ namespace wet::renderer
     }
 
     void SetVsyncRate(uint32_t hz) { xe::gpu::wet_vsync_hz = hz; }
+
+    void SetResolutionScale(uint32_t scale) { s_resolutionScale = std::clamp<uint32_t>(scale, 1, 3); }
+
+    void ToggleFullscreen()
+    {
+#if XE_PLATFORM_WIN32
+        if (s_window && s_window->app && s_window->window)
+            s_window->app->CallInUIThread([] {
+                s_window->window->SetFullscreen(!s_window->window->IsFullscreen());
+            });
+#endif
+    }
 
     void RequestDrawTrace(int frames)
     {

@@ -15,6 +15,7 @@ namespace wet::options
     {
         constexpr int kRates[] = { 30, 60, 120, 144 };
         std::atomic<int> s_fps{ 30 };
+        int s_scale = 1;
         constexpr const char* kFile = "wet.ini";
 
         int Valid(int fps)
@@ -38,6 +39,9 @@ namespace wet::options
                 std::fprintf(f, "# WET Recomp options\n");
                 std::fprintf(f, "# fps: 30 (the game's own), 60, 120 or 144 - F6 cycles in game\n");
                 std::fprintf(f, "fps = %d\n", s_fps.load());
+                std::fprintf(f, "# resolution_scale: 1 = 720p (the game's own), 2 = 1440p, 3 = 2160p (4K);\n");
+                std::fprintf(f, "# needs a restart. Higher scales need a fast GPU.\n");
+                std::fprintf(f, "resolution_scale = %d\n", s_scale);
                 std::fclose(f);
             }
         }
@@ -56,6 +60,8 @@ namespace wet::options
                     continue;
                 if (!std::strcmp(key, "fps"))
                     s_fps = Valid(value);
+                else if (!std::strcmp(key, "resolution_scale"))
+                    s_scale = value < 1 ? 1 : value > 3 ? 3 : value;
                 else if (!std::strcmp(key, "fps60"))      // earlier versions
                     s_fps = value ? 60 : 30;
             }
@@ -63,12 +69,17 @@ namespace wet::options
         }
         if (const char* v = std::getenv("WET_FPS"))
             s_fps = Valid(std::atoi(v));
+        if (const char* v = std::getenv("WET_RES_SCALE"))
+            s_scale = std::atoi(v) < 1 ? 1 : std::atoi(v) > 3 ? 3 : std::atoi(v);
+        renderer::SetResolutionScale(uint32_t(s_scale));
         Save();
         Apply();
-        Log("Options: %d FPS (F6 cycles 30/60/120/144; saved in %s)", s_fps.load(), kFile);
+        Log("Options: %d FPS (F6 cycles 30/60/120/144), rendering at %dx%d (resolution_scale %d); saved in %s",
+            s_fps.load(), 1280 * s_scale, 720 * s_scale, s_scale, kFile);
     }
 
     int Fps() { return s_fps; }
+    int ResolutionScale() { return s_scale; }
 
     void CycleFps()
     {
