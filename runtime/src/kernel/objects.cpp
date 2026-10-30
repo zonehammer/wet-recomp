@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 
 #include <unordered_map>
 
@@ -26,8 +27,17 @@ namespace wet
 
     std::mutex& DispatchLock() { return s_dispatchLock; }
 
+    // WET_BROADCAST_WAKE=1: wake every waiter on every change, like before
+    // per-object wakes (diagnostic).
+    static const bool s_broadcastWake = [] {
+        const char* v = std::getenv("WET_BROADCAST_WAKE");
+        return v && *v == '1';
+    }();
+
     void DispatchNotifyLocked(KObject* obj)
     {
+        if (s_broadcastWake)
+            obj = nullptr;
         for (Waiter* w : s_waiters)
         {
             bool match = !obj || w->thread == obj;
