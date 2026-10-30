@@ -15,8 +15,11 @@ namespace wet::options
     {
         constexpr int kRates[] = { 30, 60, 120, 144 };
         std::atomic<int> s_fps{ 30 };
-        int s_scale = 1;
+        int s_scale = 1, s_scaleRunning = 1;
+        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 };
         constexpr const char* kFile = "wet.ini";
+
+        int Clamp(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
         int Valid(int fps)
         {
@@ -26,24 +29,29 @@ namespace wet::options
             return fps >= 60 ? 60 : 30;
         }
 
-        void Apply()
+        void ApplyFps()
         {
             // Above 60 the guest's vblank runs faster too (one present per vblank).
             renderer::SetVsyncRate(s_fps > 60 ? uint32_t(s_fps.load()) : 60u);
         }
+    }
 
-        void Save()
+    void Save()
+    {
+        if (FILE* f = std::fopen(kFile, "w"))
         {
-            if (FILE* f = std::fopen(kFile, "w"))
-            {
-                std::fprintf(f, "# WET Recomp options\n");
-                std::fprintf(f, "# fps: 30 (the game's own), 60, 120 or 144 - F6 cycles in game\n");
-                std::fprintf(f, "fps = %d\n", s_fps.load());
-                std::fprintf(f, "# resolution_scale: 1 = 720p (the game's own), 2 = 1440p, 3 = 2160p (4K);\n");
-                std::fprintf(f, "# needs a restart. Higher scales need a fast GPU.\n");
-                std::fprintf(f, "resolution_scale = %d\n", s_scale);
-                std::fclose(f);
-            }
+            std::fprintf(f, "# WET Recomp options (F1 in game opens the settings overlay)\n");
+            std::fprintf(f, "# fps: 30 (the game's own), 60, 120 or 144 - F6 cycles in game\n");
+            std::fprintf(f, "fps = %d\n", s_fps.load());
+            std::fprintf(f, "# resolution_scale: 1 = 720p (the game's own), 2 = 1440p, 3 = 2160p (4K); needs a restart\n");
+            std::fprintf(f, "resolution_scale = %d\n", s_scale);
+            std::fprintf(f, "# antialiasing: 0 = off, 1 = FXAA, 2 = FXAA extreme\n");
+            std::fprintf(f, "antialiasing = %d\n", s_aa.load());
+            std::fprintf(f, "# filter (scaling to the window): 0 = bilinear, 1 = AMD CAS sharpening, 2 = AMD FSR\n");
+            std::fprintf(f, "filter = %d\n", s_filter.load());
+            std::fprintf(f, "fullscreen = %d\n", s_fullscreen.load());
+            std::fprintf(f, "show_fps = %d\n", s_showFps.load());
+            std::fclose(f);
         }
     }
 
@@ -58,40 +66,57 @@ namespace wet::options
                 int value;
                 if (std::sscanf(line, " %63[a-z0-9_] = %d", key, &value) != 2)
                     continue;
-                if (!std::strcmp(key, "fps"))
-                    s_fps = Valid(value);
-                else if (!std::strcmp(key, "resolution_scale"))
-                    s_scale = value < 1 ? 1 : value > 3 ? 3 : value;
-                else if (!std::strcmp(key, "fps60"))      // earlier versions
-                    s_fps = value ? 60 : 30;
+                if (!std::strcmp(key, "fps")) s_fps = Valid(value);
+                else if (!std::strcmp(key, "resolution_scale")) s_scale = Clamp(value, 1, 3);
+                else if (!std::strcmp(key, "antialiasing")) s_aa = Clamp(value, 0, 2);
+                else if (!std::strcmp(key, "filter")) s_filter = Clamp(value, 0, 2);
+                else if (!std::strcmp(key, "fullscreen")) s_fullscreen = value != 0;
+                else if (!std::strcmp(key, "show_fps")) s_showFps = value != 0;
+                else if (!std::strcmp(key, "fps60")) s_fps = value ? 60 : 30;   // earlier versions
             }
             std::fclose(f);
         }
         if (const char* v = std::getenv("WET_FPS"))
             s_fps = Valid(std::atoi(v));
         if (const char* v = std::getenv("WET_RES_SCALE"))
-            s_scale = std::atoi(v) < 1 ? 1 : std::atoi(v) > 3 ? 3 : std::atoi(v);
+            s_scale = Clamp(std::atoi(v), 1, 3);
+        s_scaleRunning = s_scale;
         renderer::SetResolutionScale(uint32_t(s_scale));
         Save();
-        Apply();
-        Log("Options: %d FPS (F6 cycles 30/60/120/144), rendering at %dx%d (resolution_scale %d); saved in %s",
-            s_fps.load(), 1280 * s_scale, 720 * s_scale, s_scale, kFile);
+        ApplyFps();
+        Log("Options: %d FPS, rendering at %dx%d (resolution_scale %d), antialiasing %d, filter %d; saved in %s",
+            s_fps.load(), 1280 * s_scale, 720 * s_scale, s_scale, s_aa.load(), s_filter.load(), kFile);
     }
 
     int Fps() { return s_fps; }
-    int ResolutionScale() { return s_scale; }
-
+    void SetFps(int fps)
+    {
+        s_fps = Valid(fps);
+        ApplyFps();
+        Log("Options: %d FPS", s_fps.load());
+        Save();
+    }
     void CycleFps()
     {
         int cur = s_fps, next = kRates[0];
         for (size_t i = 0; i < sizeof(kRates) / sizeof(kRates[0]); i++)
             if (kRates[i] == cur)
                 next = kRates[(i + 1) % (sizeof(kRates) / sizeof(kRates[0]))];
-        s_fps = next;
-        Apply();
-        Log("Options: %d FPS", next);
-        Save();
+        SetFps(next);
     }
+
+    int ResolutionScale() { return s_scale; }
+    int RunningResolutionScale() { return s_scaleRunning; }
+    void SetResolutionScale(int scale) { s_scale = Clamp(scale, 1, 3); Save(); }
+
+    int Antialiasing() { return s_aa; }
+    void SetAntialiasing(int v) { s_aa = Clamp(v, 0, 2); Save(); }
+    int Filter() { return s_filter; }
+    void SetFilter(int v) { s_filter = Clamp(v, 0, 2); Save(); }
+    bool Fullscreen() { return s_fullscreen; }
+    void SetFullscreen(bool v) { s_fullscreen = v; Save(); }
+    bool ShowFps() { return s_showFps; }
+    void SetShowFps(bool v) { s_showFps = v; Save(); }
 }
 
 // Midasm hook (config/WET_config.toml): the present interval D3D's Present has

@@ -31,6 +31,9 @@ namespace wet::renderer
     // Rendering resolution scale (1 = 720p, 2 = 1440p, 3 = 2160p); before Start.
     void SetResolutionScale(uint32_t scale);
     void ToggleFullscreen();
+    // F1 settings overlay; while it's open the keyboard doesn't drive the game.
+    void ToggleOverlay();
+    bool OverlayOpen();
 }
 
 // Provided by the kernel for the renderer's threads.

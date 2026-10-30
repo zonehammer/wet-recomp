@@ -9,6 +9,7 @@
 // never protected. Pages it caches are write-watched in the title's views: the
 // first CPU write invalidates the GPU copy (Xenia's scheme, see xe::Memory).
 #include "gpu/renderer.h"
+#include "options.h"
 
 #include <algorithm>
 #include <atomic>
@@ -45,6 +46,10 @@
 #include "xenia/ui/window.h"
 #include "xenia/ui/window_listener.h"
 #include "xenia/ui/windowed_app_context_win.h"
+#include "xenia/ui/imgui_dialog.h"
+#include "xenia/ui/imgui_drawer.h"
+#include "xenia/ui/immediate_drawer.h"
+#include "third_party/imgui/imgui.h"
 #endif
 
 DECLARE_bool(log_to_stdout);
@@ -277,6 +282,190 @@ namespace
         }
     };
     GameWindow* s_window = nullptr;
+
+    // ---- Settings overlay (F1) and FPS counter, drawn with Xenia's Dear ImGui ----
+    std::unique_ptr<xe::ui::ImmediateDrawer> s_immediateDrawer;
+    std::unique_ptr<xe::ui::ImGuiDrawer> s_imgui;
+    std::atomic<bool> s_overlayOpen{ false };
+    class OverlayDialog;
+    OverlayDialog* s_overlay = nullptr;   // UI thread only
+
+    // Post-processing from the options (UI thread).
+    void ApplyPostProcessing()
+    {
+        if (!s_graphics)
+            return;
+        if (auto* cp = s_graphics->command_processor())
+            cp->SetDesiredSwapPostEffect(xe::gpu::CommandProcessor::SwapPostEffect(wet::options::Antialiasing()));
+        if (auto* presenter = s_graphics->presenter())
+        {
+            auto config = presenter->GetGuestOutputPaintConfigFromUIThread();
+            config.SetEffect(xe::ui::Presenter::GuestOutputPaintConfig::Effect(wet::options::Filter()));
+            presenter->SetGuestOutputPaintConfigFromUIThread(config);
+        }
+    }
+
+    class OverlayDialog final : public xe::ui::ImGuiDialog
+    {
+    public:
+        explicit OverlayDialog(xe::ui::ImGuiDrawer* drawer) : ImGuiDialog(drawer) {}
+
+    protected:
+        void OnClose() override { s_overlay = nullptr; }
+
+        void OnDraw(ImGuiIO& io) override
+        {
+            // Readable at any window size (Xenia's font is 10 px).
+            float scale = std::max(1.5f, io.DisplaySize.y / 540.0f);
+            io.FontGlobalScale = scale;
+
+            UpdateFps();
+            if (wet::options::ShowFps())
+            {
+                ImGui::SetNextWindowPos(ImVec2(8 * scale, 8 * scale));
+                ImGui::SetNextWindowBgAlpha(0.45f);
+                ImGui::Begin("##fps", nullptr,
+                             ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                                 ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoFocusOnAppearing |
+                                 ImGuiWindowFlags_NoNav);
+                ImGui::Text("%.0f FPS", fps_);
+                ImGui::End();
+            }
+
+            if (s_overlayOpen)
+                DrawSettings(io, scale);
+
+            if (!s_overlayOpen && !wet::options::ShowFps())
+                Close();
+        }
+
+    private:
+        void UpdateFps()
+        {
+            auto now = std::chrono::steady_clock::now();
+            uint32_t frames = s_graphics && s_graphics->command_processor() ? s_graphics->command_processor()->counter() : 0;
+            double dt = std::chrono::duration<double>(now - fpsStart_).count();
+            if (dt >= 0.5)
+            {
+                fps_ = (frames - fpsFrames_) / dt;
+                fpsFrames_ = frames;
+                fpsStart_ = now;
+            }
+        }
+
+        static void Section(const char* title)
+        {
+            ImGui::Spacing();
+            ImGui::TextUnformatted(title);
+            ImGui::Separator();
+        }
+
+        static bool Radio(const char* label, int* value, int choice)
+        {
+            return ImGui::RadioButton(label, value, choice);
+        }
+
+        void DrawSettings(ImGuiIO& io, float scale)
+        {
+            ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Appearing,
+                                    ImVec2(0.5f, 0.5f));
+            ImGui::SetNextWindowBgAlpha(0.88f);
+            bool open = true;
+            if (!ImGui::Begin("WET Recomp settings (F1 to close)", &open,
+                              ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                ImGui::End();
+                return;
+            }
+
+            Section("Frame rate");
+            int fps = wet::options::Fps();
+            int pick = fps;
+            Radio("30 (original)", &pick, 30); ImGui::SameLine();
+            Radio("60", &pick, 60); ImGui::SameLine();
+            Radio("120", &pick, 120); ImGui::SameLine();
+            Radio("144", &pick, 144);
+            if (pick != fps)
+                wet::options::SetFps(pick);
+            bool showFps = wet::options::ShowFps();
+            if (ImGui::Checkbox("Show FPS counter", &showFps))
+                wet::options::SetShowFps(showFps);
+
+            Section("Resolution");
+            int res = wet::options::ResolutionScale();
+            int resPick = res;
+            Radio("720p (original)", &resPick, 1); ImGui::SameLine();
+            Radio("1440p", &resPick, 2); ImGui::SameLine();
+            Radio("2160p / 4K", &resPick, 3);
+            if (resPick != res)
+                wet::options::SetResolutionScale(resPick);
+            if (wet::options::ResolutionScale() != wet::options::RunningResolutionScale())
+                ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "Restart the game to change the resolution.");
+
+            Section("Display");
+            bool fullscreen = s_window && s_window->window && s_window->window->IsFullscreen();
+            if (ImGui::Checkbox("Fullscreen (F11)", &fullscreen))
+            {
+                s_window->window->SetFullscreen(fullscreen);
+                wet::options::SetFullscreen(fullscreen);
+            }
+
+            int aa = wet::options::Antialiasing(), aaPick = aa;
+            ImGui::TextUnformatted("Anti-aliasing:");
+            Radio("Off", &aaPick, 0); ImGui::SameLine();
+            Radio("FXAA", &aaPick, 1); ImGui::SameLine();
+            Radio("FXAA (extreme)", &aaPick, 2);
+            int filter = wet::options::Filter(), filterPick = filter;
+            ImGui::TextUnformatted("Scaling to the window:");
+            Radio("Bilinear", &filterPick, 0); ImGui::SameLine();
+            Radio("AMD CAS (sharpen)", &filterPick, 1); ImGui::SameLine();
+            Radio("AMD FSR (upscale)", &filterPick, 2);
+            if (aaPick != aa || filterPick != filter)
+            {
+                wet::options::SetAntialiasing(aaPick);
+                wet::options::SetFilter(filterPick);
+                ApplyPostProcessing();
+            }
+
+            ImGui::Spacing();
+            ImGui::TextDisabled("Settings are saved in wet.ini. While this is open, the keyboard doesn't control the game.");
+            ImGui::End();
+            if (!open)
+                s_overlayOpen = false;
+        }
+
+        double fps_ = 0;
+        uint32_t fpsFrames_ = 0;
+        std::chrono::steady_clock::time_point fpsStart_ = std::chrono::steady_clock::now();
+    };
+
+    // UI thread: make sure the overlay dialog exists if anything needs drawing.
+    void UpdateOverlay()
+    {
+        if (!s_imgui)
+            return;
+        if (!s_overlay && (s_overlayOpen || wet::options::ShowFps()))
+            s_overlay = new OverlayDialog(s_imgui.get());
+    }
+
+    // UI thread, after the presenter is attached.
+    void SetUpOverlay()
+    {
+        auto* presenter = s_graphics->presenter();
+        s_immediateDrawer = s_graphics->provider()->CreateImmediateDrawer();
+        if (!s_immediateDrawer)
+        {
+            wet::renderer_host::Log("Renderer: no immediate drawer - settings overlay unavailable");
+            return;
+        }
+        s_immediateDrawer->SetPresenter(presenter);
+        s_imgui = std::make_unique<xe::ui::ImGuiDrawer>(s_window->window.get(), 64);
+        s_imgui->SetPresenterAndImmediateDrawer(presenter, s_immediateDrawer.get());
+        ApplyPostProcessing();
+        if (wet::options::Fullscreen())
+            s_window->window->SetFullscreen(true);
+        UpdateOverlay();
+    }
 #endif
 
     // Snapshots of the guest output (what the GPU produced, before the window):
@@ -465,7 +654,10 @@ namespace wet::renderer
 #if XE_PLATFORM_WIN32
         if (appContext && s_graphics->presenter())
         {
-            appContext->CallInUIThreadSynchronous([] { s_window->window->SetPresenter(s_graphics->presenter()); });
+            appContext->CallInUIThreadSynchronous([] {
+                s_window->window->SetPresenter(s_graphics->presenter());
+                SetUpOverlay();
+            });
             renderer_host::StartThread(&GameWindow::RepaintThread, s_window, "Repaint");
         }
 #endif
@@ -543,8 +735,30 @@ namespace wet::renderer
 #if XE_PLATFORM_WIN32
         if (s_window && s_window->app && s_window->window)
             s_window->app->CallInUIThread([] {
-                s_window->window->SetFullscreen(!s_window->window->IsFullscreen());
+                bool on = !s_window->window->IsFullscreen();
+                s_window->window->SetFullscreen(on);
+                options::SetFullscreen(on);
             });
+#endif
+    }
+
+    void ToggleOverlay()
+    {
+#if XE_PLATFORM_WIN32
+        if (s_window && s_window->app && s_imgui)
+        {
+            s_overlayOpen = !s_overlayOpen;
+            s_window->app->CallInUIThread([] { UpdateOverlay(); });
+        }
+#endif
+    }
+
+    bool OverlayOpen()
+    {
+#if XE_PLATFORM_WIN32
+        return s_overlayOpen;
+#else
+        return false;
 #endif
     }
 

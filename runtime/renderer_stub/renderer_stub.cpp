@@ -15,5 +15,7 @@ namespace wet::renderer
     void SetVsyncRate(uint32_t) {}
     void SetResolutionScale(uint32_t) {}
     void ToggleFullscreen() {}
+    void ToggleOverlay() {}
+    bool OverlayOpen() { return false; }
     uint32_t ReadRegister(uint32_t) { return 0; }
 }

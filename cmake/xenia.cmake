@@ -101,6 +101,11 @@ add_library(xe_glslang_spirv STATIC ${GLSLANG_SPIRV}/disassemble.cpp ${GLSLANG_S
             ${GLSLANG_SPIRV}/InReadableOrder.cpp ${GLSLANG_SPIRV}/Logger.cpp ${GLSLANG_SPIRV}/SpvBuilder.cpp)
 xe_target(xe_glslang_spirv)
 
+add_library(xe_imgui STATIC ${XE_TP}/imgui/imgui.cpp ${XE_TP}/imgui/imgui_draw.cpp
+                            ${XE_TP}/imgui/imgui_tables.cpp ${XE_TP}/imgui/imgui_widgets.cpp)
+xe_target(xe_imgui)
+target_include_directories(xe_imgui PRIVATE ${XE_TP}/imgui)
+
 # ---- xenia-base ----
 xe_platform_files(XE_BASE_SOURCES ${XE_SRC}/base)
 list(FILTER XE_BASE_SOURCES EXCLUDE REGEX "/(console_app_main|main_init|main)_[a-z]+\\.cc$|/socket_win\\.cc$|/system_(gnulinux|win)\\.cc$")
@@ -115,7 +120,7 @@ endif()
 set(XE_UI_SOURCES ${XE_SRC}/ui/presenter.cc ${XE_SRC}/ui/graphics_upload_buffer_pool.cc
                   ${XE_SRC}/ui/graphics_util.cc ${XE_SRC}/ui/immediate_drawer.cc
                   ${XE_SRC}/ui/renderdoc_api.cc ${XE_SRC}/ui/window.cc ${XE_SRC}/ui/windowed_app_context.cc
-                  ${XE_SRC}/ui/menu_item.cc)
+                  ${XE_SRC}/ui/menu_item.cc ${XE_SRC}/ui/imgui_drawer.cc ${XE_SRC}/ui/imgui_dialog.cc)
 if(WIN32)
     list(APPEND XE_UI_SOURCES ${XE_SRC}/ui/surface_win.cc ${XE_SRC}/ui/window_win.cc
                               ${XE_SRC}/ui/windowed_app_context_win.cc)
@@ -124,7 +129,7 @@ xe_platform_files(XE_UI_VULKAN_SOURCES ${XE_SRC}/ui/vulkan)
 xe_platform_files(XE_UI_VULKAN_FN_SOURCES ${XE_SRC}/ui/vulkan/functions)
 add_library(xe_ui STATIC ${XE_UI_SOURCES} ${XE_UI_VULKAN_SOURCES} ${XE_UI_VULKAN_FN_SOURCES})
 xe_target(xe_ui)
-target_link_libraries(xe_ui PUBLIC xe_base)
+target_link_libraries(xe_ui PUBLIC xe_base xe_imgui)
 if(WIN32)
     target_link_libraries(xe_ui PUBLIC dwmapi dxgi)
 endif()

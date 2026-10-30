@@ -110,6 +110,14 @@ namespace wet
         {
             if (!OurWindowFocused())
                 return 0;
+            // F1: settings overlay.
+            static bool f1 = false;
+            bool f1Now = (GetAsyncKeyState(VK_F1) & 0x8000) != 0;
+            if (f1Now && !f1)
+                renderer::ToggleOverlay();
+            f1 = f1Now;
+            if (renderer::OverlayOpen())
+                return 0;
             uint16_t b = 0;
             for (auto& k : kKeyMap)
                 if (GetAsyncKeyState(k.vk) & 0x8000)
