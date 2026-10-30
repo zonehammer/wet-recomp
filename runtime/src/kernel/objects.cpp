@@ -30,17 +30,21 @@ namespace wet
 
     // WET_BROADCAST_WAKE=1: wake every waiter on every change, like before
     // per-object wakes (diagnostic).
-    static const bool s_broadcastWake = [] {
+    static bool BroadcastWake()
+    {
+        static const bool on = [] {
         const char* v = std::getenv("WET_BROADCAST_WAKE");
-        bool on = v && *v == '1';
-        if (on)
-            Log("Kernel: WET_BROADCAST_WAKE=1 - every change wakes every waiting thread");
+            bool b = v && *v == '1';
+            if (b)
+                Log("Kernel: WET_BROADCAST_WAKE=1 - every change wakes every waiting thread");
+            return b;
+        }();
         return on;
-    }();
+    }
 
     void DispatchNotifyLocked(KObject* obj)
     {
-        if (s_broadcastWake)
+        if (BroadcastWake())
             obj = nullptr;
         for (Waiter* w : s_waiters)
         {
