@@ -48,7 +48,7 @@ all copies or substantial portions of the Software. THE SOFTWARE IS PROVIDED "AS
 WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED.
 """
 
-README = """WET Recomp
+README = """WET Recompiled
 ==============
 
 WET (Xbox 360) recompiled to run natively on Windows 10/11 (64-bit).
