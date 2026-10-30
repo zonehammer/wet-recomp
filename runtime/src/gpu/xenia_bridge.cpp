@@ -856,6 +856,9 @@ namespace wet::renderer
 
     bool Running() { return s_running.load(); }
 
+    std::string s_shaderCacheRoot;
+    void SetShaderCacheRoot(const std::string& path) { s_shaderCacheRoot = path; }
+
     bool Start(uint8_t* membase, uint32_t titleId)
     {
         if (s_running)
@@ -953,6 +956,16 @@ namespace wet::renderer
         char text[160];
         std::snprintf(text, sizeof(text), "Renderer: Xenia GPU emulation on %s started (%s)", s_backend, s_graphics->name().c_str());
         renderer_host::Log(text);
+        // Shader / pipeline cache: everything the game has used is saved and, on
+        // later runs, rebuilt before the first frame instead of when first drawn.
+        if (!s_shaderCacheRoot.empty())
+        {
+            auto started = std::chrono::steady_clock::now();
+            s_graphics->InitializeShaderStorage(std::filesystem::path(s_shaderCacheRoot), titleId, true);
+            double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+            std::snprintf(text, sizeof(text), "Renderer: shader cache in %s loaded in %.1f s", s_shaderCacheRoot.c_str(), seconds);
+            renderer_host::Log(text);
+        }
         renderer_host::StartThread(DumpThread, nullptr, "Frame dump");
         return true;
     }

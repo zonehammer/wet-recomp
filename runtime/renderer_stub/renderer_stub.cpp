@@ -14,6 +14,7 @@ namespace wet::renderer
     void RequestDrawTrace(int) {}
     void AchievementUnlocked() {}
     void RequestBurstCapture() {}
+    void SetShaderCacheRoot(const std::string&) {}
     void SetCursorHidden(bool) {}
     void SetVsyncRate(uint32_t) {}
     void SetResolutionScale(uint32_t) {}

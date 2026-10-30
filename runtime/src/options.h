@@ -46,6 +46,8 @@ namespace wet::options
     // The game's film grain, 0-100 % (wet.ini film_grain).
     // Mouse aim (input.cpp): the mouse drives the right stick; buttons are bound
     // to pad buttons by name (0 left, 1 right, 2 middle, 3 back, 4 forward).
+    // Shader / pipeline cache in <hdd>/shaders (wet.ini shader_cache; restart).
+    bool ShaderCache();
     bool MouseAim();
     void SetMouseAim(bool v);
     int MouseSensitivity();

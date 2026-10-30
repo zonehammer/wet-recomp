@@ -20,7 +20,7 @@ namespace wet::options
         std::atomic<int> s_fpsOverride{ 0 };   // video mode: temporary 30 FPS (not saved)
         std::atomic<int> s_videoMode{ 1 };
         int s_scale = 1, s_scaleRunning = 1;
-        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_mouseAim{ 1 }, s_mouseSens{ 50 }, s_mouseInvert{ 0 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 };
+        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_mouseAim{ 1 }, s_mouseSens{ 50 }, s_mouseInvert{ 0 }, s_shaderCache{ 1 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 };
         constexpr const char* kFile = "wet.ini";
         // Mouse button bindings: left, right, middle, back (X1), forward (X2).
         constexpr const char* kMouseKeys[5] = { "mouse_left", "mouse_right", "mouse_middle", "mouse_back", "mouse_forward" };
@@ -80,6 +80,8 @@ namespace wet::options
             std::fprintf(f, "# mouse buttons: A B X Y LB RB LT RT LTHUMB RTHUMB START BACK UP DOWN LEFT RIGHT or NONE\n");
             for (int i = 0; i < 5; i++)
                 std::fprintf(f, "%s = %s\n", kMouseKeys[i], s_mouseBind[i].c_str());
+            std::fprintf(f, "# shader_cache: 1 = save compiled shaders and rebuild them at startup (no stutter the second time), 0 = off (restart)\n");
+            std::fprintf(f, "shader_cache = %d\n", s_shaderCache.load());
             std::fprintf(f, "fullscreen = %d\n", s_fullscreen.load());
             std::fprintf(f, "show_fps = %d\n", s_showFps.load());
             std::fclose(f);
@@ -111,6 +113,7 @@ namespace wet::options
                 else if (!std::strcmp(key, "filter")) s_filter = Clamp(value, 0, 3);
                 else if (!std::strcmp(key, "achievement_popups")) s_achievementPopups = value != 0;
                 else if (!std::strcmp(key, "video_mode")) s_videoMode = value != 0;
+                else if (!std::strcmp(key, "shader_cache")) s_shaderCache = value != 0;
                 else if (!std::strcmp(key, "mouse_aim")) s_mouseAim = value != 0;
                 else if (!std::strcmp(key, "mouse_sensitivity")) s_mouseSens = Clamp(value, 1, 100);
                 else if (!std::strcmp(key, "mouse_invert_y")) s_mouseInvert = value != 0;
@@ -177,6 +180,7 @@ namespace wet::options
     int Filter() { return s_filter; }
     void SetFilter(int v) { s_filter = Clamp(v, 0, 3); Save(); }
     int FilmGrain() { return s_filmGrain; }
+    bool ShaderCache() { return s_shaderCache != 0; }
     bool MouseAim() { return s_mouseAim.load(std::memory_order_relaxed) != 0; }
     void SetMouseAim(bool v) { s_mouseAim = v; Save(); }
     int MouseSensitivity() { return s_mouseSens.load(std::memory_order_relaxed); }

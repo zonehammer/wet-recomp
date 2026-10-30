@@ -14,6 +14,7 @@
 #include "profiler.h"
 #include "options.h"
 #include "achievements.h"
+#include "gpu/renderer.h"
 #include "kernel/xma.h"
 #include "memory.h"
 #include "module.h"
@@ -94,6 +95,8 @@ int main(int argc, char** argv)
     InitXma();
     InitFileSystem(gameDir, hddDir);
     achievements::Load(hddDir);
+    if (options::ShaderCache())
+        renderer::SetShaderCacheRoot((hddDir / "shaders").string());
 
     if (!StartMainThread(g_module.entryPoint, g_module.stackSize))
         return 1;

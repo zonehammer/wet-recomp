@@ -2,6 +2,7 @@
 // (gpu/xenia_bridge.cpp, Xenia's GPU emulation on Vulkan). Kept free of both the
 // kernel's and Xenia's headers so neither leaks into the other.
 #pragma once
+#include <string>
 #include <cstddef>
 #include <cstdint>
 
@@ -14,6 +15,8 @@ namespace wet::renderer
     // Returns false (after logging why) if no usable Vulkan device exists; the
     // kernel then falls back to its stand-in command processor.
     bool Start(uint8_t* membase, uint32_t titleId);
+    // Folder for the shader / pipeline cache (before Start); empty = no cache.
+    void SetShaderCacheRoot(const std::string& path);
     bool Running();
 
     void SetInterruptCallback(uint32_t callback, uint32_t userData);
