@@ -1,209 +1,139 @@
-# WET Recomp
+# WET Recompiled
 
-A static recompilation of **WET** (Xbox 360, 2009) to native Windows code, built on
-[XenonRecomp](https://github.com/hedge-dev/XenonRecomp).
+A native Windows port of **WET** (Xbox 360, 2009) made by **static recompilation**: the
+game's PowerPC code is translated to C++ and compiled for x64, then run on a small
+runtime that plays the part of the console. Graphics and audio use
+[Xenia](https://github.com/xenia-project/xenia)'s GPU and audio emulation; the
+recompiler is [XenonRecomp](https://github.com/hedge-dev/XenonRecomp).
 
-> **Status: boots to the menus and renders them.** The game's executable is fully
-> recompiled to C++ and runs under a host runtime that implements the Xbox 360 kernel/XAM
-> functions it needs. Graphics go through [Xenia](https://github.com/xenia-project/xenia)'s
-> GPU emulation (Direct3D 12 or Vulkan) in a game window, with sound (Xenia's XMA decoder and XAudio2 output); saves work. See
-> [Roadmap](#roadmap).
+**This repository contains no game data.** You need your own copy of WET (title ID
+`425307DB`). The build extracts your disc and generates the C++ on your machine;
+nothing derived from the game is ever committed.
 
-**This repository contains no game data.** You need your own copy of WET; the build
-extracts it and generates the C++ from it locally. Nothing under `game/` or
-`generated/` is ever committed.
+## Features
 
-## How it works
+- Plays through the game: Direct3D 12 rendering (Vulkan fallback), full audio, saves,
+  intro and cutscene videos.
+- **30 / 60 / 120 / 144 FPS** at the correct game speed.
+- **Resolution scaling** to 1440p or 4K, **AMD FSR / CAS** and **NVIDIA Image Scaling**,
+  FXAA, and a **film grain** slider.
+- **Controllers**: Xbox, PlayStation 4/5 (USB or Bluetooth), Switch Pro and others, up
+  to four, with rumble.
+- **Keyboard and mouse**: WASD movement and mouse aim.
+- **Achievements** with on-screen pop-ups and a list in the overlay.
+- **Shader cache**, so shader compilation stutter only happens once.
+- An in-game settings overlay (**F1**) and a **launcher** with settings and a Play button.
 
-1. `tools/prepare_game.py` extracts the disc image into `game/extracted/` (`tools/build.py` runs every step for you).
-2. CMake builds a patched XenonRecomp from `thirdparty/` and the `recompile` target
-   translates `default.xex` (PowerPC) into ~440 C++ files in `generated/ppc/`, using
-   `config/WET_config.toml` and `config/WET_switch_tables.toml`.
-3. The `WetRecomp` program compiles that code together with `runtime/`, which plays the
-   part of the console: guest memory, threads, synchronisation, files, input and the
-   ~240 kernel/XAM functions the game imports.
-4. The GPU commands the game submits are executed by Xenia's command processor, shader
-   translator and texture/render-target caches (Vulkan), built from `thirdparty/xenia`
-   and hosted by `runtime/src/gpu/xenia_bridge.cpp`; the result appears in a window.
+## Building (Windows 10/11, 64-bit)
 
-## Playing
-
-Run `build\runtime\WetRecomp.exe`. It renders with Direct3D 12 (Xenia's most complete
-backend) and falls back to Vulkan 1.1 if D3D12 isn't available; `set WET_GPU=vulkan`
-forces Vulkan. Controls: up to four controllers - PlayStation 4/5 (DualShock 4,
-DualSense; USB or Bluetooth), Xbox, Switch Pro and others SDL2 supports - in the order
-they connect, with rumble (F1 overlay: Controllers). PlayStation buttons map by
-position: Cross = A, Circle = B, Square = X, Triangle = Y, Options = Start,
-Share/Create or touchpad click = Back. Or the keyboard while the game window is focused (achievements: see below):
-
-| Key | Button | Key | Button |
-|---|---|---|---|
-| Arrow keys | D-pad | Enter | Start |
-| Space | A | Backspace | Back |
-| Esc | B | X / Y | X / Y |
-| Q / E | LB / RB | Z / C | LT / RT |
-
-Mouse aim (on by default): while the game window is active the mouse turns the
-camera and aims (it drives the right stick), WASD moves, left click is RT and right
-click LT. The cursor is hidden and kept in the window; F1 (the overlay) or Alt+Tab
-frees it. Sensitivity and invert-Y are in the overlay; the five mouse buttons can be
-bound to any pad button in wet.ini (`mouse_left = RT` ...).
-
-**F1** opens a settings overlay (frame rate, resolution, fullscreen, FPS counter,
-anti-aliasing, AMD CAS/FSR or NVIDIA Image Scaling with a sharpness slider). **F6** cycles the frame rate: 30 (the game's own), 60, 120 and 144 FPS; the choice is
-saved in `wet.ini` (`fps = 60`). Above 30 the game's 1/30 s world step is scaled to match,
-and above 60 the emulated vblank runs at the chosen rate.
-
-`resolution_scale` in `wet.ini` sets the rendering resolution (restart to apply):
-1 = 1280x720 (the game's own), 2 = 2560x1440, 3 = 3840x2160 (4K). **F11** toggles fullscreen.
-
-Saves go to `game\hdd\content\`. Logs: `wet.log` (the game and kernel) and
-`xenia_gpu.log` (the renderer). `WET_RENDERER=0` falls back to the old stand-in GPU
-(no picture), which helps tell renderer problems from game problems. F9 writes every
-draw of the next two frames to `xenia_gpu.log` (`DRAWTRACE` lines) for renderer bugs.
-
-## Building (Windows)
-
-You need your WET disc image (title ID `425307DB`) and a Clang toolchain. Visual Studio is
-**not** required.
+You need your WET disc image and a Clang toolchain. Visual Studio is **not** required.
 
 **1. Install the tools** (once):
 
 - [Python 3](https://www.python.org/downloads/) (tick "Add python.exe to PATH") and
   [Git for Windows](https://git-scm.com).
 - CMake and Ninja: `pip install cmake ninja`
-- Clang: download the latest **llvm-mingw** release
-  (`llvm-mingw-<date>-ucrt-x86_64.zip` from
+- Clang: the latest **llvm-mingw** release (`llvm-mingw-<date>-ucrt-x86_64.zip` from
   [github.com/mstorsjo/llvm-mingw/releases](https://github.com/mstorsjo/llvm-mingw/releases)),
-  unzip it somewhere like `C:\llvm-mingw`, and add its `bin` folder to your `PATH`.
+  unzipped to e.g. `C:\llvm-mingw`, with its `bin` folder added to your `PATH`.
 
-**2. Build** (in a normal Command Prompt or PowerShell):
+**2. Build** (Command Prompt or PowerShell):
 
 ```bat
-git clone --recursive https://github.com/zonehammer/Claudtest1.git wet-recomp
+git clone --recursive https://github.com/zonehammer/wet-recomp.git
 cd wet-recomp
-python tools\build.py --iso "D:\path\to\WET (USA, Europe) (En,Fr,De,Es,It).iso"
+python tools\build.py --iso "D:\path\to\WET.iso"
 ```
 
-That extracts the disc into `game\extracted`, recompiles `default.xex` into `generated\ppc`
-and compiles everything. The first build compiles ~250 MB of generated C++; expect
-5–15 minutes on a modern CPU. Later, just run `python tools\build.py` again; it only redoes
-what changed.
+This extracts the disc into `game\extracted`, recompiles `default.xex` into
+`generated\ppc` and builds everything. The first build compiles ~250 MB of generated C++
+(5–15 minutes on a modern CPU); later, `python tools\build.py` only redoes what changed.
 
-**3. Run** from the repository folder:
+*With Visual Studio 2022 and "C++ Clang tools for Windows"*, run
+`python tools\build.py --toolchain clang-cl` from an x64 Native Tools prompt instead.
 
-```bat
-build\runtime\WetRecomp.exe
-```
+**3. Play**: `build\runtime\WetLauncher.exe` (settings, then Play) or
+`build\runtime\WetRecomp.exe` (straight in).
 
-It finds `game\extracted` automatically (or pass `--game <folder>`), writes save data to
-`game\hdd`, and logs to `wet.log`.
+**Ready-to-run folder**: `python tools\package.py --with-game --with-saves --zip` makes
+`dist\WET-Recomp-<version>` with the launcher, the game exe, a player README and the
+licence notices. It contains code translated from your copy of the game, so it is for
+**your own machines only**: don't upload or share it.
 
-*Already have Visual Studio 2022 with "C++ Clang tools for Windows"?* Run
-`python tools\build.py --toolchain clang-cl` from an x64 Native Tools prompt instead of
-installing llvm-mingw. Linux works with the system `clang`; it's used for testing the runtime.
+## Controls
 
-### Continuous integration
+| Action | Controller | Keyboard / mouse |
+|---|---|---|
+| Move | Left stick | WASD |
+| Camera / aim | Right stick | Mouse |
+| Shoot / LT | RT / LT | Left / right click |
+| A / B / X / Y | A / B / X / Y (PlayStation: Cross / Circle / Square / Triangle) | Space / Esc / X / Y |
+| Bumpers / triggers | LB / RB, LT / RT | Q / E, Z / C |
+| D-pad, Start, Back | D-pad, Start (Options), Back (Share / touchpad) | Arrows, Enter, Backspace |
 
-Every push is built on GitHub's Windows machines with both llvm-mingw and clang-cl
-(`.github/workflows/windows.yml`). CI has no game files, so it links the runtime against
-`ci/stub_ppc`, a small stand-in that uses the same constructs as the generated code.
-Each llvm-mingw run also publishes the patched `XenonRecomp.exe`/`XenonAnalyse.exe` as a
-download on the run's page.
+| Key | |
+|---|---|
+| F1 | Settings overlay (frame rate, resolution, scaling, film grain, mouse, controllers, achievements); frees the mouse |
+| F6 | Cycle the frame rate |
+| F11 | Fullscreen |
+| F8 | Save the next 48 frames to `frames\` (bug reports) |
+| F10 | Profiler on/off (`profile.txt`, bug reports) |
 
-## What the log tells you
+Settings live in `wet.ini` next to the exe; the mouse buttons can be rebound there
+(`mouse_left = RT` ...). Saves, `achievements.ini` and the shader cache are in
+`game\hdd`. `WetRecomp.exe --console` shows the log live; `wet.log` always has it.
 
-Every kernel call that isn't implemented yet is a logged stub:
+## How it works
 
-```
-STUB XexGetModuleSection(70004000, 8234A0D8, 700838E0, 70083900, 00000000) #1 lr=83037A80
-```
-
-Files the game opens are logged with where they resolved to. Crashes are reported with
-the **guest** address and the last import the thread called, and an indirect call to an
-address that wasn't recompiled says exactly which address to add to the config.
+1. `tools/prepare_game.py` extracts the disc into `game/extracted/`.
+2. A patched XenonRecomp translates `default.xex` into ~440 C++ files in `generated/ppc/`,
+   guided by `config/WET_config.toml` and `config/WET_switch_tables.toml` (jump tables found
+   by `tools/find_jump_tables.py`).
+3. `runtime/` provides what the console did: guest memory with the 0xA/0xC/0xE physical
+   views, threads and synchronisation, files, input, achievements and ~240 kernel/XAM
+   functions.
+4. The GPU commands the game submits run through Xenia's command processor, shader
+   translator and caches (`runtime/src/gpu/xenia_bridge.cpp`); XMA audio is decoded by
+   Xenia's decoder and played with XAudio2.
 
 ## Repository layout
 
 ```
-config/       XenonRecomp config + jump tables for WET
-patches/      changes to XenonRecomp (applied automatically by CMake)
-runtime/      the host program
-  include/    hooks force-included into the generated code (50 MHz timebase, checked indirect calls)
-  src/        memory, threads, loader, logging
-  src/kernel/ host implementations of xboxkrnl/XAM imports
-tools/        build.py (one-command build), disc extraction and analysis scripts
-ci/           stand-in for the generated code, used by the Windows CI build
-  src/gpu/    the renderer bridge (Xenia's GPU emulation)
-  xenia_shim/ the few emulator interfaces Xenia's GPU code expects
-cmake/        builds the parts of Xenia the renderer needs
-thirdparty/   XenonRecomp and Xenia (git submodules; tools/fetch_deps.py fetches them)
+config/       XenonRecomp configuration for WET
+patches/      changes to XenonRecomp and Xenia (applied automatically by CMake)
+runtime/      the host program (src/, src/kernel/, src/gpu/, xenia_shim/)
+launcher/     the settings launcher
+tools/        build.py, package.py, disc extraction and analysis scripts
+cmake/        builds the parts of Xenia and SDL2 the runtime needs
+ci/           stand-in for the generated code, for CI builds without game files
+thirdparty/   XenonRecomp and Xenia (git submodules)
 game/         YOUR game files (ignored by git)
 generated/    generated C++ (ignored by git)
 ```
 
-## Changes to XenonRecomp
+## Status and known issues
 
-Upstream XenonRecomp was built around Sonic Unleashed; WET needed (`patches/xenonrecomp-wet.patch`):
+- Intro and cutscene videos run at 30 FPS ("Videos at 30 FPS", on by default) to avoid a
+  flicker at the top of the picture caused by a timing race at higher frame rates.
+- Mouse aim drives the right stick, so it has the stick's maximum turn speed; direct
+  camera control is planned.
+- Achievements earned in saves from before achievement support aren't shown as unlocked.
+- Tested on one game copy and a few PCs; please report problems with `wet.log` attached.
 
-- ~30 PowerPC instructions it didn't implement (update-form loads/stores, `bdzf`/`bdnzt`,
-  `eqv`, `addc`, `addme`, `subfze`, `mulhd`, `vsel128`, `vpkswss`, `vcmpgtsw`, `vctuxs`, ...).
-- `vcmpbfp`, `blrl`, and the FLOAT16 forms of `vpkd3d128`/`vupkd3d128`, which upstream
-  compiled to a debug trap.
-- `mftb` emits an overridable `PPC_QUERY_TIMEBASE()` hook instead of the host TSC.
+## Credits
 
-## Jump tables
-
-XenonAnalyse found 91 of WET's switch tables. `tools/find_jump_tables.py` finds the rest
-(absolute, halfword-relative and byte-relative tables) by symbolically evaluating each
-`bctr` back to its bounds check. Re-run against XenonAnalyse's results it reproduces every
-table it detects identically; it added 163 more.
-
-## Roadmap
-
-1. **Kernel bring-up** — implement stubs as the log shows the game needs them. *(done up to
-   the frame loop: the game submits GPU commands and presents frames)*
-2. **GPU** — *(running: Xenia's Vulkan renderer draws the intros and menus)* Next:
-   correctness in-game, performance.
-3. **Audio** — XMA decoding, the XAudio render driver callback.
-4. **Video** — Bink is decoded by the game itself and drawn by the GPU *(works)*.
-5. **Saves, content, polish.**
-
-[Xenia](https://github.com/xenia-project/xenia) is the reference for the console's
-behaviour; [UnleashedRecomp](https://github.com/hedge-dev/UnleashedRecomp) is the
-reference for how a finished recompilation project is structured.
+- [XenonRecomp](https://github.com/hedge-dev/XenonRecomp) (hedge-dev) — the recompiler;
+  [UnleashedRecomp](https://github.com/hedge-dev/UnleashedRecomp) showed how a finished
+  recompilation project fits together.
+- [Xenia](https://github.com/xenia-project/xenia) — GPU and audio emulation, and the
+  reference for the console's behaviour.
+- [SDL2](https://www.libsdl.org/), [Dear ImGui](https://github.com/ocornut/imgui),
+  [FFmpeg](https://ffmpeg.org/), [NVIDIA Image Scaling](https://github.com/NVIDIAGameWorks/NVIDIAImageScaling).
 
 ## Legal
 
-This project contains no copyrighted game code or assets. It is intended for people who
-own a legitimate copy of WET. Not affiliated with Bethesda Softworks or Artificial Mind
-and Movement.
-
-## Achievements
-
-The game's achievements (names, descriptions, gamerscore and icons, read from
-default.xex) are tracked when the game awards them: an "Achievement unlocked"
-pop-up appears at the top of the screen, and the F1 overlay's Achievements
-section lists them all with unlock dates. Unlocks are saved in
-`game\hdd\achievements.ini` (delete a line to re-lock one); pop-ups can be turned
-off in the overlay or with `achievement_popups = 0` in wet.ini. Achievements
-earned before this feature existed aren't known - the game only reports each one
-once, when it is earned.
-
-## Launcher
-
-`build\runtime\WetLauncher.exe` (in a package: "WET Launcher.exe") is a small settings
-window - frame rate, resolution, fullscreen, scaling, anti-aliasing, film grain, mouse,
-vibration, shader cache, video mode, pop-ups - with buttons to open the saves folder,
-clear the shader cache and Play. It edits the same wet.ini as the F1 overlay and starts
-WetRecomp.exe from its own folder.
-
-## Packaged build
-
-`python tools\package.py` puts a ready-to-run folder in `dist\WET-Recomp-<version>` (the version is in the VERSION file):
-WetRecomp.exe (no extra DLLs - everything it needs is part of Windows 10/11), a
-README.txt for players and the third-party licence notices. Put the extracted disc
-in its `game\extracted` folder, or add `--with-game` to copy it in; `--with-saves`
-also copies saves, achievements and the shader cache, and `--zip` makes a zip.
-The exe contains code translated from your copy of WET, so the package is for your
-own machines - `dist/` is git-ignored and must never be committed or shared.
+WET Recompiled's own code is released under the [MIT licence](LICENSE); the third-party
+projects keep their own licences. This project contains no game code or assets and is
+intended for people who own a legitimate copy of WET. It is not affiliated with or
+endorsed by Bethesda Softworks or Artificial Mind and Movement. WET is a trademark of
+its respective owner.
