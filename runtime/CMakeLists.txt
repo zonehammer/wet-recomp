@@ -81,9 +81,11 @@ if(WIN32)
         # Guest code recurses deeply; give the main thread a big stack too.
         # The map file lets tools/resolve_profile.py name profiled addresses.
         target_link_options(WetRecomp PRIVATE -Wl,--stack,16777216 -Wl,-Map=$<TARGET_FILE_DIR:WetRecomp>/WetRecomp.map)
+        # A windowed app (no console window); main() stays the entry point.
+        target_link_options(WetRecomp PRIVATE -Wl,--subsystem,windows)
     else()
         target_link_libraries(WetRecomp PRIVATE xinput winmm)
-        target_link_options(WetRecomp PRIVATE /MAP:$<TARGET_FILE_DIR:WetRecomp>/WetRecomp.map)
+        target_link_options(WetRecomp PRIVATE /MAP:$<TARGET_FILE_DIR:WetRecomp>/WetRecomp.map /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup)
     endif()
 endif()
 if(MSVC)

@@ -236,7 +236,23 @@ namespace wet::os
         }
         LogFatal("  faulting code: %s+0x%llX", shortName,
                  (unsigned long long)(mod ? pc - uintptr_t(mod) : pc));
+        LogFlush();
+        ShowFatalMessage("WET Recomp crashed.\n\nThe details are at the end of wet.log, next to WetRecomp.exe.");
         return EXCEPTION_CONTINUE_SEARCH;
+    }
+
+    void ShowFatalMessage(const char* text)
+    {
+        if (!GetConsoleWindow() && !std::getenv("CI") && !std::getenv("WET_NO_DIALOGS"))
+            MessageBoxA(nullptr, text, "WET Recomp", MB_OK | MB_ICONERROR | MB_TOPMOST | MB_SETFOREGROUND);
+    }
+
+    void OpenConsole()
+    {
+        if (GetConsoleWindow() || !AllocConsole())
+            return;
+        std::freopen("CONOUT$", "w", stdout);
+        std::freopen("CONOUT$", "w", stderr);
     }
 
     void InstallCrashHandler(uint8_t* guestBase, uint64_t guestSize)
@@ -329,6 +345,8 @@ namespace wet::os
     }
 
     void ExitCurrentThread() { pthread_exit(nullptr); }
+    void ShowFatalMessage(const char*) {}
+    void OpenConsole() {}
     uint32_t CurrentHostThreadId() { return uint32_t(syscall(SYS_gettid)); }
 
     struct WakeEvent { int fd; };

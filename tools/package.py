@@ -83,7 +83,8 @@ F11  fullscreen
 F8   save the next 48 frames to frames\\ (for bug reports)
 F10  start / stop the profiler (profile.txt, for bug reports)
 
-Settings are saved in wet.ini next to WetRecomp.exe. Some (resolution, shader
+There's no console window; to watch the log while playing, start it with
+WetRecomp.exe --console. Settings are saved in wet.ini next to WetRecomp.exe. Some (resolution, shader
 cache) apply at the next start.
 
 Saves, achievements, shader cache

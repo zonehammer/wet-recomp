@@ -383,6 +383,8 @@ using namespace wet;
              target, (unsigned long long)ctx.lr);
     LogFatal("  If this address is real code, add it to config/WET_config.toml `functions` and recompile.");
     LogCrashContext();
+    LogFlush();
+    os::ShowFatalMessage("WET Recomp stopped (the game called code that wasn't recompiled).\n\nThe details are at the end of wet.log.");
     os::ExitProcess(1);
 }
 

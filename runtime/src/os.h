@@ -57,4 +57,9 @@ namespace wet::os
     void InstallCrashHandler(uint8_t* guestBase, uint64_t guestSize);
 
     [[noreturn]] void ExitProcess(int code);
+    // A message box for fatal errors when there is no console to read (the
+    // Windows build is a windowed app); no-op elsewhere or with a console.
+    void ShowFatalMessage(const char* text);
+    // Opens a console window for the log (--console / WET_CONSOLE=1).
+    void OpenConsole();
 }

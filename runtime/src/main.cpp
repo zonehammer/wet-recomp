@@ -6,6 +6,7 @@
 //         Default: game/extracted, searched from the current folder upwards.
 // --hdd   writable folder for save data and cache. Default: <game>/../hdd
 // --log   log file. Default: wet.log in the current folder.
+#include <cstdlib>
 #include "kernel/fs.h"
 #include "kernel/init.h"
 #include "kernel/kernel.h"
@@ -57,9 +58,18 @@ int main(int argc, char** argv)
 {
     fs::path gameDir, hddDir;
     std::string logPath = "wet.log";
+    // The Windows build is a windowed app (no console); --console or WET_CONSOLE=1
+    // opens one showing the log as it is written.
+    for (int i = 1; i < argc; i++)
+        if (std::string(argv[i]) == "--console")
+            os::OpenConsole();
+    if (const char* v = std::getenv("WET_CONSOLE"); v && *v == '1')
+        os::OpenConsole();
     for (int i = 1; i < argc; i++)
     {
         std::string a = argv[i];
+        if (a == "--console")
+            continue;
         if (a == "--game" && i + 1 < argc) gameDir = argv[++i];
         else if (a == "--hdd" && i + 1 < argc) hddDir = argv[++i];
         else if (a == "--log" && i + 1 < argc) logPath = argv[++i];
@@ -86,6 +96,8 @@ int main(int argc, char** argv)
     if (gameDir.empty() || !fs::exists(gameDir / "default.xex"))
     {
         LogFatal("Could not find the game. Run tools/prepare_game.py first, or pass --game <folder containing default.xex>.");
+        os::ShowFatalMessage("Could not find the game files.\n\nPut your extracted WET disc in game\\extracted next to "
+                             "WetRecomp.exe, so that game\\extracted\\default.xex exists.");
         return 1;
     }
     gameDir = fs::absolute(gameDir);
