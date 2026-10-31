@@ -81,8 +81,8 @@ key), with the launcher's Keyboard... button, or in wet.ini (key_a = SPACE).
 
 Keys
 ----
-F1   settings overlay (frame rate, resolution, scaling, film grain, mouse,
-     controllers, achievements)
+F1   settings overlay (frame rate, resolution, scaling, field of view, film grain,
+     mouse, keyboard, controllers, achievements)
 F6   cycle the frame rate (30 / 60 / 120 / 144)
 F11  fullscreen
 F8   save the next 48 frames to frames\\ (for bug reports)
