@@ -126,12 +126,34 @@ namespace wet::padaim
     }
 }
 
+namespace
+{
+    thread_local uint32_t t_actionLr = 0;   // caller of the input action being read
+}
+
+// An input action's value (sub_82B0ADD0): reads the pad axes bound to it through
+// GetAxis. Its caller is the game code that uses the stick (the camera).
+extern "C" void __imp__sub_82B0ADD0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82B0ADD0)
+{
+    uint32_t outer = t_actionLr;
+    t_actionLr = uint32_t(ctx.lr);
+    __imp__sub_82B0ADD0(ctx, base);
+    t_actionLr = outer;
+}
+
 // The pad object's GetAxis(id) (a virtual): +8 + id*4, so 2 = right X, 3 = right Y.
+// Logged by the caller of the action when read through one.
 extern "C" void __imp__sub_82BF1CC0(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_82BF1CC0)
 {
     if (wet::padaim::s_logAxes.load(std::memory_order_relaxed))
-        wet::padaim::NoteAxisCall(uint32_t(ctx.lr), ctx.r4.u32);
+    {
+        uint32_t lr = uint32_t(ctx.lr);
+        if ((lr == 0x82B0AE28 || lr == 0x82B0AE68) && t_actionLr)
+            lr = t_actionLr;
+        wet::padaim::NoteAxisCall(lr, ctx.r4.u32);
+    }
     __imp__sub_82BF1CC0(ctx, base);
 }
 
