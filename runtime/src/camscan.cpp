@@ -163,6 +163,14 @@ namespace wet::camscan
             keep([&](const Candidate& x) { return sign(x.v[7] - x.v[6]) == sign(x.v[1] - x.v[0]); });
             Hold(0, 0, 0.5);
 
+            keep([](const Candidate& x) {
+                for (float v : x.v)
+                    if (!Plausible(v))
+                        return false;
+                // An angle holds where it was left (allowing for a little smoothing).
+                float push = std::fabs(x.v[1] - x.v[0]);
+                return std::fabs(x.v[3] - x.v[1]) <= 0.5f * push;
+            });
             // Best: the same size of change each time (a steady turn rate).
             auto score = [](const Candidate& x) {
                 float a = std::fabs(x.v[1] - x.v[0]), b = std::fabs(x.v[4] - x.v[3]), d = std::fabs(x.v[7] - x.v[6]);
@@ -257,7 +265,7 @@ namespace wet::camscan
                 s_watchAddrs.clear();
                 s_writers.clear();
                 auto add = [&](const std::vector<Candidate>& list) {
-                    for (size_t i = 0; i < list.size() && i < 12; i++)
+                    for (size_t i = 0; i < list.size() && i < 150; i++)
                     {
                         uint32_t a = list[i].addr;
                         s_watchAddrs[a] = uint32_t(i);
