@@ -41,7 +41,6 @@ namespace wet::options
             return true;
         }();
         std::atomic<int> s_keyVersion{ 0 };
-        std::string s_skipPasses;   // post effect passes switched off (hex hashes), under s_keyLock
 
         std::string Upper(std::string s)
         {
@@ -129,8 +128,6 @@ namespace wet::options
                 std::lock_guard lock(s_keyLock);
                 for (int i = 0; i < keybinds::kActionCount; i++)
                     std::fprintf(f, "key_%s = %s\n", keybinds::kActions[i].id, s_keyBind[i].c_str());
-                std::fprintf(f, "# skip_passes: post effect passes switched off in F1 > Post effect passes (pixel shader hashes)\n");
-                std::fprintf(f, "skip_passes = %s\n", s_skipPasses.c_str());
             }
             std::fprintf(f, "# shader_cache: 1 = save compiled shaders and rebuild them at startup (no stutter the second time), 0 = off (restart)\n");
             std::fprintf(f, "shader_cache = %d\n", s_shaderCache.load());
@@ -151,12 +148,6 @@ namespace wet::options
             {
                 char key[64], text[64], rest[192];
                 int value;
-                if (std::sscanf(line, " skip_passes = %191[^\r\n]", rest) == 1)
-                {
-                    std::lock_guard lock(s_keyLock);
-                    s_skipPasses = Upper(rest);
-                    continue;
-                }
                 if (std::sscanf(line, " key_%63[a-z0-9_] = %191[^\r\n]", key, rest) == 2)
                 {
                     for (int i = 0; i < keybinds::kActionCount; i++)
@@ -293,19 +284,6 @@ namespace wet::options
             s_keyBind[action] = Upper(keys);
         }
         s_keyVersion++;
-        Save();
-    }
-    std::string SkippedPasses()
-    {
-        std::lock_guard lock(s_keyLock);
-        return s_skipPasses;
-    }
-    void SetSkippedPasses(const std::string& hashes)
-    {
-        {
-            std::lock_guard lock(s_keyLock);
-            s_skipPasses = Upper(hashes);
-        }
         Save();
     }
     int KeyBindingsVersion() { return s_keyVersion.load(std::memory_order_relaxed); }

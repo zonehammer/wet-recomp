@@ -67,9 +67,6 @@ namespace wet::options
     std::string KeyBinding(int action);
     void SetKeyBinding(int action, const std::string& keys);
     int KeyBindingsVersion();   // changes whenever a binding does
-    // Post effect passes switched off (comma-separated pixel shader hashes, hex).
-    std::string SkippedPasses();
-    void SetSkippedPasses(const std::string& hashes);
     int FilmGrain();
     void SetFilmGrain(int v);
     // Horizontal field of view at 16:9 in degrees (90 = the game's own; fov.cpp).

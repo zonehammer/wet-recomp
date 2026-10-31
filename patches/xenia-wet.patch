@@ -107,7 +107,7 @@ index 8f6087b05..47c87eec0 100644
  
  static void set_name(HANDLE thread, const std::string_view name) {
 diff --git a/src/xenia/gpu/command_processor.cc b/src/xenia/gpu/command_processor.cc
-index ce08d19bd..ae8865a3a 100644
+index ce08d19bd..007e90746 100644
 --- a/src/xenia/gpu/command_processor.cc
 +++ b/src/xenia/gpu/command_processor.cc
 @@ -9,6 +9,9 @@
@@ -120,7 +120,7 @@ index ce08d19bd..ae8865a3a 100644
  #include <algorithm>
  #include <cinttypes>
  #include <cmath>
-@@ -32,6 +35,160 @@
+@@ -32,6 +35,111 @@
  namespace xe {
  namespace gpu {
  
@@ -136,55 +136,6 @@ index ce08d19bd..ae8865a3a 100644
 +std::atomic<uint32_t> wet_display_aspect_x{1280};
 +std::atomic<uint32_t> wet_display_aspect_y{720};
 +std::atomic<float> wet_hud_squeeze{1.0f};
-+
-+namespace {
-+std::mutex wet_pass_lock;
-+std::vector<WetPassInfo> wet_passes;
-+std::vector<uint64_t> wet_skipped;
-+std::atomic<bool> wet_any_skipped{false};
-+uint32_t wet_pass_frame = ~0u, wet_pass_order = 0;
-+}  // namespace
-+
-+void WetNotePass(uint64_t hash, uint32_t swap_count) {
-+  std::lock_guard<std::mutex> lock(wet_pass_lock);
-+  if (swap_count != wet_pass_frame) {
-+    wet_pass_frame = swap_count;
-+    wet_pass_order = 0;
-+  }
-+  uint32_t order = wet_pass_order++;
-+  for (auto& p : wet_passes) {
-+    if (p.hash == hash) {
-+      if (p.last_frame != swap_count) {
-+        p.order = order;
-+        p.last_frame = swap_count;
-+      }
-+      return;
-+    }
-+  }
-+  if (wet_passes.size() < 256) {
-+    wet_passes.push_back({hash, order, swap_count});
-+  }
-+}
-+
-+bool WetSkipPass(uint64_t hash) {
-+  if (!wet_any_skipped.load(std::memory_order_relaxed)) {
-+    return false;
-+  }
-+  std::lock_guard<std::mutex> lock(wet_pass_lock);
-+  return std::find(wet_skipped.begin(), wet_skipped.end(), hash) !=
-+         wet_skipped.end();
-+}
-+
-+std::vector<WetPassInfo> WetPassList() {
-+  std::lock_guard<std::mutex> lock(wet_pass_lock);
-+  return wet_passes;
-+}
-+
-+void WetSetSkippedPasses(const std::vector<uint64_t>& hashes) {
-+  std::lock_guard<std::mutex> lock(wet_pass_lock);
-+  wet_skipped = hashes;
-+  wet_any_skipped = !hashes.empty();
-+}
 +
 +float WetHudSqueeze(const Shader* pixel_shader, uint32_t swap_count) {
 +  // The frame (swap count) the composite was last drawn in; draws after it in the
@@ -281,7 +232,7 @@ index ce08d19bd..ae8865a3a 100644
  using namespace xe::gpu::xenos;
  
  CommandProcessor::CommandProcessor(GraphicsSystem* graphics_system,
-@@ -244,6 +401,7 @@ void CommandProcessor::WorkerThreadMain() {
+@@ -244,6 +352,7 @@ void CommandProcessor::WorkerThreadMain() {
        xe::store_and_swap<uint32_t>(
            memory_->TranslatePhysical(read_ptr_writeback_ptr_), read_ptr_index_);
      }
@@ -289,7 +240,7 @@ index ce08d19bd..ae8865a3a 100644
  
      // FIXME: We're supposed to process the WAIT_UNTIL register at this point,
      // but no games seem to actually use it.
-@@ -349,6 +507,7 @@ void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
+@@ -349,6 +458,7 @@ void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
        uint32_t scratch_addr = regs.values[XE_GPU_REG_SCRATCH_ADDR];
        uint32_t mem_addr = scratch_addr + (scratch_reg * 4);
        xe::store_and_swap<uint32_t>(memory_->TranslatePhysical(mem_addr), value);
@@ -297,7 +248,7 @@ index ce08d19bd..ae8865a3a 100644
      }
    } else {
      switch (index) {
-@@ -743,21 +902,26 @@ bool CommandProcessor::ExecutePacketType3(RingBuffer* reader, uint32_t packet) {
+@@ -743,21 +853,26 @@ bool CommandProcessor::ExecutePacketType3(RingBuffer* reader, uint32_t packet) {
        break;
      case PM4_MEM_WRITE:
        result = ExecutePacketType3_MEM_WRITE(reader, packet, count);
@@ -324,7 +275,7 @@ index ce08d19bd..ae8865a3a 100644
        break;
      case PM4_DRAW_INDX:
        result = ExecutePacketType3_DRAW_INDX(reader, packet, count);
-@@ -932,11 +1096,44 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(RingBuffer* reader,
+@@ -932,11 +1047,44 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(RingBuffer* reader,
    uint32_t frontbuffer_ptr = reader->ReadAndSwap<uint32_t>();
    uint32_t frontbuffer_width = reader->ReadAndSwap<uint32_t>();
    uint32_t frontbuffer_height = reader->ReadAndSwap<uint32_t>();
@@ -370,7 +321,7 @@ index ce08d19bd..ae8865a3a 100644
    return true;
  }
  
-@@ -974,7 +1171,19 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -974,7 +1122,19 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
                  : register_file_->values[poll_reg_addr];
  
    bool matched = false;
@@ -390,7 +341,7 @@ index ce08d19bd..ae8865a3a 100644
      uint32_t value = value_ref;
      if (is_memory) {
        trace_writer_.WriteMemoryRead(CpuToGpu(poll_reg_addr & ~uint32_t(0x3)),
-@@ -1017,12 +1226,19 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -1017,12 +1177,19 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
        // Wait.
        if (wait >= 0x100) {
          PrepareForWait();
@@ -410,7 +361,7 @@ index ce08d19bd..ae8865a3a 100644
          xe::threading::SyncMemory();
          ReturnFromWait();
  
-@@ -1036,6 +1252,7 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -1036,6 +1203,7 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
      }
    } while (!matched);
  
@@ -419,10 +370,10 @@ index ce08d19bd..ae8865a3a 100644
  }
  
 diff --git a/src/xenia/gpu/command_processor.h b/src/xenia/gpu/command_processor.h
-index ffc8eeffa..9bf973344 100644
+index ffc8eeffa..1ef8b8872 100644
 --- a/src/xenia/gpu/command_processor.h
 +++ b/src/xenia/gpu/command_processor.h
-@@ -35,9 +35,67 @@ class ByteStream;
+@@ -35,9 +35,55 @@ class ByteStream;
  
  namespace gpu {
  
@@ -464,18 +415,6 @@ index ffc8eeffa..9bf973344 100644
 +extern std::atomic<float> wet_hud_squeeze;
 +// Called per draw by the backends: the factor for this draw (1 = leave it).
 +float WetHudSqueeze(const Shader* pixel_shader, uint32_t swap_count);
-+// WET: full-screen passes (post effects). Each draw of 6 vertices or fewer is
-+// noted by pixel shader hash; WetSkipPass says whether the runtime switched that
-+// pass off (the draw is then skipped).
-+void WetNotePass(uint64_t pixel_shader_hash, uint32_t swap_count);
-+bool WetSkipPass(uint64_t pixel_shader_hash);
-+struct WetPassInfo {
-+  uint64_t hash;
-+  uint32_t order;     // position in the last frame it was seen in
-+  uint32_t last_frame;
-+};
-+std::vector<WetPassInfo> WetPassList();
-+void WetSetSkippedPasses(const std::vector<uint64_t>& hashes);
 +// Called while WAIT_REG_MEM polls a register (set by the runtime).
 +extern void (*wet_register_sync_hook)();
 +// Draw trace helpers shared by the backends.
@@ -490,7 +429,7 @@ index ffc8eeffa..9bf973344 100644
  struct SwapState {
    // Lock must be held when changing data in this structure.
    std::mutex mutex;
-@@ -78,6 +136,10 @@ class CommandProcessor {
+@@ -78,6 +124,10 @@ class CommandProcessor {
    virtual ~CommandProcessor();
  
    uint32_t counter() const { return counter_; }
@@ -501,7 +440,7 @@ index ffc8eeffa..9bf973344 100644
    void increment_counter() { counter_++; }
  
    Shader* active_vertex_shader() const { return active_vertex_shader_; }
-@@ -270,6 +332,9 @@ class CommandProcessor {
+@@ -270,6 +320,9 @@ class CommandProcessor {
    std::vector<uint32_t> me_bin_;
  
    uint32_t counter_ = 0;
@@ -512,7 +451,7 @@ index ffc8eeffa..9bf973344 100644
    uint32_t primary_buffer_ptr_ = 0;
    uint32_t primary_buffer_size_ = 0;
 diff --git a/src/xenia/gpu/d3d12/d3d12_command_processor.cc b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
-index 0ec70a7d1..1f21a9941 100644
+index 0ec70a7d1..f43fa6f10 100644
 --- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
 +++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
 @@ -1661,7 +1661,12 @@ void D3D12CommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
@@ -539,7 +478,7 @@ index 0ec70a7d1..1f21a9941 100644
        return true;
      }
    }
-@@ -2070,8 +2079,53 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+@@ -2070,8 +2079,45 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
    }
    if (!primitive_processing_result.host_draw_vertex_count) {
      // Nothing to draw.
@@ -554,14 +493,6 @@ index 0ec70a7d1..1f21a9941 100644
 +    WetTraceDraw(regs, *memory_, *vertex_shader, pixel_shader,
 +                 uint32_t(primitive_type), index_count,
 +                 index_buffer_info != nullptr);
-+  // Post effect passes: noted for the overlay, skipped if switched off.
-+  if (pixel_shader && index_count <= 6) {
-+    uint64_t pass_hash = pixel_shader->ucode_data_hash();
-+    WetNotePass(pass_hash, wet_swap_count());
-+    if (WetSkipPass(pass_hash)) {
-+      return true;
-+    }
-+  }
 +  // Film grain: scale the grain constant for this draw only (restored after,
 +  // through WriteRegister so the constant buffers see both changes).
 +  struct WetConstantRestore {
@@ -593,7 +524,7 @@ index 0ec70a7d1..1f21a9941 100644
  
    reg::RB_DEPTHCONTROL normalized_depth_control =
        draw_util::GetNormalizedDepthControl(regs);
-@@ -2169,6 +2223,13 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+@@ -2169,6 +2215,13 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
            render_target_cache_->depth_float24_convert_in_pixel_shader(),
        host_render_targets_used, pixel_shader && pixel_shader->writes_depth(),
        viewport_info);
@@ -607,7 +538,7 @@ index 0ec70a7d1..1f21a9941 100644
    draw_util::Scissor scissor;
    draw_util::GetScissor(regs, scissor);
    scissor.offset[0] *= draw_resolution_scale_x;
-@@ -2467,6 +2528,11 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+@@ -2467,6 +2520,11 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
      }
    }
  

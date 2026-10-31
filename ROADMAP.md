@@ -23,9 +23,7 @@ Make a full playthrough reliable before adding more features.
 |---|---|---|
 | ~~Direct mouse aim~~ (done: `mouse_direct`, uncapped stick values written into the game's pad object) | True 1:1 aim, no stick speed cap or acceleration | M–L |
 | ~~Keyboard rebinding~~ (done: wet.ini `key_*`, the F1 overlay and the launcher) | Everything except the mouse buttons is fixed today | S |
-| **Keep sound on the speakers** when a PlayStation pad registers as an audio device (opt-in) | Windows switches the default output to the controller | S |
 | **PlayStation button prompts** (swap the game's Xbox button icons) | Matches the controller in hand | L |
-| **DualSense / DualShock gyro aim** (optional) | Fine aim on PlayStation pads | M |
 
 ## 0.4 — Performance and visuals
 
@@ -36,7 +34,6 @@ Make a full playthrough reliable before adding more features.
 | ~~Field of view slider~~ (done: `fov`, overlay and launcher) | Common request, especially with wide screens | M |
 | ~~Any frame rate~~ (done: 30-360 or match the monitor; VRR works. Truly uncapped would need a variable time step) | Today it's 30 / 60 / 120 / 144 | M |
 | **Better anti-aliasing** (SMAA, or MSAA through Xenia's render targets) | FXAA is soft | M |
-| **Motion blur and other post effects** as toggles, like film grain | Personal taste; some effects look worse at high frame rates | S per effect |
 | **Further GPU-thread work** (fewer memory traps, cheaper fence wake-ups) | Headroom for 4K at 144 FPS on slower CPUs | M |
 
 ## 0.5 — Packaging and ease of use
