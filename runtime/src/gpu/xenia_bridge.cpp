@@ -615,6 +615,9 @@ namespace
                 bool invert = wet::options::MouseInvertY();
                 if (ImGui::Checkbox("Invert mouse Y", &invert))
                     wet::options::SetMouseInvertY(invert);
+                bool direct = wet::options::MouseDirect();
+                if (ImGui::Checkbox("Direct mouse aim (turn by how far the mouse moves, no stick speed limit)", &direct))
+                    wet::options::SetMouseDirect(direct);
                 ImGui::TextDisabled("WASD move, left click RT, right click LT (buttons: wet.ini mouse_*)");
             }
 

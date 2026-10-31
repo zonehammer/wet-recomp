@@ -130,6 +130,7 @@ namespace wet
             double accX = 0, accY = 0;
             std::chrono::steady_clock::time_point last = std::chrono::steady_clock::now();
             double stickX = 0, stickY = 0;
+            double directX = 0, directY = 0;   // pixels not yet taken by the pad hook (direct aim)
         };
         MouseState s_mouse;
         std::mutex s_mouseLock;
@@ -152,6 +153,15 @@ namespace wet
             renderer::SetCursorHidden(false);
             s_mouse.captured = false;
             s_mouse.stickX = s_mouse.stickY = 0;
+            s_mouse.directX = s_mouse.directY = 0;
+        }
+
+        void AddMouseButtons(uint16_t& buttons, uint8_t& lt, uint8_t& rt)
+        {
+            static constexpr int kButtons[5] = { VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2 };
+            for (int i = 0; i < 5; i++)
+                if (GetAsyncKeyState(kButtons[i]) & 0x8000)
+                    buttons |= BindingBits(options::MouseBinding(i), lt, rt);
         }
 
         // Fills the right stick and mouse-button presses; false if not aiming.
@@ -193,9 +203,20 @@ namespace wet
             {
                 s_mouse.accX += p.x - s_mouse.center.x;
                 s_mouse.accY += p.y - s_mouse.center.y;
+                s_mouse.directX += p.x - s_mouse.center.x;
+                s_mouse.directY += p.y - s_mouse.center.y;
             }
             SetCursorPos(center.x, center.y);
             s_mouse.center = center;
+            if (options::MouseDirect())
+            {
+                // The pad hook takes the movement; the stick is left to the controller.
+                s_mouse.accX = s_mouse.accY = 0;
+                s_mouse.stickX = s_mouse.stickY = 0;
+                AddMouseButtons(buttons, lt, rt);
+                return true;
+            }
+            s_mouse.directX = s_mouse.directY = 0;
             // Turn the movement into a speed every few ms, so several reads in one
             // frame don't see zero and make the stick jitter.
             auto now = std::chrono::steady_clock::now();
@@ -229,10 +250,7 @@ namespace wet
             }
             rx = int16_t(std::clamp(s_mouse.stickX, -1.0, 1.0) * 32767);
             ry = int16_t(std::clamp(s_mouse.stickY, -1.0, 1.0) * 32767);
-            static constexpr int kButtons[5] = { VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2 };
-            for (int i = 0; i < 5; i++)
-                if (GetAsyncKeyState(kButtons[i]) & 0x8000)
-                    buttons |= BindingBits(options::MouseBinding(i), lt, rt);
+            AddMouseButtons(buttons, lt, rt);
             return true;
         }
 
@@ -558,6 +576,22 @@ namespace wet
         s_overrideRx = rx;
         s_overrideRy = ry;
         s_stickOverride = on;
+    }
+
+    bool TakeMouseDelta(double& dx, double& dy)
+    {
+        dx = dy = 0;
+#ifdef _WIN32
+        std::lock_guard lock(s_mouseLock);
+        if (!s_mouse.captured || !options::MouseDirect())
+            return false;
+        dx = s_mouse.directX;
+        dy = s_mouse.directY;
+        s_mouse.directX = s_mouse.directY = 0;
+        return true;
+#else
+        return false;
+#endif
     }
 
     bool HostPadConnected(uint32_t user)

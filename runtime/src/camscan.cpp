@@ -237,7 +237,8 @@ namespace wet::camscan
         // to the first 64 bytes (sticks at +8..+20, triggers +56/+60) records the
         // host instruction, then the thread single-steps it with the page open.
         std::atomic<bool> s_padWatching{ false };
-        std::atomic<uintptr_t> s_padPage{ 0 };
+        std::vector<uintptr_t> s_padPages;   // host views of the pad's page
+        thread_local uintptr_t t_padPage = 0;
         uint32_t s_padGuest = 0;
         std::map<std::pair<uint32_t, uintptr_t>, uint32_t> s_padReaders;   // (offset, host pc) -> count
         thread_local bool t_padStepping = false;
@@ -245,17 +246,20 @@ namespace wet::camscan
         int OnPadFault(uintptr_t host, uintptr_t pc)
         {
             uintptr_t page = host & ~uintptr_t(0xFFF);
-            if (page != s_padPage.load())
-                return 0;
             std::lock_guard lock(s_watchLock);
+            if (std::find(s_padPages.begin(), s_padPages.end(), page) == s_padPages.end())
+                return 0;
             if (!s_padWatching.load())
-                return 2;   // released meanwhile: retry
+                return Writable(page) ? 2 : 0;   // released meanwhile: retry
             uint32_t guest = HostToGuest(host);
             if (guest >= s_padGuest && guest < s_padGuest + 64)
                 s_padReaders[{ guest - s_padGuest, pc }]++;
+            if (s_padGuest >= 0xA0000000u)
+                PrepareHostWrite(s_padGuest & ~0xFFFu, 0x1000);   // in case it's a write
             DWORD old;
             VirtualProtect(reinterpret_cast<void*>(page), 0x1000, PAGE_READWRITE, &old);
             t_padStepping = true;
+            t_padPage = page;
             return 1;
         }
 
@@ -286,11 +290,12 @@ namespace wet::camscan
             {
                 t_padStepping = false;
                 std::lock_guard lock(s_watchLock);
-                if (s_padWatching.load())
+                if (s_padWatching.load() && t_padPage)
                 {
                     DWORD old;
-                    VirtualProtect(reinterpret_cast<void*>(s_padPage.load()), 0x1000, PAGE_NOACCESS, &old);
+                    VirtualProtect(reinterpret_cast<void*>(t_padPage), 0x1000, PAGE_NOACCESS, &old);
                 }
+                t_padPage = 0;
                 return;
             }
             uintptr_t page = t_steppingPage;
@@ -397,9 +402,9 @@ namespace wet::camscan
         void RunPadReaders()
         {
             uint32_t pad = padaim::PadAddress();
-            if (!pad || pad >= 0xA0000000u)
+            if (!pad)
             {
-                Log("Pad readers: no pad object yet (or it's in physical memory: %08X)", pad);
+                Log("Pad readers: no pad object yet - start gameplay first");
                 s_running = false;
                 return;
             }
@@ -408,11 +413,24 @@ namespace wet::camscan
                 std::lock_guard lock(s_watchLock);
                 s_padReaders.clear();
                 s_padGuest = pad;
-                s_padPage = uintptr_t(g_mem.base + (pad & ~0xFFFu));
+                s_padPages.clear();
+                if (pad >= 0xA0000000u)
+                {
+                    uint8_t* views[3];
+                    PhysicalPageViews((pad - 0xA0000000u) / 0x1000, views);
+                    for (auto* v : views)
+                        if (v)
+                            s_padPages.push_back(uintptr_t(v));
+                }
+                else
+                    s_padPages.push_back(uintptr_t(g_mem.base + (pad & ~0xFFFu)));
                 os::SetDiagnosticWatch(OnDiagFault, OnDiagStep);
                 s_padWatching = true;
-                DWORD old;
-                VirtualProtect(reinterpret_cast<void*>(s_padPage.load()), 0x1000, PAGE_NOACCESS, &old);
+                for (auto page : s_padPages)
+                {
+                    DWORD old;
+                    VirtualProtect(reinterpret_cast<void*>(page), 0x1000, PAGE_NOACCESS, &old);
+                }
             }
             Hold(16000, 0, 1.0);
             Hold(-16000, 0, 1.0);
@@ -421,8 +439,14 @@ namespace wet::camscan
             {
                 std::lock_guard lock(s_watchLock);
                 s_padWatching = false;
-                DWORD old;
-                VirtualProtect(reinterpret_cast<void*>(s_padPage.load()), 0x1000, PAGE_READWRITE, &old);
+                if (pad >= 0xA0000000u)
+                    RestorePhysicalPageProtection((pad - 0xA0000000u) / 0x1000);
+                else
+                    for (auto page : s_padPages)
+                    {
+                        DWORD old;
+                        VirtualProtect(reinterpret_cast<void*>(page), 0x1000, PAGE_READWRITE, &old);
+                    }
             }
             SetRightStickOverride(false);
             FILE* report = std::fopen("padreaders.txt", "w");

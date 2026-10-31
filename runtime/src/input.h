@@ -22,4 +22,7 @@ namespace wet
     std::vector<std::string> ConnectedControllers();
     // Diagnostics (camscan.cpp): forces player 1's right stick while on.
     void SetRightStickOverride(bool on, int16_t rx = 0, int16_t ry = 0);
+    // Direct mouse aim: the mouse movement (pixels) since the last call; false while
+    // the mouse isn't captured for aiming or direct aim is off.
+    bool TakeMouseDelta(double& dx, double& dy);
 }

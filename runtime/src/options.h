@@ -57,6 +57,10 @@ namespace wet::options
     void SetMouseSensitivity(int v);
     bool MouseInvertY();
     void SetMouseInvertY(bool v);
+    // Direct mouse aim (padaim.cpp): mouse movement goes straight into the game's
+    // right-stick value each frame, without the stick's -1..1 limit.
+    bool MouseDirect();
+    void SetMouseDirect(bool v);
     std::string MouseBinding(int button);
     int FilmGrain();
     void SetFilmGrain(int v);

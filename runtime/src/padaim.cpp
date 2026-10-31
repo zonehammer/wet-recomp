@@ -5,14 +5,24 @@
 // The camera reads the right stick from there, so this is the place for direct
 // mouse aim: the floats aren't limited to the stick's -1..1.
 //
-// Diagnostics for now: WET_RSTICK_SCALE=<n> multiplies the right stick after the
-// read (does the camera clamp it?), and the pad's address is kept for the pad
-// reader watch (Shift+F7, camscan.cpp).
+// Direct mouse aim (mouse_direct): each update, the mouse movement since the last
+// one becomes a right-stick value proportional to the mouse's speed, past the
+// camera's dead zone and without the -1..1 limit (the camera doesn't clamp it:
+// WET_RSTICK_SCALE=3 turned three times as fast). So a fast flick turns as far as
+// the mouse moved instead of topping out at the stick's turn speed.
+//
+// Diagnostics: WET_RSTICK_SCALE=<n> multiplies the right stick after the read, and
+// the pad's address is kept for the pad reader watch (Shift+F7, camscan.cpp).
 #include "padaim.h"
+#include "input.h"
 #include "log.h"
+#include "options.h"
 #include "ppc_context.h"
 
+#include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 
@@ -48,6 +58,31 @@ namespace wet::padaim
             std::memcpy(&u, &f, 4);
             PPC_STORE_U32(a, u);
         }
+
+        // Mouse movement since the last update -> right stick (x right, y up).
+        bool MouseStick(float& sx, float& sy)
+        {
+            static auto last = std::chrono::steady_clock::now();
+            auto now = std::chrono::steady_clock::now();
+            double dt = std::clamp(std::chrono::duration<double>(now - last).count(), 0.001, 0.1);
+            last = now;
+            double dx, dy;
+            if (!TakeMouseDelta(dx, dy) || (dx == 0 && dy == 0))
+                return false;
+            // Same scale as the stick mode at low speed: sensitivity 50 = 1200 px/s
+            // for a full deflection, 100 = 600 px/s - but nothing caps it at 1.
+            double k = options::MouseSensitivity() / 100.0 / 600.0;
+            double tx = dx / dt * k, ty = -dy / dt * k;
+            if (options::MouseInvertY())
+                ty = -ty;
+            double mag = std::sqrt(tx * tx + ty * ty);
+            // Past the camera's dead zone (~24%) so slow movements still turn.
+            constexpr double kDeadZone = 0.24;
+            double out = kDeadZone + (1.0 - kDeadZone) * mag;
+            sx = float(tx / mag * out);
+            sy = float(ty / mag * out);
+            return true;
+        }
     }
 
     uint32_t PadAddress() { return s_pad.load(); }
@@ -63,6 +98,12 @@ PPC_FUNC(sub_82BF2AA0)
         return;
     if (wet::padaim::s_pad.exchange(pad) != pad)
         wet::Log("Pad: user 0's pad object is at %08X", pad);
+    float mx, my;
+    if (wet::padaim::MouseStick(mx, my))
+    {
+        wet::padaim::StoreF(base, pad + 16, mx);
+        wet::padaim::StoreF(base, pad + 20, my);
+    }
     float scale = wet::padaim::Scale();
     if (scale != 1.0f)
     {
