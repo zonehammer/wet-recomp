@@ -10,7 +10,8 @@ namespace wet::options
 
     // Frame rate: 30 (the game's own), 60, 120 or 144. F6 cycles through them.
     int Fps();              // in effect (30 while video mode holds it)
-    int ConfiguredFps();    // the player's setting
+    int ConfiguredFps();      // as set: 30-360, or 0 = match the monitor
+    int MonitorRefreshRate();    // the player's setting
     // Video mode (fs.cpp opens/closes .bik files): temporary FPS, 0 = none.
     void SetFpsOverride(int fps);
     bool VideoMode();

@@ -3,6 +3,7 @@
 #include "log.h"
 #include "gpu/renderer.h"
 #include "memory.h"
+#include "os.h"
 #include "ppc_context.h"
 
 #include <atomic>
@@ -17,7 +18,10 @@ namespace wet::options
 {
     namespace
     {
-        constexpr int kRates[] = { 30, 60, 120, 144 };
+        // F6 cycles through these; 0 = the monitor's refresh rate.
+        constexpr int kRates[] = { 30, 60, 120, 144, 165, 240, 0 };
+        constexpr int kMaxFps = 360;
+        std::atomic<int> s_monitorHz{ 0 };   // read once, when "match monitor" is first used
         std::atomic<int> s_fps{ 30 };
         std::atomic<int> s_fpsOverride{ 0 };   // video mode: temporary 30 FPS (not saved)
         std::atomic<int> s_videoMode{ 1 };
@@ -48,12 +52,23 @@ namespace wet::options
 
         int Clamp(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
+        // Any rate from 30 to 360, or 0 (match the monitor).
         int Valid(int fps)
         {
-            for (int r : kRates)
-                if (fps == r)
-                    return r;
-            return fps >= 60 ? 60 : 30;
+            if (fps == 0)
+                return 0;
+            return Clamp(fps, 30, kMaxFps);
+        }
+
+        int MonitorHz()
+        {
+            int hz = s_monitorHz.load(std::memory_order_relaxed);
+            if (!hz)
+            {
+                hz = Clamp(os::DisplayRefreshRate(), 30, kMaxFps);
+                s_monitorHz = hz;
+            }
+            return hz;
         }
 
         int CurrentFps();
@@ -70,7 +85,7 @@ namespace wet::options
         if (FILE* f = std::fopen(kFile, "w"))
         {
             std::fprintf(f, "# WET Recomp options (F1 in game opens the settings overlay)\n");
-            std::fprintf(f, "# fps: 30 (the game's own), 60, 120 or 144 - F6 cycles in game\n");
+            std::fprintf(f, "# fps: 30 (the game's own) up to 360, or 0 = match the monitor's refresh rate - F6 cycles in game\n");
             std::fprintf(f, "fps = %d\n", s_fps.load());
             std::fprintf(f, "# resolution_scale: 1 = 720p (the game's own), 2 = 1440p, 3 = 2160p (4K); needs a restart\n");
             std::fprintf(f, "resolution_scale = %d\n", s_scale);
@@ -196,7 +211,15 @@ namespace wet::options
             s_fps.load(), 1280 * s_scale, 720 * s_scale, s_scale, s_aa.load(), s_filter.load(), kFile);
     }
 
-    int Fps() { int o = s_fpsOverride.load(std::memory_order_relaxed); return o ? o : s_fps.load(std::memory_order_relaxed); }
+    int Fps()
+    {
+        int o = s_fpsOverride.load(std::memory_order_relaxed);
+        if (o)
+            return o;
+        int f = s_fps.load(std::memory_order_relaxed);
+        return f ? f : MonitorHz();
+    }
+    int MonitorRefreshRate() { return MonitorHz(); }
     int ConfiguredFps() { return s_fps; }
     namespace { int CurrentFps() { return Fps(); } }
     bool VideoMode() { return s_videoMode != 0; }
@@ -210,7 +233,10 @@ namespace wet::options
     {
         s_fps = Valid(fps);
         ApplyFps();
-        Log("Options: %d FPS", s_fps.load());
+        if (s_fps.load())
+            Log("Options: %d FPS", s_fps.load());
+        else
+            Log("Options: %d FPS (the monitor's refresh rate)", MonitorHz());
         Save();
     }
     void CycleFps()

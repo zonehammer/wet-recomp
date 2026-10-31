@@ -14,7 +14,7 @@ nothing derived from the game is ever committed.
 
 - Plays through the game: Direct3D 12 rendering (Vulkan fallback), full audio, saves,
   intro and cutscene videos.
-- **30 / 60 / 120 / 144 FPS** at the correct game speed.
+- **Any frame rate from 30 to 360 FPS** (or match the monitor) at the correct game speed; G-Sync / FreeSync work.
 - **Resolution scaling** to 1440p or 4K, **AMD FSR / CAS** and **NVIDIA Image Scaling**,
   FXAA, and a **film grain** slider.
 - **Controllers**: Xbox, PlayStation 4/5 (USB or Bluetooth), Switch Pro and others, up

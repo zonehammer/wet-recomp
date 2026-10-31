@@ -34,7 +34,7 @@ Make a full playthrough reliable before adding more features.
 | ~~Don't wait for shaders~~ (done: `async_shaders`) | Removes the first-time stutter the shader cache can't | M |
 | ~~Widescreen and ultrawide~~ (done: `widescreen`, Hor+ view, extra horizontal resolution, HUD kept 16:9) | The game renders 16:9 only | M–L |
 | ~~Field of view slider~~ (done: `fov`, overlay and launcher) | Common request, especially with wide screens | M |
-| **Any frame rate** (165, 240, uncapped with VRR / G-Sync / FreeSync) | Today it's 30 / 60 / 120 / 144 | M |
+| ~~Any frame rate~~ (done: 30-360 or match the monitor; VRR works. Truly uncapped would need a variable time step) | Today it's 30 / 60 / 120 / 144 | M |
 | **Better anti-aliasing** (SMAA, or MSAA through Xenia's render targets) | FXAA is soft | M |
 | **Motion blur and other post effects** as toggles, like film grain | Personal taste; some effects look worse at high frame rates | S per effect |
 | **Further GPU-thread work** (fewer memory traps, cheaper fence wake-ups) | Headroom for 4K at 144 FPS on slower CPUs | M |

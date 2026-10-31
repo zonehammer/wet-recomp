@@ -637,10 +637,23 @@ namespace
             Section("Frame rate");
             int fps = wet::options::ConfiguredFps();
             int pick = fps;
-            Radio("30 (original)", &pick, 30); ImGui::SameLine();
-            Radio("60", &pick, 60); ImGui::SameLine();
-            Radio("120", &pick, 120); ImGui::SameLine();
-            Radio("144", &pick, 144);
+            static constexpr int kChoices[] = { 30, 60, 120, 144, 165, 240 };
+            bool listed = fps == 0;
+            for (int c : kChoices)
+            {
+                char label[24];
+                std::snprintf(label, sizeof(label), c == 30 ? "%d (original)" : "%d", c);
+                Radio(label, &pick, c);
+                ImGui::SameLine();
+                listed |= fps == c;
+            }
+            char monitor[40];
+            std::snprintf(monitor, sizeof(monitor), "Monitor (%d Hz)", wet::options::MonitorRefreshRate());
+            Radio(monitor, &pick, 0);
+            // Any other rate: the slider (also shows a custom rate from wet.ini).
+            int custom = pick == 0 ? wet::options::MonitorRefreshRate() : pick;
+            if (ImGui::SliderInt(listed ? "Other rate" : "Other rate (in use)", &custom, 30, 360, "%d FPS"))
+                pick = custom;
             if (pick != fps)
                 wet::options::SetFps(pick);
             bool asyncShaders = wet::options::AsyncShaders();
@@ -652,7 +665,7 @@ namespace
             bool videoMode = wet::options::VideoMode();
             if (ImGui::Checkbox("Videos at 30 FPS (avoids video flicker)", &videoMode))
                 wet::options::SetVideoMode(videoMode);
-            if (wet::options::Fps() != wet::options::ConfiguredFps())
+            if (wet::options::Fps() != (wet::options::ConfiguredFps() ? wet::options::ConfiguredFps() : wet::options::MonitorRefreshRate()))
                 ImGui::TextDisabled("A video is playing: %d FPS until it ends", wet::options::Fps());
             bool showFps = wet::options::ShowFps();
             if (ImGui::Checkbox("Show FPS counter", &showFps))

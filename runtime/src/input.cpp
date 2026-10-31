@@ -318,7 +318,7 @@ namespace wet
                 renderer::RequestDrawTrace(2);
             }
             f9 = f9Now;
-            // F6: 30 / 60 / 120 / 144 FPS.
+            // F6: 30 / 60 / 120 / 144 / 165 / 240 FPS / the monitor rate.
             static bool f6 = false;
             bool f6Now = (GetAsyncKeyState(VK_F6) & 0x8000) != 0;
             if (f6Now && !f6)

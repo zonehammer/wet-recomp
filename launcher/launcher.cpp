@@ -113,7 +113,8 @@ namespace
     fs::path s_dir, s_iniPath, s_gameDir, s_hddDir;
     Ini s_ini;
 
-    const int kFpsValues[] = { 30, 60, 120, 144 };
+    // 0 = match the monitor; a rate from wet.ini that isn't listed gets its own item.
+    std::vector<int> s_fpsValues = { 30, 60, 120, 144, 165, 240, 360, 0 };
 
     int S(int v) { return int(v * s_scale + 0.5); }
 
@@ -314,7 +315,7 @@ namespace
     void SaveSettings()
     {
         int fps = Selected(kFps);
-        s_ini.Set("fps", kFpsValues[fps < 0 ? 0 : fps]);
+        s_ini.Set("fps", s_fpsValues[fps < 0 ? 0 : size_t(fps)]);
         s_ini.Set("resolution_scale", Selected(kResolution) + 1);
         s_ini.Set("fullscreen", Checked(kFullscreen));
         s_ini.Set("show_fps", Checked(kShowFps));
@@ -385,11 +386,21 @@ namespace
         // Display
         Group(L"Display", 10, 8, 330, 164);
         Label(L"Frame rate", 22, 30);
-        int fps = ini.Get("fps", 30), fpsIndex = 0;
-        for (int i = 0; i < 4; i++)
-            if (kFpsValues[i] == fps)
-                fpsIndex = i;
-        Combo(kFps, 140, 28, 186, { L"30 (original)", L"60", L"120", L"144" }, fpsIndex);
+        int fps = ini.Get("fps", 30), fpsIndex = -1;
+        for (size_t i = 0; i < s_fpsValues.size(); i++)
+            if (s_fpsValues[i] == fps)
+                fpsIndex = int(i);
+        HWND fpsCombo = Combo(kFps, 140, 28, 186,
+                              { L"30 (original)", L"60", L"120", L"144", L"165", L"240", L"360", L"Match monitor" }, 0);
+        if (fpsIndex < 0)
+        {
+            // A custom rate from wet.ini: keep it as its own choice.
+            std::wstring text = std::to_wstring(fps) + L" (wet.ini)";
+            SendMessageW(fpsCombo, CB_ADDSTRING, 0, LPARAM(text.c_str()));
+            s_fpsValues.push_back(fps);
+            fpsIndex = int(s_fpsValues.size()) - 1;
+        }
+        SendMessageW(fpsCombo, CB_SETCURSEL, WPARAM(fpsIndex), 0);
         Label(L"Resolution", 22, 60);
         Combo(kResolution, 140, 58, 186, { L"720p (original)", L"1440p", L"2160p (4K)" },
               std::min(std::max(ini.Get("resolution_scale", 1), 1), 3) - 1);

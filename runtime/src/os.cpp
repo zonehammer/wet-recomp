@@ -276,6 +276,15 @@ namespace wet::os
             MessageBoxA(nullptr, text, "WET Recomp", MB_OK | MB_ICONERROR | MB_TOPMOST | MB_SETFOREGROUND);
     }
 
+    int DisplayRefreshRate()
+    {
+        DEVMODEW mode{};
+        mode.dmSize = sizeof(mode);
+        if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &mode) && mode.dmDisplayFrequency >= 30)
+            return int(mode.dmDisplayFrequency);
+        return 60;
+    }
+
     void OpenConsole()
     {
         if (GetConsoleWindow() || !AllocConsole())
@@ -377,6 +386,7 @@ namespace wet::os
     void ShowFatalMessage(const char*) {}
     void SetDiagnosticWatch(DiagFaultHandler, DiagStepHandler) {}
     void OpenConsole() {}
+    int DisplayRefreshRate() { return 60; }
     uint32_t CurrentHostThreadId() { return uint32_t(syscall(SYS_gettid)); }
 
     struct WakeEvent { int fd; };
