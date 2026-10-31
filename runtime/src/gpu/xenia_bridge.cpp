@@ -227,6 +227,26 @@ namespace
     std::unique_ptr<xe::gpu::GraphicsSystem> s_graphics;
     uint32_t s_resolutionScale = 1;   // rendering resolution = 1280x720 x this
 
+    // "A, B" (hex) -> hashes (skip_passes).
+    static std::vector<uint64_t> ParseHashes(const std::string& text)
+    {
+        std::vector<uint64_t> out;
+        size_t i = 0;
+        while (i < text.size())
+        {
+            size_t j = text.find(',', i);
+            if (j == std::string::npos)
+                j = text.size();
+            std::string item = text.substr(i, j - i);
+            item.erase(std::remove_if(item.begin(), item.end(), [](char c) { return std::isspace((unsigned char)c); }),
+                       item.end());
+            if (!item.empty())
+                out.push_back(std::strtoull(item.c_str(), nullptr, 16));
+            i = j + 1;
+        }
+        return out;
+    }
+
     // Width / height of the main monitor (16:9 if unknown).
     float ScreenAspect()
     {
@@ -550,6 +570,61 @@ namespace
             ImGui::Separator();
         }
 
+        // Post effect passes: every full-screen pass the game drew recently, in
+        // frame order, each with a checkbox (skipped when off). For finding which
+        // pass is motion blur, bloom and so on.
+        static void DrawPasses()
+        {
+            if (!ImGui::CollapsingHeader("Post effect passes (experimental)"))
+                return;
+            ImGui::TextDisabled("Full-screen passes from the last few seconds, in drawing order. Untick one to");
+            ImGui::TextDisabled("switch it off and see what changes (some may break the picture - tick it again).");
+            std::vector<uint64_t> skipped = ParseHashes(wet::options::SkippedPasses());
+            auto passes = xe::gpu::WetPassList();
+            uint32_t now = s_graphics && s_graphics->command_processor() ? s_graphics->command_processor()->wet_swap_count() : 0;
+            std::vector<xe::gpu::WetPassInfo> recent;
+            for (auto& p : passes)
+                if (now - p.last_frame < 600 || std::find(skipped.begin(), skipped.end(), p.hash) != skipped.end())
+                    recent.push_back(p);
+            std::sort(recent.begin(), recent.end(), [](auto& a, auto& b) { return a.order < b.order; });
+            bool changed = false;
+            for (auto& p : recent)
+            {
+                bool on = std::find(skipped.begin(), skipped.end(), p.hash) == skipped.end();
+                char label[96];
+                std::snprintf(label, sizeof(label), "#%u  %016llX%s%s", p.order, (unsigned long long)p.hash,
+                              p.hash == xe::gpu::wet_grain_ps_hash ? "  (final composite + film grain)" : "",
+                              now - p.last_frame >= 600 ? "  (not seen lately)" : "");
+                if (ImGui::Checkbox(label, &on))
+                {
+                    changed = true;
+                    if (on)
+                        skipped.erase(std::remove(skipped.begin(), skipped.end(), p.hash), skipped.end());
+                    else
+                        skipped.push_back(p.hash);
+                }
+            }
+            if (recent.empty())
+                ImGui::TextDisabled("(none yet - play for a moment)");
+            if (!skipped.empty() && ImGui::Button("Switch all back on"))
+            {
+                skipped.clear();
+                changed = true;
+            }
+            if (changed)
+            {
+                std::string text;
+                for (uint64_t h : skipped)
+                {
+                    char hex[24];
+                    std::snprintf(hex, sizeof(hex), "%s%016llX", text.empty() ? "" : ", ", (unsigned long long)h);
+                    text += hex;
+                }
+                wet::options::SetSkippedPasses(text);
+                xe::gpu::WetSetSkippedPasses(skipped);
+            }
+        }
+
         // Keyboard bindings: click an action, press a key. Right click clears it.
         static void DrawKeyboard()
         {
@@ -716,6 +791,7 @@ namespace
             }
 
             DrawKeyboard();
+            DrawPasses();
 
             Section("Resolution");
             int res = wet::options::ResolutionScale();
@@ -1046,6 +1122,7 @@ namespace wet::renderer
             xe::gpu::wet_grain_const = (256 + c) * 4 + k;
         }
         xe::gpu::wet_film_grain = float(options::FilmGrain()) / 100.0f;
+        xe::gpu::WetSetSkippedPasses(ParseHashes(options::SkippedPasses()));
 #if WET_HAVE_D3D12
         xe::gpu::d3d12::wet_async_pipelines = options::AsyncShaders();
 #endif
