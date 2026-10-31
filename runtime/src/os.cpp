@@ -174,13 +174,18 @@ namespace wet::os
                 s_diagStep();
             return EXCEPTION_CONTINUE_EXECUTION;
         }
-        if (s_diagFault && rec->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && rec->NumberParameters >= 2 &&
-            rec->ExceptionInformation[0] == 1 &&
-            s_diagFault(uintptr_t(rec->ExceptionInformation[1]), uintptr_t(rec->ExceptionAddress)))
+        if (auto diag = s_diagFault; diag && rec->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
+            rec->NumberParameters >= 2 && rec->ExceptionInformation[0] == 1)
         {
-            t_diagStepping = true;
-            info->ContextRecord->EFlags |= 0x100;   // trap after this one instruction
-            return EXCEPTION_CONTINUE_EXECUTION;
+            int r = diag(uintptr_t(rec->ExceptionInformation[1]), uintptr_t(rec->ExceptionAddress));
+            if (r == 1)
+            {
+                t_diagStepping = true;
+                info->ContextRecord->EFlags |= 0x100;   // trap after this one instruction
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
+            if (r == 2)
+                return EXCEPTION_CONTINUE_EXECUTION;
         }
         if (rec->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && rec->NumberParameters >= 2 &&
             rec->ExceptionInformation[0] == 1 && s_writeFaultHandler &&

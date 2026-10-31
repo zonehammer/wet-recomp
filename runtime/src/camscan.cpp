@@ -51,7 +51,8 @@ namespace wet::camscan
             return f;
         }
 
-        bool Plausible(float f) { return std::isfinite(f) && std::fabs(f) < 1.0e5f; }
+        // Finite, not absurd, and not a denormal (integers and flags read as floats).
+        bool Plausible(float f) { return std::isfinite(f) && std::fabs(f) < 1.0e5f && (f == 0.0f || std::fabs(f) > 1.0e-6f); }
 
         // Readable, committed guest memory: everything below 0xC0000000 except MMIO
         // (the 0xC/0xE physical views repeat the 0xA one).
@@ -101,7 +102,7 @@ namespace wet::camscan
                 bytes += r.data.size();
             Log("Camera scan (%s): compared %zu MB of guest memory", vertical ? "up/down" : "left/right", bytes >> 20);
 
-            push(+1, 0.4);
+            push(+1, 0.25);
             std::vector<Candidate> c;
             for (auto& r : before)
                 for (size_t o = 0; o + 4 <= r.data.size(); o += 4)
@@ -119,6 +120,15 @@ namespace wet::camscan
             before.clear();
             before.shrink_to_fit();
             size_t first = c.size();
+            // Still pushing: a camera angle keeps moving the same way (a flag or a
+            // stick value set once doesn't).
+            push(+1, 0.25);
+            for (auto& x : c)
+            {
+                float now = LoadFloat(x.addr);
+                x.v[1] = (now - x.v[1]) * (x.v[1] - x.v[0]) > 0 ? now : NAN;
+            }
+            c.erase(std::remove_if(c.begin(), c.end(), [](const Candidate& x) { return std::isnan(x.v[1]); }), c.end());
 
             auto sample = [&](int slot) {
                 for (auto& x : c)
@@ -134,15 +144,21 @@ namespace wet::camscan
             Hold(0, 0, 0.2);
             sample(3);
             keep([](const Candidate& x) { return x.v[2] == x.v[3]; });               // still at rest
-            push(-1, 0.4);
+            push(-1, 0.25);
             sample(4);
             keep([&](const Candidate& x) { return sign(x.v[4] - x.v[3]) == -sign(x.v[1] - x.v[0]) && x.v[4] != x.v[3]; });
+            push(-1, 0.25);
+            keep([&](const Candidate& x) {
+                float now = LoadFloat(x.addr);
+                return sign(now - x.v[4]) == sign(x.v[4] - x.v[3]);
+            });
+            sample(4);
             Hold(0, 0, 0.6);
             sample(5);
             Hold(0, 0, 0.2);
             sample(6);
             keep([](const Candidate& x) { return x.v[5] == x.v[6]; });
-            push(+1, 0.4);
+            push(+1, 0.5);
             sample(7);
             keep([&](const Candidate& x) { return sign(x.v[7] - x.v[6]) == sign(x.v[1] - x.v[0]); });
             Hold(0, 0, 0.5);
@@ -195,22 +211,22 @@ namespace wet::camscan
                 readOnly ? os::ProtectReadOnly(page, 0x1000) : os::ProtectReadWrite(page, 0x1000);
         }
 
-        bool OnDiagFault(uintptr_t host, uintptr_t pc)
+        int OnDiagFault(uintptr_t host, uintptr_t pc)
         {
-            if (!s_watching.load())
-                return false;
             std::lock_guard lock(s_watchLock);
             uintptr_t page = host & ~uintptr_t(0xFFF);
             bool ours = false;
             for (auto& [p, g] : s_watchPages)
                 ours = ours || uintptr_t(p) == page;
             if (!ours)
-                return false;
+                return 0;
+            if (!s_watching.load())
+                return 2;   // released while this write was faulting: just retry it
             uint32_t guest = HostToGuest(host) & ~3u;
             if (s_watchAddrs.count(guest))
                 s_writers[{ guest, pc }]++;
             ProtectAll(false);   // let this one write through; the step handler re-arms
-            return true;
+            return 1;
         }
 
         void OnDiagStep()
@@ -277,7 +293,8 @@ namespace wet::camscan
                 s_watching = false;
                 ProtectAll(false);
             }
-            os::SetDiagnosticWatch(nullptr, nullptr);
+            // The handler stays installed: a write that faulted just before the pages
+            // were released retries instead of crashing (OnDiagFault returns 2).
 
             std::fprintf(report, "\n== Writers (address: host instruction x count; resolve exe:offsets with the map) ==\n");
             for (auto& [key, count] : s_writers)

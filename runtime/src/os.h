@@ -32,7 +32,9 @@ namespace wet::os
     // returns true if the page is one of its own (it unprotects it); the faulting
     // thread then single-steps that one instruction and the step handler
     // re-protects. Windows only.
-    using DiagFaultHandler = bool (*)(uintptr_t hostAddress, uintptr_t pc);
+    // Returns 0: not a diagnostic page; 1: handled, single-step and re-arm;
+    // 2: the page was just released - retry the write.
+    using DiagFaultHandler = int (*)(uintptr_t hostAddress, uintptr_t pc);
     using DiagStepHandler = void (*)();
     void SetDiagnosticWatch(DiagFaultHandler fault, DiagStepHandler step);
     bool Commit(void* p, size_t size);          // make read/write, zero-filled when fresh
