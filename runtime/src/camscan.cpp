@@ -432,6 +432,7 @@ namespace wet::camscan
                     VirtualProtect(reinterpret_cast<void*>(page), 0x1000, PAGE_NOACCESS, &old);
                 }
             }
+            padaim::LogAxisReaders(true);
             Hold(16000, 0, 1.0);
             Hold(-16000, 0, 1.0);
             Hold(0, 16000, 1.0);
@@ -448,10 +449,14 @@ namespace wet::camscan
                         VirtualProtect(reinterpret_cast<void*>(page), 0x1000, PAGE_READWRITE, &old);
                     }
             }
+            padaim::LogAxisReaders(false);
             SetRightStickOverride(false);
             FILE* report = std::fopen("padreaders.txt", "w");
             if (report)
             {
+                std::fprintf(report, "# GetAxis (sub_82BF1CC0) callers: lr, axis (2 = right X, 3 = right Y) x count\n");
+                for (auto& c : padaim::AxisReaders())
+                    std::fprintf(report, "lr %08X axis %u x%u\n", c.lr, c.axis, c.count);
                 std::fprintf(report, "# Pad object %08X: offset, host instruction x count (resolve exe: with the map)\n", pad);
                 for (auto& [key, count] : s_padReaders)
                     std::fprintf(report, "+%u: %s x%u\n", key.first, Describe(key.second).c_str(), count);

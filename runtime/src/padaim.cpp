@@ -25,12 +25,25 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <map>
+#include <mutex>
+#include <utility>
 
 namespace wet::padaim
 {
     namespace
     {
         std::atomic<uint32_t> s_pad{ 0 };
+        // The controller's own right stick, and what we last wrote over it: the
+        // game only refreshes the pad when the XInput packet changes, so after
+        // mouse movement the controller value has to be put back by us.
+        float s_ctrlX = 0, s_ctrlY = 0, s_wroteX = 0, s_wroteY = 0;
+        bool s_wrote = false;
+
+        // Axis reader log (Shift+F7): (caller lr, axis) -> count.
+        std::atomic<bool> s_logAxes{ false };
+        std::mutex s_axisLock;
+        std::map<std::pair<uint32_t, uint32_t>, uint32_t> s_axisCalls;
 
         float Scale()
         {
@@ -86,6 +99,40 @@ namespace wet::padaim
     }
 
     uint32_t PadAddress() { return s_pad.load(); }
+
+    void LogAxisReaders(bool on)
+    {
+        if (on)
+        {
+            std::lock_guard lock(s_axisLock);
+            s_axisCalls.clear();
+        }
+        s_logAxes = on;
+    }
+
+    std::vector<AxisCall> AxisReaders()
+    {
+        std::lock_guard lock(s_axisLock);
+        std::vector<AxisCall> out;
+        for (auto& [key, count] : s_axisCalls)
+            out.push_back({ key.first, key.second, count });
+        return out;
+    }
+
+    void NoteAxisCall(uint32_t lr, uint32_t axis)
+    {
+        std::lock_guard lock(s_axisLock);
+        s_axisCalls[{ lr, axis }]++;
+    }
+}
+
+// The pad object's GetAxis(id) (a virtual): +8 + id*4, so 2 = right X, 3 = right Y.
+extern "C" void __imp__sub_82BF1CC0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82BF1CC0)
+{
+    if (wet::padaim::s_logAxes.load(std::memory_order_relaxed))
+        wet::padaim::NoteAxisCall(uint32_t(ctx.lr), ctx.r4.u32);
+    __imp__sub_82BF1CC0(ctx, base);
 }
 
 extern "C" void __imp__sub_82BF2AA0(PPCContext& ctx, uint8_t* base);
@@ -98,11 +145,29 @@ PPC_FUNC(sub_82BF2AA0)
         return;
     if (wet::padaim::s_pad.exchange(pad) != pad)
         wet::Log("Pad: user 0's pad object is at %08X", pad);
-    float mx, my;
-    if (wet::padaim::MouseStick(mx, my))
+    using namespace wet::padaim;
+    float curX = LoadF(base, pad + 16), curY = LoadF(base, pad + 20);
+    if (!s_wrote || curX != s_wroteX || curY != s_wroteY)
     {
-        wet::padaim::StoreF(base, pad + 16, mx);
-        wet::padaim::StoreF(base, pad + 20, my);
+        s_ctrlX = curX;   // the game stored a fresh controller reading
+        s_ctrlY = curY;
+    }
+    float mx, my;
+    if (MouseStick(mx, my))
+    {
+        StoreF(base, pad + 16, mx);
+        StoreF(base, pad + 20, my);
+        s_wroteX = mx;
+        s_wroteY = my;
+        s_wrote = true;
+    }
+    else if (s_wrote)
+    {
+        // Mouse stopped: back to the controller's stick.
+        StoreF(base, pad + 16, s_ctrlX);
+        StoreF(base, pad + 20, s_ctrlY);
+        s_wroteX = s_ctrlX;
+        s_wroteY = s_ctrlY;
     }
     float scale = wet::padaim::Scale();
     if (scale != 1.0f)
