@@ -175,7 +175,7 @@ namespace wet::os
             return EXCEPTION_CONTINUE_EXECUTION;
         }
         if (auto diag = s_diagFault; diag && rec->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
-            rec->NumberParameters >= 2 && rec->ExceptionInformation[0] == 1)
+            rec->NumberParameters >= 2 && rec->ExceptionInformation[0] <= 1)   // read or write
         {
             int r = diag(uintptr_t(rec->ExceptionInformation[1]), uintptr_t(rec->ExceptionAddress));
             if (r == 1)

@@ -16,6 +16,7 @@
 #include "log.h"
 #include "memory.h"
 #include "os.h"
+#include "padaim.h"
 
 #include <algorithm>
 #include <atomic>
@@ -231,8 +232,37 @@ namespace wet::camscan
                    (mbi.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE));
         }
 
+        // ---- Pad reader watch (Shift+F7) ----
+        // The pad object's page is made no-access for a few seconds; every access
+        // to the first 64 bytes (sticks at +8..+20, triggers +56/+60) records the
+        // host instruction, then the thread single-steps it with the page open.
+        std::atomic<bool> s_padWatching{ false };
+        std::atomic<uintptr_t> s_padPage{ 0 };
+        uint32_t s_padGuest = 0;
+        std::map<std::pair<uint32_t, uintptr_t>, uint32_t> s_padReaders;   // (offset, host pc) -> count
+        thread_local bool t_padStepping = false;
+
+        int OnPadFault(uintptr_t host, uintptr_t pc)
+        {
+            uintptr_t page = host & ~uintptr_t(0xFFF);
+            if (page != s_padPage.load())
+                return 0;
+            std::lock_guard lock(s_watchLock);
+            if (!s_padWatching.load())
+                return 2;   // released meanwhile: retry
+            uint32_t guest = HostToGuest(host);
+            if (guest >= s_padGuest && guest < s_padGuest + 64)
+                s_padReaders[{ guest - s_padGuest, pc }]++;
+            DWORD old;
+            VirtualProtect(reinterpret_cast<void*>(page), 0x1000, PAGE_READWRITE, &old);
+            t_padStepping = true;
+            return 1;
+        }
+
         int OnDiagFault(uintptr_t host, uintptr_t pc)
         {
+            if (int r = OnPadFault(host, pc))
+                return r;
             uintptr_t page = host & ~uintptr_t(0xFFF);
             std::lock_guard lock(s_watchLock);
             auto it = s_watchPages.find(page);
@@ -252,6 +282,17 @@ namespace wet::camscan
 
         void OnDiagStep()
         {
+            if (t_padStepping)
+            {
+                t_padStepping = false;
+                std::lock_guard lock(s_watchLock);
+                if (s_padWatching.load())
+                {
+                    DWORD old;
+                    VirtualProtect(reinterpret_cast<void*>(s_padPage.load()), 0x1000, PAGE_NOACCESS, &old);
+                }
+                return;
+            }
             uintptr_t page = t_steppingPage;
             t_steppingPage = 0;
             std::lock_guard lock(s_watchLock);
@@ -353,6 +394,55 @@ namespace wet::camscan
             Log("Camera scan: finished - results in camscan.txt");
             s_running = false;
         }
+        void RunPadReaders()
+        {
+            uint32_t pad = padaim::PadAddress();
+            if (!pad || pad >= 0xA0000000u)
+            {
+                Log("Pad readers: no pad object yet (or it's in physical memory: %08X)", pad);
+                s_running = false;
+                return;
+            }
+            Log("Pad readers: watching the pad object at %08X for 4 s - the stick is driven, don't touch it", pad);
+            {
+                std::lock_guard lock(s_watchLock);
+                s_padReaders.clear();
+                s_padGuest = pad;
+                s_padPage = uintptr_t(g_mem.base + (pad & ~0xFFFu));
+                os::SetDiagnosticWatch(OnDiagFault, OnDiagStep);
+                s_padWatching = true;
+                DWORD old;
+                VirtualProtect(reinterpret_cast<void*>(s_padPage.load()), 0x1000, PAGE_NOACCESS, &old);
+            }
+            Hold(16000, 0, 1.0);
+            Hold(-16000, 0, 1.0);
+            Hold(0, 16000, 1.0);
+            Hold(0, -16000, 1.0);
+            {
+                std::lock_guard lock(s_watchLock);
+                s_padWatching = false;
+                DWORD old;
+                VirtualProtect(reinterpret_cast<void*>(s_padPage.load()), 0x1000, PAGE_READWRITE, &old);
+            }
+            SetRightStickOverride(false);
+            FILE* report = std::fopen("padreaders.txt", "w");
+            if (report)
+            {
+                std::fprintf(report, "# Pad object %08X: offset, host instruction x count (resolve exe: with the map)\n", pad);
+                for (auto& [key, count] : s_padReaders)
+                    std::fprintf(report, "+%u: %s x%u\n", key.first, Describe(key.second).c_str(), count);
+                std::fclose(report);
+            }
+            Log("Pad readers: %zu (offset, instruction) pairs in padreaders.txt", s_padReaders.size());
+            s_running = false;
+        }
+    }
+
+    void StartPadReaders()
+    {
+        if (s_running.exchange(true))
+            return;
+        std::thread(RunPadReaders).detach();
     }
 
     void Start()
@@ -363,5 +453,6 @@ namespace wet::camscan
     }
 #else
     void Start() {}
+    void StartPadReaders() {}
 #endif
 }

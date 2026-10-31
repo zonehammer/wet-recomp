@@ -297,7 +297,12 @@ namespace wet
             static bool f7 = false;
             bool f7Now = (GetAsyncKeyState(VK_F7) & 0x8000) != 0;
             if (f7Now && !f7)
-                camscan::Start();
+            {
+                if (GetAsyncKeyState(VK_SHIFT) & 0x8000)
+                    camscan::StartPadReaders();
+                else
+                    camscan::Start();
+            }
             f7 = f7Now;
             // F8: save the next 48 frames (frames/burst_*.png) for diagnosing glitches.
             static bool f8 = false;
