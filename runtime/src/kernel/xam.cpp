@@ -1,4 +1,6 @@
 // XAM: users, input, notifications, loader, title/module info, console settings.
+#include <vector>
+#include <mutex>
 #include "kernel.h"
 #include "module.h"
 #include "objects.h"
@@ -172,6 +174,18 @@ GUEST_IMPORT(XamInputGetCapabilities)
 GUEST_IMPORT(XamInputGetState)
 {
     uint32_t user = Arg(ctx, 0) == 0xFF ? 0 : Arg(ctx, 0), state = Arg(ctx, 2);
+    {
+        // Diagnostics for mouse aim: who reads the controller, into which buffer.
+        static std::mutex lock;
+        static std::vector<uint32_t> seen;
+        std::lock_guard g(lock);
+        uint32_t lr = uint32_t(ctx.lr);
+        if (seen.size() < 8 && std::find(seen.begin(), seen.end(), lr) == seen.end())
+        {
+            seen.push_back(lr);
+            Log("Input: XamInputGetState(user %u) called from %08X into %08X", user, lr, state);
+        }
+    }
     HostPadState s;
     if (!HostPadGetState(user, s))
         return Ret(ctx, ERROR_DEVICE_NOT_CONNECTED);
