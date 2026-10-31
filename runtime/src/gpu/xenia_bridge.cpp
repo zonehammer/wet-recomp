@@ -751,6 +751,15 @@ namespace
             bool wide = wet::options::Widescreen();
             if (ImGui::Checkbox("Widescreen / ultrawide (fill wider screens; sharpest after a restart)", &wide))
                 wet::options::SetWidescreen(wide);
+            if (wide)
+            {
+                bool hud = wet::options::WidescreenHud();
+                if (ImGui::Checkbox("Keep the HUD and menus 16:9 in the middle", &hud))
+                    wet::options::SetWidescreenHud(hud);
+            }
+            bool borders = wet::options::HideBorders();
+            if (ImGui::Checkbox("Hide the dark frame at the screen edges (vignette / cinematic borders)", &borders))
+                wet::options::SetHideBorders(borders);
 
             int fov = wet::options::Fov(), fovPick = fov;
             ImGui::SliderInt("Field of view (90 = original)", &fovPick, 60, 130, "%d deg");
@@ -761,7 +770,8 @@ namespace
             ImGui::TextUnformatted("Anti-aliasing:");
             Radio("Off", &aaPick, 0); ImGui::SameLine();
             Radio("FXAA", &aaPick, 1); ImGui::SameLine();
-            Radio("FXAA (extreme)", &aaPick, 2);
+            Radio("FXAA (extreme)", &aaPick, 2); ImGui::SameLine();
+            Radio("SMAA (sharper)", &aaPick, 3);
             int filter = wet::options::Filter(), filterPick = filter;
             ImGui::TextUnformatted("Scaling to the window:");
             Radio("Bilinear", &filterPick, 0); ImGui::SameLine();
@@ -1203,7 +1213,9 @@ namespace wet::renderer
         xe::gpu::wet_display_aspect_x.store(w, std::memory_order_relaxed);
         xe::gpu::wet_display_aspect_y.store(h, std::memory_order_relaxed);
         // The HUD (drawn after the final composite) stays 16:9 in the middle.
-        xe::gpu::wet_hud_squeeze.store((16.0f / 9.0f) * float(h) / float(w), std::memory_order_relaxed);
+        xe::gpu::wet_hud_squeeze.store(wet::options::WidescreenHud() ? (16.0f / 9.0f) * float(h) / float(w) : 1.0f,
+                                       std::memory_order_relaxed);
+        xe::gpu::wet_hide_borders.store(wet::options::HideBorders(), std::memory_order_relaxed);
         return float(w) / float(h);
     }
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Compiles the NVIDIA Image Scaling shader embedded in the patched Xenia
-(src/xenia/ui/d3d12/wet_nis.h) with D3DCompiler_47.dll, the same way the game
+"""Compiles the NVIDIA Image Scaling and SMAA shaders embedded in the patched Xenia
+(src/xenia/ui/d3d12/wet_nis.h, src/xenia/gpu/d3d12/wet_smaa.h) with D3DCompiler_47.dll, the same way the game
 does at startup. Windows only; used by CI."""
 import ctypes
 import re
@@ -36,11 +36,23 @@ def blob_bytes(p):
     return ctypes.string_at(get_ptr(p), get_size(p))
 
 
-code, errors = ctypes.c_void_p(), ctypes.c_void_p()
-hr = d3dc.D3DCompile(source, len(source), b"wet_nis.hlsl", None, None, b"main", b"ps_5_1",
-                     1 << 15, 0, ctypes.byref(code), ctypes.byref(errors))
-if errors.value:
-    print(blob_bytes(errors).decode(errors="replace"))
-if hr < 0 or not code.value:
-    sys.exit("NIS shader failed to compile: 0x%08X" % (hr & 0xFFFFFFFF))
-print("NIS shader compiled: %d bytes" % len(blob_bytes(code)))
+def compile_shader(name, src, entry, target):
+    code, errors = ctypes.c_void_p(), ctypes.c_void_p()
+    hr = d3dc.D3DCompile(src, len(src), name.encode(), None, None, entry.encode(), target.encode(),
+                         1 << 15, 0, ctypes.byref(code), ctypes.byref(errors))
+    if errors.value:
+        print(blob_bytes(errors).decode(errors="replace"))
+    if hr < 0 or not code.value:
+        sys.exit("%s (%s) failed to compile: 0x%08X" % (name, entry, hr & 0xFFFFFFFF))
+    print("%s (%s) compiled: %d bytes" % (name, entry, len(blob_bytes(code))))
+
+
+compile_shader("wet_nis.hlsl", source, "main", "ps_5_1")
+
+# SMAA (antialiasing = 3): three compute passes.
+smaa_header = root / "thirdparty/xenia/src/xenia/gpu/d3d12/wet_smaa.h"
+smaa = "".join(re.findall(r'R"WETSMAA\((.*?)\)WETSMAA"', smaa_header.read_text(), re.S)).encode()
+if not smaa:
+    sys.exit("no shader source found in " + str(smaa_header))
+for entry in ("edges_main", "weights_main", "blend_main"):
+    compile_shader("wet_smaa.hlsl", smaa, entry, "cs_5_1")

@@ -36,6 +36,15 @@ NOTICES = [
     ("FFmpeg (XMA audio decoding, LGPL 2.1)", "thirdparty/xenia/third_party/FFmpeg/COPYING.LGPLv2.1"),
 ]
 
+SMAA_NOTICE = """SMAA (anti-aliasing shader and lookup textures, MIT licence)
+Copyright (C) 2013 Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro,
+Diego Gutierrez. Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights to use,
+copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the
+Software. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+"""
+
 NIS_NOTICE = """NVIDIA Image Scaling SDK v1.0.3 (scaling shader, MIT licence)
 Copyright (c) 2022 NVIDIA CORPORATION. All rights reserved.
 Permission is hereby granted, free of charge, to any person obtaining a copy of this
@@ -168,6 +177,7 @@ def main():
             else:
                 f.write(f"(see {path} in the source tree)\n\n")
         f.write("=" * 78 + "\n" + NIS_NOTICE)
+        f.write("=" * 78 + "\n" + SMAA_NOTICE)
         f.write("\nFFmpeg is used under the LGPL 2.1; its source is in the Xenia submodule\n"
                 "(thirdparty/xenia/third_party/FFmpeg) of the WET Recomp source tree.\n")
 

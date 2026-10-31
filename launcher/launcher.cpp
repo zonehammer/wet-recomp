@@ -417,8 +417,8 @@ namespace
         Label(L"NIS sharpness", 362, 60, 90);
         Slider(kSharpness, kSharpnessValue, 456, 58, 160, 0, 100, ini.Get("sharpness", 50), L"%");
         Label(L"Anti-aliasing", 362, 88, 90);
-        Combo(kAntialiasing, 460, 86, 206, { L"Off", L"FXAA", L"FXAA (extreme)" },
-              std::min(std::max(ini.Get("antialiasing", 0), 0), 2));
+        Combo(kAntialiasing, 460, 86, 206, { L"Off", L"FXAA", L"FXAA (extreme)", L"SMAA (sharper)" },
+              std::min(std::max(ini.Get("antialiasing", 0), 0), 3));
         Label(L"Film grain", 362, 116, 90);
         Slider(kGrain, kGrainValue, 456, 114, 160, 0, 100, ini.Get("film_grain", 100), L"%");
         Label(L"Field of view", 362, 144, 90);

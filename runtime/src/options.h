@@ -75,6 +75,12 @@ namespace wet::options
     // Fill screens and windows wider than 16:9 (Hor+: the view widens).
     bool Widescreen();
     void SetWidescreen(bool v);
+    // Widescreen: keep the HUD 16:9 in the middle (else it stretches).
+    bool WidescreenHud();
+    void SetWidescreenHud(bool v);
+    // Don't draw the dark frame at the screen edges (vignette / cinematic borders).
+    bool HideBorders();
+    void SetHideBorders(bool v);
     int Sharpness();
     void SetSharpness(int v);
 
