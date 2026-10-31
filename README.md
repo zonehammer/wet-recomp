@@ -80,7 +80,8 @@ licence notices. It contains code translated from your copy of the game, so it i
 | F10 | Profiler on/off (`profile.txt`, bug reports) |
 
 Settings live in `wet.ini` next to the exe; the mouse buttons can be rebound there
-(`mouse_left = RT` ...). Saves, `achievements.ini` and the shader cache are in
+(`mouse_left = RT` ...). Direct mouse aim (`mouse_direct`, on by default) turns the camera
+by how far the mouse moves, with no stick speed limit. Saves, `achievements.ini` and the shader cache are in
 `game\hdd`. `WetRecomp.exe --console` shows the log live; `wet.log` always has it.
 
 ## How it works
@@ -115,8 +116,6 @@ generated/    generated C++ (ignored by git)
 
 - Intro and cutscene videos run at 30 FPS ("Videos at 30 FPS", on by default) to avoid a
   flicker at the top of the picture caused by a timing race at higher frame rates.
-- Mouse aim drives the right stick, so it has the stick's maximum turn speed; direct
-  camera control is planned.
 - Achievements earned in saves from before achievement support aren't shown as unlocked.
 - Tested on one game copy and a few PCs; please report problems with `wet.log` attached.
 

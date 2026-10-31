@@ -11,6 +11,11 @@
 // WET_RSTICK_SCALE=3 turned three times as fast). So a fast flick turns as far as
 // the mouse moved instead of topping out at the stick's turn speed.
 //
+// How the right stick reaches the camera (found with Shift+F7): the look code
+// (sub_829A2FE8, called from the camera/aim states) reads the "look" input actions
+// (sub_82B0ADD0), which read this pad's GetAxis(2/3) (sub_82BF1CC0); the vector
+// then goes through sub_829A64B8 (magnitude, dead zone, turn speed).
+//
 // Diagnostics: WET_RSTICK_SCALE=<n> multiplies the right stick after the read, and
 // the pad's address is kept for the pad reader watch (Shift+F7, camscan.cpp).
 #include "padaim.h"
