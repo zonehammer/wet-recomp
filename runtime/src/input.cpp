@@ -335,7 +335,9 @@ namespace wet
             bool f7Now = (GetAsyncKeyState(VK_F7) & 0x8000) != 0;
             if (f7Now && !f7)
             {
-                if (GetAsyncKeyState(VK_SHIFT) & 0x8000)
+                if (GetAsyncKeyState(VK_CONTROL) & 0x8000)
+                    camscan::StartProjScan();
+                else if (GetAsyncKeyState(VK_SHIFT) & 0x8000)
                     camscan::StartPadReaders();
                 else
                     camscan::Start();

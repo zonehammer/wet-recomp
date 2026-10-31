@@ -399,6 +399,107 @@ namespace wet::camscan
             Log("Camera scan: finished - results in camscan.txt");
             s_running = false;
         }
+        // ---- Projection finder (Ctrl+F7) ----
+        // Perspective matrices have one shape: x and y scale on the diagonal, a
+        // depth pair, a +-1 for w and zeros everywhere else (either layout). Every
+        // match is listed with the field of view it implies, then the matches get
+        // write watchpoints for 2 s: the writer is the function that builds the
+        // projection, and its input is the game's FOV.
+        float BeFloat(const uint8_t* p)
+        {
+            uint32_t u = uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3];
+            float f;
+            std::memcpy(&f, &u, 4);
+            return f;
+        }
+
+        void RunProjScan()
+        {
+            Log("Projection scan: started (about 5 s)");
+            FILE* report = std::fopen("projscan.txt", "w");
+            if (!report)
+            {
+                s_running = false;
+                return;
+            }
+            std::fprintf(report, "# Perspective matrices: address, x scale, y scale, aspect (y/x), vertical / horizontal FOV\n");
+            std::vector<Candidate> found;
+            static constexpr int kZero[] = { 1, 2, 3, 4, 6, 7, 8, 9, 12, 13, 15 };
+            for (auto& r : Snapshot())
+            {
+                const uint8_t* d = r.data.data();
+                for (size_t off = 0; off + 64 <= r.data.size(); off += 4)
+                {
+                    float m0 = BeFloat(d + off), m5 = BeFloat(d + off + 20);
+                    if (!(m0 > 0.2f && m0 < 8.0f && m5 > 0.2f && m5 < 8.0f))
+                        continue;
+                    float m11 = BeFloat(d + off + 44), m14 = BeFloat(d + off + 56);
+                    if (std::fabs(m11) != 1.0f && std::fabs(m14) != 1.0f)
+                        continue;
+                    bool zeros = true;
+                    for (int z : kZero)
+                        if (BeFloat(d + off + z * 4) != 0.0f)
+                        {
+                            zeros = false;
+                            break;
+                        }
+                    if (!zeros || BeFloat(d + off + 40) == 0.0f)
+                        continue;
+                    Candidate c{};
+                    c.addr = r.guest + uint32_t(off);
+                    c.v[0] = m0;
+                    c.v[1] = m5;
+                    found.push_back(c);
+                }
+            }
+            constexpr double kDeg = 57.29577951308232;
+            for (auto& c : found)
+                std::fprintf(report, "%08X  x %.5f  y %.5f  aspect %.4f  vfov %.2f  hfov %.2f\n", c.addr, c.v[0], c.v[1],
+                             c.v[1] / c.v[0], 2 * std::atan(1.0 / c.v[1]) * kDeg, 2 * std::atan(1.0 / c.v[0]) * kDeg);
+            Log("Projection scan: %zu perspective matrices", found.size());
+            if (found.size() > 150)
+                found.resize(150);
+            // Watch each matrix's x scale (m00) for 2 s.
+            {
+                std::lock_guard lock(s_watchLock);
+                s_watchPages.clear();
+                s_watchAddrs.clear();
+                s_writers.clear();
+                for (size_t i = 0; i < found.size(); i++)
+                {
+                    uint32_t a = found[i].addr;
+                    s_watchAddrs[a] = uint32_t(i);
+                    uint32_t gpage = a & ~0xFFFu;
+                    if (a >= 0xA0000000u)
+                    {
+                        uint8_t* views[3];
+                        PhysicalPageViews((a - 0xA0000000u) / 0x1000, views);
+                        for (auto* v : views)
+                            if (v)
+                                s_watchPages[uintptr_t(v)] = gpage;
+                    }
+                    else
+                        s_watchPages[uintptr_t(g_mem.base + gpage)] = gpage;
+                }
+                os::SetDiagnosticWatch(OnDiagFault, OnDiagStep);
+                s_watching = true;
+                for (auto& [page, guest] : s_watchPages)
+                    os::ProtectReadOnly(reinterpret_cast<void*>(page), 0x1000);
+            }
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+            {
+                std::lock_guard lock(s_watchLock);
+                s_watching = false;
+                ReleaseAll();
+            }
+            std::fprintf(report, "\n== Writers of m00 (address: host instruction x count; resolve exe:offsets with the map) ==\n");
+            for (auto& [key, count] : s_writers)
+                std::fprintf(report, "%08X: %s x%u\n", key.first, Describe(key.second).c_str(), count);
+            std::fclose(report);
+            Log("Projection scan: finished - %zu writers, results in projscan.txt", s_writers.size());
+            s_running = false;
+        }
+
         void RunPadReaders()
         {
             uint32_t pad = padaim::PadAddress();
@@ -467,6 +568,13 @@ namespace wet::camscan
         }
     }
 
+    void StartProjScan()
+    {
+        if (s_running.exchange(true))
+            return;
+        std::thread(RunProjScan).detach();
+    }
+
     void StartPadReaders()
     {
         if (s_running.exchange(true))
@@ -483,5 +591,6 @@ namespace wet::camscan
 #else
     void Start() {}
     void StartPadReaders() {}
+    void StartProjScan() {}
 #endif
 }
