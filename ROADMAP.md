@@ -31,7 +31,7 @@ Make a full playthrough reliable before adding more features.
 
 | Item | Why | Effort |
 |---|---|---|
-| **Don't wait for shaders**: skip a draw for a frame or two while its shader builds (setting) | Removes the first-time stutter the shader cache can't | M |
+| ~~Don't wait for shaders~~ (done: `async_shaders`) | Removes the first-time stutter the shader cache can't | M |
 | **Widescreen and ultrawide** (21:9, 32:9) with correct aspect and HUD placement | The game renders 16:9 only | M–L |
 | **Field of view** slider | Common request, especially with wide screens | M |
 | **Any frame rate** (165, 240, uncapped with VRR / G-Sync / FreeSync) | Today it's 30 / 60 / 120 / 144 | M |

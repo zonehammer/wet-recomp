@@ -496,6 +496,100 @@ index 0ec70a7d1..d12d1a1a7 100644
    return true;
  }
  
+diff --git a/src/xenia/gpu/d3d12/deferred_command_list.cc b/src/xenia/gpu/d3d12/deferred_command_list.cc
+index adaefcd4c..b99e5fe65 100644
+--- a/src/xenia/gpu/d3d12/deferred_command_list.cc
++++ b/src/xenia/gpu/d3d12/deferred_command_list.cc
+@@ -8,6 +8,7 @@
+  */
+ 
+ #include "xenia/gpu/d3d12/deferred_command_list.h"
++#include "xenia/gpu/d3d12/pipeline_cache.h"
+ 
+ #include "xenia/base/assert.h"
+ #include "xenia/base/math.h"
+@@ -107,6 +108,11 @@ void DeferredCommandList::Execute(ID3D12GraphicsCommandList* command_list,
+               args.start_index_location, args.base_vertex_location,
+               args.start_instance_location);
+         }
++#if XE_WET_RUNTIME
++        else {
++          wet_skipped_draws.fetch_add(1, std::memory_order_relaxed);
++        }
++#endif
+       } break;
+       case Command::kD3DDrawInstanced: {
+         if (current_pipeline_state != nullptr) {
+@@ -116,6 +122,11 @@ void DeferredCommandList::Execute(ID3D12GraphicsCommandList* command_list,
+               args.vertex_count_per_instance, args.instance_count,
+               args.start_vertex_location, args.start_instance_location);
+         }
++#if XE_WET_RUNTIME
++        else {
++          wet_skipped_draws.fetch_add(1, std::memory_order_relaxed);
++        }
++#endif
+       } break;
+       case Command::kD3DIASetIndexBuffer: {
+         auto view = reinterpret_cast<const D3D12_INDEX_BUFFER_VIEW*>(stream);
+diff --git a/src/xenia/gpu/d3d12/pipeline_cache.cc b/src/xenia/gpu/d3d12/pipeline_cache.cc
+index a81b19675..435ab82b8 100644
+--- a/src/xenia/gpu/d3d12/pipeline_cache.cc
++++ b/src/xenia/gpu/d3d12/pipeline_cache.cc
+@@ -793,6 +793,11 @@ void PipelineCache::ShutdownShaderStorage() {
+   shader_storage_title_id_ = 0;
+ }
+ 
++#if XE_WET_RUNTIME
++std::atomic<bool> wet_async_pipelines{false};
++std::atomic<uint64_t> wet_skipped_draws{0};
++#endif
++
+ void PipelineCache::EndSubmission() {
+   if (shader_storage_file_flush_needed_ ||
+       pipeline_storage_file_flush_needed_) {
+@@ -809,6 +814,14 @@ void PipelineCache::EndSubmission() {
+     shader_storage_file_flush_needed_ = false;
+     pipeline_storage_file_flush_needed_ = false;
+   }
++#if XE_WET_RUNTIME
++  // Asynchronous: leave the queued pipelines to the creation threads; the
++  // deferred command list skips draws whose pipeline isn't created yet.
++  if (!creation_threads_.empty() &&
++      wet_async_pipelines.load(std::memory_order_relaxed)) {
++    return;
++  }
++#endif
+   if (!creation_threads_.empty()) {
+     CreateQueuedPipelinesOnProcessorThread();
+     // Await creation of all queued pipelines.
+diff --git a/src/xenia/gpu/d3d12/pipeline_cache.h b/src/xenia/gpu/d3d12/pipeline_cache.h
+index d1ede5ffa..af4350c79 100644
+--- a/src/xenia/gpu/d3d12/pipeline_cache.h
++++ b/src/xenia/gpu/d3d12/pipeline_cache.h
+@@ -10,6 +10,7 @@
+ #ifndef XENIA_GPU_D3D12_PIPELINE_CACHE_H_
+ #define XENIA_GPU_D3D12_PIPELINE_CACHE_H_
+ 
++#include <atomic>
+ #include <condition_variable>
+ #include <cstdio>
+ #include <deque>
+@@ -43,6 +44,14 @@ namespace d3d12 {
+ 
+ class D3D12CommandProcessor;
+ 
++#if XE_WET_RUNTIME
++// WET: don't wait for pipelines still being created when a submission ends -
++// draws that need them are skipped until they're ready (a frame or two)
++// instead of the frame stalling. Counts the skipped draws.
++extern std::atomic<bool> wet_async_pipelines;
++extern std::atomic<uint64_t> wet_skipped_draws;
++#endif
++
+ class PipelineCache {
+  public:
+   static constexpr size_t kLayoutUIDEmpty = 0;
 diff --git a/src/xenia/gpu/graphics_system.cc b/src/xenia/gpu/graphics_system.cc
 index aa96166ef..80caacb94 100644
 --- a/src/xenia/gpu/graphics_system.cc

@@ -50,6 +50,7 @@
 #include "xenia/gpu/vulkan/vulkan_graphics_system.h"
 #if WET_HAVE_D3D12
 #include "xenia/gpu/d3d12/d3d12_graphics_system.h"
+#include "xenia/gpu/d3d12/pipeline_cache.h"
 #endif
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/memory.h"
@@ -283,6 +284,24 @@ namespace
                     std::this_thread::sleep_until(next);
                 if (self->window)
                     self->window->RequestPaint();
+#if WET_HAVE_D3D12
+                // Every 10 s: draws skipped while their shader was compiling.
+                static auto lastReport = std::chrono::steady_clock::now();
+                static uint64_t reported = 0;
+                if (now - lastReport > std::chrono::seconds(10))
+                {
+                    lastReport = now;
+                    uint64_t skipped = xe::gpu::d3d12::wet_skipped_draws.load();
+                    if (skipped != reported)
+                    {
+                        char text[128];
+                        std::snprintf(text, sizeof(text), "Renderer: %llu draws skipped while their shaders compiled (%llu in total)",
+                                      (unsigned long long)(skipped - reported), (unsigned long long)skipped);
+                        wet::renderer_host::Log(text);
+                        reported = skipped;
+                    }
+                }
+#endif
             }
         }
 
@@ -340,6 +359,9 @@ namespace
     void ApplyPostProcessing()
     {
         xe::gpu::wet_film_grain = float(wet::options::FilmGrain()) / 100.0f;
+#if WET_HAVE_D3D12
+        xe::gpu::d3d12::wet_async_pipelines = wet::options::AsyncShaders();
+#endif
         if (!s_graphics)
             return;
         if (auto* cp = s_graphics->command_processor())
@@ -540,6 +562,12 @@ namespace
             Radio("144", &pick, 144);
             if (pick != fps)
                 wet::options::SetFps(pick);
+            bool asyncShaders = wet::options::AsyncShaders();
+            if (ImGui::Checkbox("Don't wait for new shaders (less stutter; objects may pop in)", &asyncShaders))
+            {
+                wet::options::SetAsyncShaders(asyncShaders);
+                ApplyPostProcessing();
+            }
             bool videoMode = wet::options::VideoMode();
             if (ImGui::Checkbox("Videos at 30 FPS (avoids video flicker)", &videoMode))
                 wet::options::SetVideoMode(videoMode);
@@ -898,6 +926,9 @@ namespace wet::renderer
             xe::gpu::wet_grain_const = (256 + c) * 4 + k;
         }
         xe::gpu::wet_film_grain = float(options::FilmGrain()) / 100.0f;
+#if WET_HAVE_D3D12
+        xe::gpu::d3d12::wet_async_pipelines = options::AsyncShaders();
+#endif
         xe::gpu::wet_gpu_progress = renderer_host::GpuProgress;
         xe::gpu::wet_register_sync_hook = [] { renderer_host::RequestRegisterSync(); };
         s_processor = std::make_unique<xe::cpu::Processor>(s_memory.get());

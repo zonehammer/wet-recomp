@@ -93,7 +93,7 @@ namespace
         kFps = 100, kResolution, kFullscreen, kShowFps,
         kFilter, kSharpness, kSharpnessValue, kAntialiasing, kGrain, kGrainValue,
         kMouseAim, kSensitivity, kSensitivityValue, kInvertY, kVibration,
-        kShaderCache, kVideoMode, kPopups,
+        kShaderCache, kVideoMode, kPopups, kAsyncShaders,
         kStatus, kPlay, kSaves, kClearShaders,
     };
 
@@ -204,6 +204,7 @@ namespace
         s_ini.Set("shader_cache", Checked(kShaderCache));
         s_ini.Set("video_mode", Checked(kVideoMode));
         s_ini.Set("achievement_popups", Checked(kPopups));
+        s_ini.Set("async_shaders", Checked(kAsyncShaders));
         if (!s_ini.Save(s_iniPath))
             MessageBoxW(s_window, L"Could not save wet.ini.", L"WET Launcher", MB_ICONERROR);
     }
@@ -283,7 +284,7 @@ namespace
         Slider(kGrain, kGrainValue, 456, 114, 160, 0, 100, ini.Get("film_grain", 100), L"%");
 
         // Controls
-        Group(L"Controls", 10, 152, 330, 112);
+        Group(L"Controls", 10, 152, 330, 134);
         Check(kMouseAim, L"Mouse aim (WASD + mouse)", 22, 172, ini.Get("mouse_aim", 1) != 0, 200);
         Check(kInvertY, L"Invert Y", 230, 172, ini.Get("mouse_invert_y", 0) != 0, 100);
         Label(L"Mouse sensitivity", 22, 202);
@@ -291,14 +292,15 @@ namespace
         Check(kVibration, L"Controller vibration", 22, 234, ini.Get("vibration", 1) != 0, 200);
 
         // Other
-        Group(L"Other", 350, 152, 330, 112);
+        Group(L"Other", 350, 152, 330, 134);
         Check(kShaderCache, L"Shader cache (less stutter after the first time)", 362, 172, ini.Get("shader_cache", 1) != 0, 310);
-        Check(kPopups, L"Achievement pop-ups", 362, 198, ini.Get("achievement_popups", 1) != 0, 200);
-        Make(L"BUTTON", L"Open saves folder", BS_PUSHBUTTON | WS_TABSTOP, 362, 228, 145, 26, kSaves);
-        Make(L"BUTTON", L"Clear shader cache", BS_PUSHBUTTON | WS_TABSTOP, 517, 228, 150, 26, kClearShaders);
+        Check(kAsyncShaders, L"Don't wait for new shaders (objects may pop in)", 362, 196, ini.Get("async_shaders", 1) != 0, 310);
+        Check(kPopups, L"Achievement pop-ups", 362, 220, ini.Get("achievement_popups", 1) != 0, 200);
+        Make(L"BUTTON", L"Open saves folder", BS_PUSHBUTTON | WS_TABSTOP, 362, 250, 145, 26, kSaves);
+        Make(L"BUTTON", L"Clear shader cache", BS_PUSHBUTTON | WS_TABSTOP, 517, 250, 150, 26, kClearShaders);
 
-        Make(L"STATIC", L"", SS_LEFT | SS_PATHELLIPSIS, 12, 280, 540, 18, kStatus);
-        Make(L"BUTTON", L"Play", BS_DEFPUSHBUTTON | WS_TABSTOP, 570, 274, 110, 32, kPlay);
+        Make(L"STATIC", L"", SS_LEFT | SS_PATHELLIPSIS, 12, 302, 540, 18, kStatus);
+        Make(L"BUTTON", L"Play", BS_DEFPUSHBUTTON | WS_TABSTOP, 570, 296, 110, 32, kPlay);
         UpdateStatus();
     }
 
@@ -365,7 +367,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show)
     wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(1));
     RegisterClassExW(&wc);
 
-    RECT rc{ 0, 0, S(690), S(316) };
+    RECT rc{ 0, 0, S(690), S(338) };
     DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
     AdjustWindowRect(&rc, style, FALSE);
     int w = rc.right - rc.left, h = rc.bottom - rc.top;

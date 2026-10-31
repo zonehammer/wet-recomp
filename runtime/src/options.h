@@ -48,6 +48,9 @@ namespace wet::options
     // to pad buttons by name (0 left, 1 right, 2 middle, 3 back, 4 forward).
     // Shader / pipeline cache in <hdd>/shaders (wet.ini shader_cache; restart).
     bool ShaderCache();
+    // Skip draws whose shader is still compiling instead of waiting (wet.ini async_shaders).
+    bool AsyncShaders();
+    void SetAsyncShaders(bool v);
     bool MouseAim();
     void SetMouseAim(bool v);
     int MouseSensitivity();
