@@ -155,9 +155,33 @@ namespace wet::os
     void SetWriteFaultHandler(WriteFaultHandler handler) { s_writeFaultHandler = handler; }
 
     // First in line for every exception: resolves write-watch faults.
+    static DiagFaultHandler s_diagFault = nullptr;
+    static DiagStepHandler s_diagStep = nullptr;
+    static thread_local bool t_diagStepping = false;
+    void SetDiagnosticWatch(DiagFaultHandler fault, DiagStepHandler step)
+    {
+        s_diagStep = step;
+        s_diagFault = fault;
+    }
+
     static LONG WINAPI WatchVectoredHandler(PEXCEPTION_POINTERS info)
     {
         auto* rec = info->ExceptionRecord;
+        if (rec->ExceptionCode == EXCEPTION_SINGLE_STEP && t_diagStepping)
+        {
+            t_diagStepping = false;
+            if (s_diagStep)
+                s_diagStep();
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
+        if (s_diagFault && rec->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && rec->NumberParameters >= 2 &&
+            rec->ExceptionInformation[0] == 1 &&
+            s_diagFault(uintptr_t(rec->ExceptionInformation[1]), uintptr_t(rec->ExceptionAddress)))
+        {
+            t_diagStepping = true;
+            info->ContextRecord->EFlags |= 0x100;   // trap after this one instruction
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
         if (rec->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && rec->NumberParameters >= 2 &&
             rec->ExceptionInformation[0] == 1 && s_writeFaultHandler &&
             s_writeFaultHandler(uintptr_t(rec->ExceptionInformation[1])))
@@ -346,6 +370,7 @@ namespace wet::os
 
     void ExitCurrentThread() { pthread_exit(nullptr); }
     void ShowFatalMessage(const char*) {}
+    void SetDiagnosticWatch(DiagFaultHandler, DiagStepHandler) {}
     void OpenConsole() {}
     uint32_t CurrentHostThreadId() { return uint32_t(syscall(SYS_gettid)); }
 

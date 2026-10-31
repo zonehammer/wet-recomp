@@ -27,6 +27,14 @@ namespace wet::os
     // if it made the access valid (the faulting instruction is then retried).
     using WriteFaultHandler = bool (*)(uintptr_t hostAddress);
     void SetWriteFaultHandler(WriteFaultHandler handler);
+    // Diagnostic write watchpoints (camscan.cpp), checked before everything else:
+    // the fault handler gets the written address and the writing instruction and
+    // returns true if the page is one of its own (it unprotects it); the faulting
+    // thread then single-steps that one instruction and the step handler
+    // re-protects. Windows only.
+    using DiagFaultHandler = bool (*)(uintptr_t hostAddress, uintptr_t pc);
+    using DiagStepHandler = void (*)();
+    void SetDiagnosticWatch(DiagFaultHandler fault, DiagStepHandler step);
     bool Commit(void* p, size_t size);          // make read/write, zero-filled when fresh
     void Decommit(void* p, size_t size);        // back to no-access, contents discarded
 

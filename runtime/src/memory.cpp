@@ -391,6 +391,8 @@ namespace wet
         out[2] = g_mem.base + (0xE0000000u - g_mem.eViewOffset) + phys;
     }
 
+    void PhysicalPageViews(uint32_t page, uint8_t* out[3]) { PageViews(page, out); }
+
     static void SetRangeProtection(uint32_t firstPage, uint32_t count, bool readOnly)
     {
         uint8_t* views[3];

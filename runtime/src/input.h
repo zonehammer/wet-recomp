@@ -20,4 +20,6 @@ namespace wet
     bool HostPadSetVibration(uint32_t user, uint16_t left, uint16_t right);
     // Names of the controllers in guest slots 0-3 (empty = none), for the overlay.
     std::vector<std::string> ConnectedControllers();
+    // Diagnostics (camscan.cpp): forces player 1's right stick while on.
+    void SetRightStickOverride(bool on, int16_t rx = 0, int16_t ry = 0);
 }

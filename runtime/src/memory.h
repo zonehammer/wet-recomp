@@ -114,6 +114,8 @@ namespace wet
     uint8_t* PhysicalHostView();
     // Write-watch counters since start: faults taken, protect (watch) calls.
     void WatchStats(uint64_t& faults, uint64_t& protectCalls);
+    // Host addresses of a physical page in the 0xA/0xC/0xE views (nullptr if absent).
+    void PhysicalPageViews(uint32_t page, uint8_t* out[3]);
     // Adaptive watching of pages rewritten every frame (see memory.cpp): call at
     // every ring buffer kick, before the GPU sees the new commands.
     void FlushHotPages();

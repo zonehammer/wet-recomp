@@ -3,6 +3,7 @@
 #include "gpu/renderer.h"
 #include "profiler.h"
 #include "options.h"
+#include "camscan.h"
 
 #include <atomic>
 #include <cmath>
@@ -292,6 +293,12 @@ namespace wet
             if (f11Now && !f11)
                 renderer::ToggleFullscreen();
             f11 = f11Now;
+            // F7: camera finder (camscan.txt) for direct mouse aim.
+            static bool f7 = false;
+            bool f7Now = (GetAsyncKeyState(VK_F7) & 0x8000) != 0;
+            if (f7Now && !f7)
+                camscan::Start();
+            f7 = f7Now;
             // F8: save the next 48 frames (frames/burst_*.png) for diagnosing glitches.
             static bool f8 = false;
             bool f8Now = (GetAsyncKeyState(VK_F8) & 0x8000) != 0;
@@ -535,6 +542,19 @@ namespace wet
         return out;
     }
 
+    namespace
+    {
+        std::atomic<bool> s_stickOverride{ false };
+        std::atomic<int> s_overrideRx{ 0 }, s_overrideRy{ 0 };
+    }
+
+    void SetRightStickOverride(bool on, int16_t rx, int16_t ry)
+    {
+        s_overrideRx = rx;
+        s_overrideRy = ry;
+        s_stickOverride = on;
+    }
+
     bool HostPadConnected(uint32_t user)
     {
 #if WET_HAVE_SDL
@@ -603,6 +623,11 @@ namespace wet
         merge(out.ly, kly);
         merge(out.rx, krx);
         merge(out.ry, kry);
+        if (s_stickOverride.load())
+        {
+            out.rx = krx = int16_t(s_overrideRx.load());   // (krx/kry feed the packet number below)
+            out.ry = kry = int16_t(s_overrideRy.load());
+        }
         // The packet number must change whenever the state does.
         static std::atomic<uint64_t> s_lastExtra{ 0 };
         static std::atomic<uint32_t> s_extraPackets{ 0 };
