@@ -72,9 +72,12 @@ PlayStation buttons map by position: Cross = A, Circle = B, Square = X,
 Triangle = Y, Options = Start, Share/Create or touchpad click = Back.
 
 Keyboard and mouse: WASD move, the mouse turns the camera and aims, left click RT,
-right click LT, Space A, Esc B, X / Y, Q / E bumpers, Z / C triggers, Enter Start,
-Backspace Back, arrow keys D-pad. The cursor is hidden while you play; F1 or
-Alt+Tab frees it.
+right click LT, Space A, Esc B, X / Y, Q / E bumpers, Z / C triggers, Left Shift / V
+stick clicks, Enter Start, Backspace Back, arrow keys D-pad. The cursor is hidden
+while you play; F1 or Alt+Tab frees it.
+
+Rebind any key in the F1 overlay (Keyboard bindings: click an action, then press a
+key), with the launcher's Keyboard... button, or in wet.ini (key_a = SPACE).
 
 Keys
 ----

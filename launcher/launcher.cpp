@@ -6,6 +6,7 @@
 #endif
 #define NOMINMAX
 #include "wet_version.h"
+#include "keybinds.h"
 #include <windows.h>
 #include <commctrl.h>
 #include <shellapi.h>
@@ -51,15 +52,22 @@ namespace
             }
         }
 
+        std::string GetString(const std::string& key, const std::string& fallback) const
+        {
+            auto it = values.find(key);
+            return it == values.end() || it->second.empty() ? fallback : it->second;
+        }
+
         int Get(const std::string& key, int fallback) const
         {
             auto it = values.find(key);
             return it == values.end() || it->second.empty() ? fallback : std::atoi(it->second.c_str());
         }
 
-        void Set(const std::string& key, int value)
+        void Set(const std::string& key, int value) { SetString(key, std::to_string(value)); }
+
+        void SetString(const std::string& key, const std::string& v)
         {
-            std::string v = std::to_string(value);
             values[key] = v;
             for (auto& line : lines)
             {
@@ -94,10 +102,12 @@ namespace
         kFilter, kSharpness, kSharpnessValue, kAntialiasing, kGrain, kGrainValue,
         kMouseAim, kSensitivity, kSensitivityValue, kInvertY, kVibration,
         kShaderCache, kVideoMode, kPopups, kAsyncShaders,
-        kStatus, kPlay, kSaves, kClearShaders,
+        kStatus, kPlay, kSaves, kClearShaders, kKeyboard,
+        kKeyFirst = 300,                       // one combo per keybinds action
+        kKeysOk = kKeyFirst + wet::keybinds::kActionCount, kKeysReset, kKeysCancel,
     };
 
-    HWND s_window = nullptr;
+    HWND s_window = nullptr, s_keysWindow = nullptr;
     HFONT s_font = nullptr;
     double s_scale = 1.0;
     fs::path s_dir, s_iniPath, s_gameDir, s_hddDir;
@@ -107,15 +117,130 @@ namespace
 
     int S(int v) { return int(v * s_scale + 0.5); }
 
+    HWND s_parent = nullptr;   // where Make() puts controls (the main window or the keyboard window)
+
     HWND Make(const wchar_t* cls, const wchar_t* text, DWORD style, int x, int y, int w, int h, int id)
     {
-        HWND h_ = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style, S(x), S(y), S(w), S(h), s_window,
+        HWND h_ = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style, S(x), S(y), S(w), S(h), s_parent,
                                   reinterpret_cast<HMENU>(intptr_t(id)), GetModuleHandleW(nullptr), nullptr);
         SendMessageW(h_, WM_SETFONT, WPARAM(s_font), TRUE);
         return h_;
     }
 
     HWND Item(int id) { return GetDlgItem(s_window, id); }
+    HWND KeyItem(int id) { return GetDlgItem(s_keysWindow, id); }
+
+    std::wstring Wide(const std::string& s) { return std::wstring(s.begin(), s.end()); }
+
+    // ---- Keyboard bindings window ----
+    // Each action gets a list of the key names; a binding the list doesn't have
+    // (two keys, "Q, F") is shown as an extra item so it survives unchanged.
+    void SelectKey(int action, const std::string& value)
+    {
+        HWND c = KeyItem(kKeyFirst + action);
+        SendMessageW(c, CB_RESETCONTENT, 0, 0);
+        SendMessageW(c, CB_ADDSTRING, 0, LPARAM(L"NONE"));
+        int sel = 0;
+        for (int k = 0; k < wet::keybinds::kKeyCount; k++)
+        {
+            SendMessageW(c, CB_ADDSTRING, 0, LPARAM(Wide(wet::keybinds::kKeys[k].name).c_str()));
+            if (value == wet::keybinds::kKeys[k].name)
+                sel = k + 1;
+        }
+        if (sel == 0 && value != "NONE" && !value.empty())
+        {
+            SendMessageW(c, CB_ADDSTRING, 0, LPARAM(Wide(value).c_str()));
+            sel = wet::keybinds::kKeyCount + 1;
+        }
+        SendMessageW(c, CB_SETCURSEL, WPARAM(sel), 0);
+    }
+
+    std::string SelectedKey(int action)
+    {
+        HWND c = KeyItem(kKeyFirst + action);
+        int sel = int(SendMessageW(c, CB_GETCURSEL, 0, 0));
+        wchar_t text[64] = {};
+        if (sel >= 0)
+            SendMessageW(c, CB_GETLBTEXT, WPARAM(sel), LPARAM(text));
+        std::string out;
+        for (wchar_t* p = text; *p; p++)
+            out += char(*p);
+        return out.empty() ? "NONE" : out;
+    }
+
+    void CloseKeys()
+    {
+        if (!s_keysWindow)
+            return;
+        EnableWindow(s_window, TRUE);
+        DestroyWindow(s_keysWindow);
+        s_keysWindow = nullptr;
+        SetForegroundWindow(s_window);
+    }
+
+    LRESULT CALLBACK KeysProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+    {
+        switch (msg)
+        {
+        case WM_COMMAND:
+            switch (LOWORD(wp))
+            {
+            case kKeysOk:
+                for (int i = 0; i < wet::keybinds::kActionCount; i++)
+                    s_ini.SetString(std::string("key_") + wet::keybinds::kActions[i].id, SelectedKey(i));
+                CloseKeys();
+                return 0;
+            case kKeysReset:
+                for (int i = 0; i < wet::keybinds::kActionCount; i++)
+                    SelectKey(i, wet::keybinds::kActions[i].fallback);
+                return 0;
+            case kKeysCancel:
+            case IDCANCEL:
+                CloseKeys();
+                return 0;
+            }
+            break;
+        case WM_CTLCOLORSTATIC:
+            SetBkMode(HDC(wp), TRANSPARENT);
+            return LRESULT(GetSysColorBrush(COLOR_WINDOW));
+        case WM_CLOSE:
+            CloseKeys();
+            return 0;
+        }
+        return DefWindowProcW(hwnd, msg, wp, lp);
+    }
+
+    void OpenKeys()
+    {
+        if (s_keysWindow)
+            return;
+        constexpr int kRows = (wet::keybinds::kActionCount + 1) / 2;
+        RECT rc{ 0, 0, S(560), S(kRows * 30 + 64) };
+        DWORD style = WS_POPUP | WS_CAPTION | WS_SYSMENU;
+        AdjustWindowRect(&rc, style, FALSE);
+        RECT owner;
+        GetWindowRect(s_window, &owner);
+        int w = rc.right - rc.left, h = rc.bottom - rc.top;
+        s_keysWindow = CreateWindowExW(WS_EX_DLGMODALFRAME, L"WetLauncherKeys", L"Keyboard bindings", style,
+                                       (owner.left + owner.right - w) / 2, (owner.top + owner.bottom - h) / 2, w, h,
+                                       s_window, nullptr, GetModuleHandleW(nullptr), nullptr);
+        s_parent = s_keysWindow;
+        for (int i = 0; i < wet::keybinds::kActionCount; i++)
+        {
+            int x = (i % 2) * 280 + 12, y = (i / 2) * 30 + 12;
+            Make(L"STATIC", Wide(wet::keybinds::kActions[i].label).c_str(), SS_LEFT, x, y + 3, 120, 18, 0);
+            Make(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, x + 124, y, 136, 300, kKeyFirst + i);
+            std::string key = std::string("key_") + wet::keybinds::kActions[i].id;
+            SelectKey(i, s_ini.GetString(key, wet::keybinds::kActions[i].fallback));
+        }
+        int by = kRows * 30 + 22;
+        Make(L"BUTTON", L"Reset to defaults", BS_PUSHBUTTON | WS_TABSTOP, 12, by, 140, 28, kKeysReset);
+        Make(L"BUTTON", L"OK", BS_DEFPUSHBUTTON | WS_TABSTOP, 338, by, 100, 28, kKeysOk);
+        Make(L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, 448, by, 100, 28, kKeysCancel);
+        s_parent = s_window;
+        EnableWindow(s_window, FALSE);
+        ShowWindow(s_keysWindow, SW_SHOW);
+    }
 
     void Label(const wchar_t* text, int x, int y, int w = 110) { Make(L"STATIC", text, SS_LEFT, x, y + 3, w, 18, 0); }
 
@@ -289,7 +414,8 @@ namespace
         Check(kInvertY, L"Invert Y", 230, 172, ini.Get("mouse_invert_y", 0) != 0, 100);
         Label(L"Mouse sensitivity", 22, 202);
         Slider(kSensitivity, kSensitivityValue, 136, 200, 150, 1, 100, ini.Get("mouse_sensitivity", 50), L"");
-        Check(kVibration, L"Controller vibration", 22, 234, ini.Get("vibration", 1) != 0, 200);
+        Check(kVibration, L"Controller vibration", 22, 234, ini.Get("vibration", 1) != 0, 180);
+        Make(L"BUTTON", L"Keyboard...", BS_PUSHBUTTON | WS_TABSTOP, 216, 250, 110, 26, kKeyboard);
 
         // Other
         Group(L"Other", 350, 152, 330, 134);
@@ -319,6 +445,7 @@ namespace
             case kPlay: Play(); return 0;
             case kSaves: OpenSaves(); return 0;
             case kClearShaders: ClearShaders(); return 0;
+            case kKeyboard: OpenKeys(); return 0;
             case IDCANCEL: DestroyWindow(hwnd); return 0;
             }
             break;
@@ -366,6 +493,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show)
     wc.lpszClassName = L"WetLauncher";
     wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(1));
     RegisterClassExW(&wc);
+    WNDCLASSEXW kc = wc;
+    kc.lpfnWndProc = KeysProc;
+    kc.lpszClassName = L"WetLauncherKeys";
+    RegisterClassExW(&kc);
 
     RECT rc{ 0, 0, S(690), S(338) };
     DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
@@ -375,6 +506,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show)
     s_window = CreateWindowExW(0, wc.lpszClassName, title.c_str(), style,
                                (GetSystemMetrics(SM_CXSCREEN) - w) / 2, (GetSystemMetrics(SM_CYSCREEN) - h) / 2, w, h,
                                nullptr, nullptr, instance, nullptr);
+    s_parent = s_window;
     BuildControls();
     ShowWindow(s_window, show);
     SetFocus(Item(kPlay));
@@ -382,7 +514,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show)
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0))
     {
-        if (!IsDialogMessageW(s_window, &msg))
+        if (!(s_keysWindow && IsDialogMessageW(s_keysWindow, &msg)) && !IsDialogMessageW(s_window, &msg))
         {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);

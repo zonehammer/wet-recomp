@@ -70,6 +70,11 @@ licence notices. It contains code translated from your copy of the game, so it i
 | A / B / X / Y | A / B / X / Y (PlayStation: Cross / Circle / Square / Triangle) | Space / Esc / X / Y |
 | Bumpers / triggers | LB / RB, LT / RT | Q / E, Z / C |
 | D-pad, Start, Back | D-pad, Start (Options), Back (Share / touchpad) | Arrows, Enter, Backspace |
+| Stick clicks | L3 / R3 | Left Shift / V |
+
+Every keyboard key can be rebound: in the F1 overlay (Keyboard bindings: click an
+action, press a key), with the launcher's **Keyboard...** button, or in `wet.ini`
+(`key_a = SPACE`, two keys as `key_lb = Q, F`).
 
 | Key | |
 |---|---|
@@ -80,7 +85,7 @@ licence notices. It contains code translated from your copy of the game, so it i
 | F10 | Profiler on/off (`profile.txt`, bug reports) |
 
 Settings live in `wet.ini` next to the exe; the mouse buttons can be rebound there
-(`mouse_left = RT` ...). Direct mouse aim (`mouse_direct`, on by default) turns the camera
+(`mouse_left = RT` ...) as well as the keys. Direct mouse aim (`mouse_direct`, on by default) turns the camera
 by how far the mouse moves, with no stick speed limit. Saves, `achievements.ini` and the shader cache are in
 `game\hdd`. `WetRecomp.exe --console` shows the log live; `wet.log` always has it.
 

@@ -4,6 +4,7 @@
 #include "profiler.h"
 #include "options.h"
 #include "camscan.h"
+#include "keybinds.h"
 
 #include <atomic>
 #include <cmath>
@@ -31,7 +32,7 @@
 // Without SDL, or if it fails to start, XInput pads (Xbox-compatible only).
 //
 // Pad 0 is the union of: the first controller, the keyboard
-// (Windows, see kKeyMap) and WET_AUTOPRESS (any platform), so the game can be
+// (Windows, keybinds.h and wet.ini key_*) and WET_AUTOPRESS (any platform), so the game can be
 // driven with no controller attached and in automated test runs.
 //
 // WET_AUTOPRESS="START,A,A" taps each button in turn, one every 2 seconds
@@ -98,12 +99,24 @@ namespace wet
         const AutoPress& Auto() { static AutoPress a; return a; }
 
 #ifdef _WIN32
-        struct KeyBinding { int vk; uint16_t bit; };
-        constexpr KeyBinding kKeyMap[] = {
-            { VK_UP, kUp }, { VK_DOWN, kDown }, { VK_LEFT, kLeft }, { VK_RIGHT, kRight },
-            { VK_RETURN, kStart }, { VK_BACK, kBack }, { VK_SPACE, kA }, { VK_ESCAPE, kB },
-            { 'X', kX }, { 'Y', kY }, { 'Q', kLB }, { 'E', kRB },
+        // keybinds::kActions order: 4 move directions, then these buttons
+        // (0 = a trigger: lt, rt).
+        constexpr uint16_t kActionBits[keybinds::kActionCount] = {
+            0, 0, 0, 0, kA, kB, kX, kY, kLB, kRB, 0, 0, kLThumb, kRThumb, kStart, kBack, kUp, kDown, kLeft, kRight,
         };
+        enum { kMoveUp, kMoveDown, kMoveLeft, kMoveRight, kTriggerL = 10, kTriggerR = 11 };
+
+        // Parsed bindings, rebuilt when wet.ini / the overlay changes one.
+        std::vector<int> s_keys[keybinds::kActionCount];
+        int s_keysVersion = -1;
+
+        bool ActionHeld(int action)
+        {
+            for (int vk : s_keys[action])
+                if (GetAsyncKeyState(vk) & 0x8000)
+                    return true;
+            return false;
+        }
 
         // The keyboard only counts while this process's console (or, later, window)
         // is in the foreground, so typing elsewhere doesn't drive the game.
@@ -275,14 +288,20 @@ namespace wet
                 return 0;
             }
             uint16_t b = 0;
-            for (auto& k : kKeyMap)
-                if (GetAsyncKeyState(k.vk) & 0x8000)
-                    b |= k.bit;
-            if (GetAsyncKeyState('Z') & 0x8000) lt = 255;
-            if (GetAsyncKeyState('C') & 0x8000) rt = 255;
+            if (int v = options::KeyBindingsVersion(); v != s_keysVersion)
+            {
+                s_keysVersion = v;
+                for (int i = 0; i < keybinds::kActionCount; i++)
+                    s_keys[i] = keybinds::Parse(options::KeyBinding(i));
+            }
+            for (int i = 0; i < keybinds::kActionCount; i++)
+                if (kActionBits[i] && ActionHeld(i))
+                    b |= kActionBits[i];
+            if (ActionHeld(kTriggerL)) lt = 255;
+            if (ActionHeld(kTriggerR)) rt = 255;
             // WASD: left stick.
-            int mx = ((GetAsyncKeyState('D') & 0x8000) ? 1 : 0) - ((GetAsyncKeyState('A') & 0x8000) ? 1 : 0);
-            int my = ((GetAsyncKeyState('W') & 0x8000) ? 1 : 0) - ((GetAsyncKeyState('S') & 0x8000) ? 1 : 0);
+            int mx = (ActionHeld(kMoveRight) ? 1 : 0) - (ActionHeld(kMoveLeft) ? 1 : 0);
+            int my = (ActionHeld(kMoveUp) ? 1 : 0) - (ActionHeld(kMoveDown) ? 1 : 0);
             if (mx || my)
             {
                 double scale = (mx && my) ? 0.7071 : 1.0;

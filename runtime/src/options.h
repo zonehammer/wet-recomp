@@ -62,6 +62,10 @@ namespace wet::options
     bool MouseDirect();
     void SetMouseDirect(bool v);
     std::string MouseBinding(int button);
+    // Keyboard bindings (keybinds.h actions): "KEY" or "KEY, KEY" or "NONE".
+    std::string KeyBinding(int action);
+    void SetKeyBinding(int action, const std::string& keys);
+    int KeyBindingsVersion();   // changes whenever a binding does
     int FilmGrain();
     void SetFilmGrain(int v);
     int Sharpness();

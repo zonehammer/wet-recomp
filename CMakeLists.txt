@@ -135,7 +135,7 @@ if(WIN32)
     add_executable(WetLauncher WIN32 launcher/launcher.cpp launcher/launcher.rc)
     set_target_properties(WetLauncher PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/runtime)
     target_compile_definitions(WetLauncher PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
-    target_include_directories(WetLauncher PRIVATE ${WET_VERSION_INCLUDE})
+    target_include_directories(WetLauncher PRIVATE ${WET_VERSION_INCLUDE} ${CMAKE_SOURCE_DIR}/runtime/src)
     target_link_libraries(WetLauncher PRIVATE comctl32 shell32)
     # Optional icon (launcher/launcher.ico, not in git: use your own image).
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/launcher/launcher.ico)

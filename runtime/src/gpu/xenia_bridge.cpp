@@ -13,6 +13,7 @@
 #include "options.h"
 #include "input.h"
 #include "achievements.h"
+#include "keybinds.h"
 #include <map>
 #include <ctime>
 #define STB_IMAGE_STATIC
@@ -535,6 +536,72 @@ namespace
             ImGui::Separator();
         }
 
+        // Keyboard bindings: click an action, press a key. Right click clears it.
+        static void DrawKeyboard()
+        {
+            namespace kb = wet::keybinds;
+            static int capture = -1;
+            static bool held[kb::kKeyCount];
+            if (!ImGui::CollapsingHeader("Keyboard bindings"))
+            {
+                capture = -1;
+                return;
+            }
+#if XE_PLATFORM_WIN32
+            if (capture >= 0)
+            {
+                // The first key that goes down after the click (keys already held,
+                // like the Enter that pressed the button, don't count).
+                for (int k = 0; k < kb::kKeyCount; k++)
+                {
+                    bool down = (GetAsyncKeyState(kb::kKeys[k].vk) & 0x8000) != 0;
+                    if (down && !held[k] && capture >= 0)
+                    {
+                        wet::options::SetKeyBinding(capture, kb::kKeys[k].name);
+                        capture = -1;
+                    }
+                    held[k] = down;
+                }
+            }
+#endif
+            if (ImGui::BeginTable("keys", 4, ImGuiTableFlags_SizingFixedFit))
+            {
+                for (int i = 0; i < kb::kActionCount; i++)
+                {
+                    if (i % 2 == 0)
+                        ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(kb::kActions[i].label);
+                    ImGui::TableNextColumn();
+                    std::string keys = wet::options::KeyBinding(i);
+                    std::string text = capture == i ? "Press a key..." : keys.empty() ? "NONE" : keys;
+                    text += "##key" + std::to_string(i);
+                    if (ImGui::Button(text.c_str(), ImVec2(ImGui::GetFontSize() * 9, 0)))
+                    {
+                        capture = capture == i ? -1 : i;
+#if XE_PLATFORM_WIN32
+                        for (int k = 0; k < kb::kKeyCount; k++)
+                            held[k] = (GetAsyncKeyState(kb::kKeys[k].vk) & 0x8000) != 0;
+#endif
+                    }
+                    if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                    {
+                        wet::options::SetKeyBinding(i, "NONE");
+                        capture = -1;
+                    }
+                }
+                ImGui::EndTable();
+            }
+            if (ImGui::Button("Reset keyboard to defaults"))
+            {
+                for (int i = 0; i < kb::kActionCount; i++)
+                    wet::options::SetKeyBinding(i, kb::kActions[i].fallback);
+                capture = -1;
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled("Click, then press a key; right click clears. Two keys: wet.ini key_* = Q, F");
+        }
+
         static bool Radio(const char* label, int* value, int choice)
         {
             return ImGui::RadioButton(label, value, choice);
@@ -618,8 +685,10 @@ namespace
                 bool direct = wet::options::MouseDirect();
                 if (ImGui::Checkbox("Direct mouse aim (turn by how far the mouse moves, no stick speed limit)", &direct))
                     wet::options::SetMouseDirect(direct);
-                ImGui::TextDisabled("WASD move, left click RT, right click LT (buttons: wet.ini mouse_*)");
+                ImGui::TextDisabled("Left click RT, right click LT (other buttons: wet.ini mouse_*)");
             }
+
+            DrawKeyboard();
 
             Section("Resolution");
             int res = wet::options::ResolutionScale();

@@ -22,7 +22,7 @@ Make a full playthrough reliable before adding more features.
 | Item | Why | Effort |
 |---|---|---|
 | ~~Direct mouse aim~~ (done: `mouse_direct`, uncapped stick values written into the game's pad object) | True 1:1 aim, no stick speed cap or acceleration | M–L |
-| **Keyboard rebinding** in wet.ini and the launcher | Everything except the mouse buttons is fixed today | S |
+| ~~Keyboard rebinding~~ (done: wet.ini `key_*`, the F1 overlay and the launcher) | Everything except the mouse buttons is fixed today | S |
 | **Keep sound on the speakers** when a PlayStation pad registers as an audio device (opt-in) | Windows switches the default output to the controller | S |
 | **PlayStation button prompts** (swap the game's Xbox button icons) | Matches the controller in hand | L |
 | **DualSense / DualShock gyro aim** (optional) | Fine aim on PlayStation pads | M |

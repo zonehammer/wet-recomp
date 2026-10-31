@@ -1,4 +1,5 @@
 #include "options.h"
+#include "keybinds.h"
 #include "log.h"
 #include "gpu/renderer.h"
 #include "memory.h"
@@ -9,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <string>
 
 namespace wet::options
@@ -25,6 +27,24 @@ namespace wet::options
         // Mouse button bindings: left, right, middle, back (X1), forward (X2).
         constexpr const char* kMouseKeys[5] = { "mouse_left", "mouse_right", "mouse_middle", "mouse_back", "mouse_forward" };
         std::string s_mouseBind[5] = { "RT", "LT", "RTHUMB", "LB", "RB" };
+
+        // Keyboard bindings (keybinds.h), key_<action> = KEY[, KEY].
+        std::mutex s_keyLock;
+        std::string s_keyBind[keybinds::kActionCount];
+        [[maybe_unused]] bool s_keyBindLoaded = [] {
+            for (int i = 0; i < keybinds::kActionCount; i++)
+                s_keyBind[i] = keybinds::kActions[i].fallback;
+            return true;
+        }();
+        std::atomic<int> s_keyVersion{ 0 };
+
+        std::string Upper(std::string s)
+        {
+            for (auto& c : s)
+                c = char(std::toupper((unsigned char)c));
+            size_t a = s.find_first_not_of(" \t\r\n"), b = s.find_last_not_of(" \t\r\n");
+            return a == std::string::npos ? std::string() : s.substr(a, b - a + 1);
+        }
 
         int Clamp(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
@@ -82,6 +102,14 @@ namespace wet::options
             std::fprintf(f, "# mouse buttons: A B X Y LB RB LT RT LTHUMB RTHUMB START BACK UP DOWN LEFT RIGHT or NONE\n");
             for (int i = 0; i < 5; i++)
                 std::fprintf(f, "%s = %s\n", kMouseKeys[i], s_mouseBind[i].c_str());
+            std::fprintf(f, "# keyboard: key_<action> = KEY or KEY, KEY or NONE. Keys: A-Z 0-9 SPACE ENTER ESC BACKSPACE TAB LSHIFT RSHIFT\n"
+                            "# LCTRL RCTRL LALT RALT CAPSLOCK UP DOWN LEFT RIGHT INSERT DELETE HOME END PAGEUP PAGEDOWN NUM0-NUM9\n"
+                            "# F2-F5 F12 MINUS EQUALS LBRACKET RBRACKET SEMICOLON APOSTROPHE COMMA PERIOD SLASH BACKSLASH GRAVE\n");
+            {
+                std::lock_guard lock(s_keyLock);
+                for (int i = 0; i < keybinds::kActionCount; i++)
+                    std::fprintf(f, "key_%s = %s\n", keybinds::kActions[i].id, s_keyBind[i].c_str());
+            }
             std::fprintf(f, "# shader_cache: 1 = save compiled shaders and rebuild them at startup (no stutter the second time), 0 = off (restart)\n");
             std::fprintf(f, "shader_cache = %d\n", s_shaderCache.load());
             std::fprintf(f, "# async_shaders: 1 = don't wait for new shaders (an object may appear a frame or two late instead of a stutter), 0 = wait\n");
@@ -99,8 +127,19 @@ namespace wet::options
             char line[256];
             while (std::fgets(line, sizeof(line), f))
             {
-                char key[64], text[64];
+                char key[64], text[64], rest[192];
                 int value;
+                if (std::sscanf(line, " key_%63[a-z0-9_] = %191[^\r\n]", key, rest) == 2)
+                {
+                    for (int i = 0; i < keybinds::kActionCount; i++)
+                        if (!std::strcmp(key, keybinds::kActions[i].id))
+                        {
+                            std::lock_guard lock(s_keyLock);
+                            s_keyBind[i] = Upper(rest);
+                        }
+                    s_keyVersion++;
+                    continue;
+                }
                 if (std::sscanf(line, " %63[a-z0-9_] = %63s", key, text) == 2)
                     for (int i = 0; i < 5; i++)
                         if (!std::strcmp(key, kMouseKeys[i]))
@@ -197,6 +236,25 @@ namespace wet::options
     void SetMouseInvertY(bool v) { s_mouseInvert = v; Save(); }
     bool MouseDirect() { return s_mouseDirect.load(std::memory_order_relaxed) != 0; }
     void SetMouseDirect(bool v) { s_mouseDirect = v; Save(); }
+    std::string KeyBinding(int action)
+    {
+        if (action < 0 || action >= keybinds::kActionCount)
+            return {};
+        std::lock_guard lock(s_keyLock);
+        return s_keyBind[action];
+    }
+    void SetKeyBinding(int action, const std::string& keys)
+    {
+        if (action < 0 || action >= keybinds::kActionCount)
+            return;
+        {
+            std::lock_guard lock(s_keyLock);
+            s_keyBind[action] = Upper(keys);
+        }
+        s_keyVersion++;
+        Save();
+    }
+    int KeyBindingsVersion() { return s_keyVersion.load(std::memory_order_relaxed); }
     std::string MouseBinding(int button) { return button >= 0 && button < 5 ? s_mouseBind[button] : std::string(); }
     void SetFilmGrain(int v) { s_filmGrain = Clamp(v, 0, 100); Save(); }
     int Sharpness() { return s_sharpness; }
