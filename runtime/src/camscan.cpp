@@ -423,7 +423,7 @@ namespace wet::camscan
                 return;
             }
             std::fprintf(report, "# Perspective matrices: address, x scale, y scale, aspect (y/x), vertical / horizontal FOV\n");
-            std::vector<Candidate> found, ortho;
+            std::vector<Candidate> found, ortho, views;
             static constexpr int kZero[] = { 1, 2, 3, 4, 6, 7, 8, 9, 12, 13, 15 };
             static constexpr int kOrthoZero[] = { 1, 2, 4, 6, 8, 9 };
             for (auto& r : Snapshot())
@@ -431,6 +431,30 @@ namespace wet::camscan
                 const uint8_t* d = r.data.data();
                 for (size_t off = 0; off + 64 <= r.data.size(); off += 4)
                 {
+                    // Viewports: Scaleform's (buffer 1280x720, left 0, top 0, 1280x720) and
+                    // D3D's (0, 0, 1280, 720, min z 0, max z 1).
+                    auto be32 = [&](size_t o) {
+                        return uint32_t(d[o]) << 24 | uint32_t(d[o + 1]) << 16 | uint32_t(d[o + 2]) << 8 | d[o + 3];
+                    };
+                    if (be32(off) == 1280 && views.size() < 100)
+                    {
+                        if (be32(off + 4) == 720 && be32(off + 8) == 0 && be32(off + 12) == 0 && be32(off + 16) == 1280 &&
+                            be32(off + 20) == 720)
+                        {
+                            Candidate c{};
+                            c.addr = r.guest + uint32_t(off) + 16;   // its width
+                            c.v[0] = 1;
+                            views.push_back(c);
+                        }
+                    }
+                    if (be32(off) == 0 && be32(off + 4) == 0 && be32(off + 8) == 1280 && be32(off + 12) == 720 &&
+                        BeFloat(d + off + 16) == 0.0f && BeFloat(d + off + 20) == 1.0f && views.size() < 100)
+                    {
+                        Candidate c{};
+                        c.addr = r.guest + uint32_t(off) + 8;   // its width
+                        c.v[0] = 2;
+                        views.push_back(c);
+                    }
                     float m0 = BeFloat(d + off), m5 = BeFloat(d + off + 20);
                     // 2D (orthographic): scale, +-scale, w = 1, translation in one
                     // row or column, not the identity.
@@ -487,14 +511,17 @@ namespace wet::camscan
                 std::fprintf(report, "%08X  x %.6f  y %.6f  (%.1f x %.1f)  tx %.4f  ty %.4f\n", c.addr, c.v[0], c.v[1],
                              2.0 / std::fabs(c.v[0]), 2.0 / std::fabs(c.v[1]), c.v[2], c.v[3]);
             Log("Projection scan: %zu perspective, %zu 2D matrices", found.size(), ortho.size());
-            // Watch the first wide perspective ones and the 2D ones.
-            std::vector<Candidate> wide;
+            std::fprintf(report, "\n# Viewports (width field): 1 = Scaleform-style (buffer, left, top, width, height), 2 = D3D-style\n");
+            for (auto& c : views)
+                std::fprintf(report, "%08X  type %.0f\n", c.addr, c.v[0]);
+            Log("Projection scan: %zu viewports", views.size());
+            // Watch the viewports, the first wide perspective ones and the 2D ones.
+            std::vector<Candidate> wide = views;
             for (auto& c : found)
-                if (c.v[1] / c.v[0] > 1.2f && wide.size() < 60)
+                if (c.v[1] / c.v[0] > 1.2f && wide.size() < views.size() + 40)
                     wide.push_back(c);
             found = wide;
-            for (size_t i = 0; i < ortho.size() && found.size() < 150; i++)
-                found.push_back(ortho[i]);
+            (void)ortho;   // world transforms, not the HUD (first widescreen test)
             // Watch each matrix's x scale (m00) for 2 s.
             {
                 std::lock_guard lock(s_watchLock);
