@@ -99,7 +99,7 @@ namespace
     enum : int
     {
         kFps = 100, kResolution, kFullscreen, kShowFps,
-        kFilter, kSharpness, kSharpnessValue, kAntialiasing, kGrain, kGrainValue,
+        kFilter, kSharpness, kSharpnessValue, kAntialiasing, kGrain, kGrainValue, kFov, kFovValue,
         kMouseAim, kSensitivity, kSensitivityValue, kInvertY, kVibration,
         kShaderCache, kVideoMode, kPopups, kAsyncShaders,
         kStatus, kPlay, kSaves, kClearShaders, kKeyboard,
@@ -322,6 +322,7 @@ namespace
         s_ini.Set("sharpness", Pos(kSharpness));
         s_ini.Set("antialiasing", Selected(kAntialiasing));
         s_ini.Set("film_grain", Pos(kGrain));
+        s_ini.Set("fov", Pos(kFov));
         s_ini.Set("mouse_aim", Checked(kMouseAim));
         s_ini.Set("mouse_sensitivity", Pos(kSensitivity));
         s_ini.Set("mouse_invert_y", Checked(kInvertY));
@@ -381,7 +382,7 @@ namespace
     {
         const Ini& ini = s_ini;
         // Display
-        Group(L"Display", 10, 8, 330, 136);
+        Group(L"Display", 10, 8, 330, 164);
         Label(L"Frame rate", 22, 30);
         int fps = ini.Get("fps", 30), fpsIndex = 0;
         for (int i = 0; i < 4; i++)
@@ -396,7 +397,7 @@ namespace
         Check(kVideoMode, L"Videos at 30 FPS (avoids video flicker)", 22, 114, ini.Get("video_mode", 1) != 0, 300);
 
         // Graphics
-        Group(L"Graphics", 350, 8, 330, 136);
+        Group(L"Graphics", 350, 8, 330, 164);
         Label(L"Scaling", 362, 30, 90);
         Combo(kFilter, 460, 28, 206, { L"Bilinear", L"AMD CAS (sharpen)", L"AMD FSR (upscale)", L"NVIDIA NIS (upscale)" },
               std::min(std::max(ini.Get("filter", 0), 0), 3));
@@ -407,26 +408,28 @@ namespace
               std::min(std::max(ini.Get("antialiasing", 0), 0), 2));
         Label(L"Film grain", 362, 116, 90);
         Slider(kGrain, kGrainValue, 456, 114, 160, 0, 100, ini.Get("film_grain", 100), L"%");
+        Label(L"Field of view", 362, 144, 90);
+        Slider(kFov, kFovValue, 456, 142, 160, 60, 130, std::min(std::max(ini.Get("fov", 90), 60), 130), L"\u00B0");
 
         // Controls
-        Group(L"Controls", 10, 152, 330, 134);
-        Check(kMouseAim, L"Mouse aim (WASD + mouse)", 22, 172, ini.Get("mouse_aim", 1) != 0, 200);
-        Check(kInvertY, L"Invert Y", 230, 172, ini.Get("mouse_invert_y", 0) != 0, 100);
-        Label(L"Mouse sensitivity", 22, 202);
-        Slider(kSensitivity, kSensitivityValue, 136, 200, 150, 1, 100, ini.Get("mouse_sensitivity", 50), L"");
-        Check(kVibration, L"Controller vibration", 22, 234, ini.Get("vibration", 1) != 0, 180);
-        Make(L"BUTTON", L"Keyboard...", BS_PUSHBUTTON | WS_TABSTOP, 216, 250, 110, 26, kKeyboard);
+        Group(L"Controls", 10, 180, 330, 134);
+        Check(kMouseAim, L"Mouse aim (WASD + mouse)", 22, 200, ini.Get("mouse_aim", 1) != 0, 200);
+        Check(kInvertY, L"Invert Y", 230, 200, ini.Get("mouse_invert_y", 0) != 0, 100);
+        Label(L"Mouse sensitivity", 22, 230);
+        Slider(kSensitivity, kSensitivityValue, 136, 228, 150, 1, 100, ini.Get("mouse_sensitivity", 50), L"");
+        Check(kVibration, L"Controller vibration", 22, 262, ini.Get("vibration", 1) != 0, 180);
+        Make(L"BUTTON", L"Keyboard...", BS_PUSHBUTTON | WS_TABSTOP, 216, 278, 110, 26, kKeyboard);
 
         // Other
-        Group(L"Other", 350, 152, 330, 134);
-        Check(kShaderCache, L"Shader cache (less stutter after the first time)", 362, 172, ini.Get("shader_cache", 1) != 0, 310);
-        Check(kAsyncShaders, L"Don't wait for new shaders (objects may pop in)", 362, 196, ini.Get("async_shaders", 1) != 0, 310);
-        Check(kPopups, L"Achievement pop-ups", 362, 220, ini.Get("achievement_popups", 1) != 0, 200);
-        Make(L"BUTTON", L"Open saves folder", BS_PUSHBUTTON | WS_TABSTOP, 362, 250, 145, 26, kSaves);
-        Make(L"BUTTON", L"Clear shader cache", BS_PUSHBUTTON | WS_TABSTOP, 517, 250, 150, 26, kClearShaders);
+        Group(L"Other", 350, 180, 330, 134);
+        Check(kShaderCache, L"Shader cache (less stutter after the first time)", 362, 200, ini.Get("shader_cache", 1) != 0, 310);
+        Check(kAsyncShaders, L"Don't wait for new shaders (objects may pop in)", 362, 224, ini.Get("async_shaders", 1) != 0, 310);
+        Check(kPopups, L"Achievement pop-ups", 362, 248, ini.Get("achievement_popups", 1) != 0, 200);
+        Make(L"BUTTON", L"Open saves folder", BS_PUSHBUTTON | WS_TABSTOP, 362, 278, 145, 26, kSaves);
+        Make(L"BUTTON", L"Clear shader cache", BS_PUSHBUTTON | WS_TABSTOP, 517, 278, 150, 26, kClearShaders);
 
-        Make(L"STATIC", L"", SS_LEFT | SS_PATHELLIPSIS, 12, 302, 540, 18, kStatus);
-        Make(L"BUTTON", L"Play", BS_DEFPUSHBUTTON | WS_TABSTOP, 570, 296, 110, 32, kPlay);
+        Make(L"STATIC", L"", SS_LEFT | SS_PATHELLIPSIS, 12, 330, 540, 18, kStatus);
+        Make(L"BUTTON", L"Play", BS_DEFPUSHBUTTON | WS_TABSTOP, 570, 324, 110, 32, kPlay);
         UpdateStatus();
     }
 
@@ -437,6 +440,7 @@ namespace
         case WM_HSCROLL:
             if (HWND(lp) == Item(kSharpness)) UpdateValueLabel(kSharpness, kSharpnessValue, L"%");
             else if (HWND(lp) == Item(kGrain)) UpdateValueLabel(kGrain, kGrainValue, L"%");
+            else if (HWND(lp) == Item(kFov)) UpdateValueLabel(kFov, kFovValue, L"\u00B0");
             else if (HWND(lp) == Item(kSensitivity)) UpdateValueLabel(kSensitivity, kSensitivityValue, L"");
             return 0;
         case WM_COMMAND:
@@ -498,7 +502,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show)
     kc.lpszClassName = L"WetLauncherKeys";
     RegisterClassExW(&kc);
 
-    RECT rc{ 0, 0, S(690), S(338) };
+    RECT rc{ 0, 0, S(690), S(366) };
     DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
     AdjustWindowRect(&rc, style, FALSE);
     int w = rc.right - rc.left, h = rc.bottom - rc.top;

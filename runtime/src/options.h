@@ -68,6 +68,9 @@ namespace wet::options
     int KeyBindingsVersion();   // changes whenever a binding does
     int FilmGrain();
     void SetFilmGrain(int v);
+    // Horizontal field of view at 16:9 in degrees (90 = the game's own; fov.cpp).
+    int Fov();
+    void SetFov(int v);
     int Sharpness();
     void SetSharpness(int v);
 

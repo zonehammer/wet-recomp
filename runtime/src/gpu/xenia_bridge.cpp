@@ -721,6 +721,11 @@ namespace
                 ApplyPostProcessing();
             }
 
+            int fov = wet::options::Fov(), fovPick = fov;
+            ImGui::SliderInt("Field of view (90 = original)", &fovPick, 60, 130, "%d deg");
+            if (fovPick != fov)
+                wet::options::SetFov(fovPick);
+
             int aa = wet::options::Antialiasing(), aaPick = aa;
             ImGui::TextUnformatted("Anti-aliasing:");
             Radio("Off", &aaPick, 0); ImGui::SameLine();
