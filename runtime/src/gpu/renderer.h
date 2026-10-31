@@ -40,6 +40,9 @@ namespace wet::renderer
     // Rendering resolution scale (1 = 720p, 2 = 1440p, 3 = 2160p); before Start.
     void SetResolutionScale(uint32_t scale);
     void ToggleFullscreen();
+    // Width / height the game is shown at: 16:9, or the window's shape with the
+    // widescreen option (never narrower than 16:9). Passes it on to the presenter.
+    float DisplayAspect();
     // F1 settings overlay; while it's open the keyboard doesn't drive the game.
     void ToggleOverlay();
     bool OverlayOpen();

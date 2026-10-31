@@ -8,6 +8,11 @@
 // included) agrees. Scaling keeps the game's own changes (zoom while aiming)
 // relative to the new FOV. Only wide perspective projections are touched: the
 // square 90-degree ones are shadow and reflection cameras.
+//
+// Widescreen (Hor+): on a screen wider than 16:9 the frame is shown stretched, so
+// the x scale is also divided by how much wider it is - the vertical view stays
+// and the sides open up.
+#include "gpu/renderer.h"
 #include "options.h"
 #include "ppc_context.h"
 
@@ -47,8 +52,9 @@ extern "C" void __imp__sub_82C7E590(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_82C7E590)
 {
     int fov = wet::options::Fov();
+    float wide = wet::renderer::DisplayAspect() / (16.0f / 9.0f);
     uint32_t proj = ctx.r5.u32;
-    if (fov == 90 || !proj || !WidePerspective(base, proj))
+    if ((fov == 90 && wide < 1.001f) || !proj || !WidePerspective(base, proj))
     {
         __imp__sub_82C7E590(ctx, base);
         return;
@@ -59,7 +65,7 @@ PPC_FUNC(sub_82C7E590)
     for (uint32_t i = 0; i < 64; i += 4)
         PPC_STORE_U32(copy + i, PPC_LOAD_U32(proj + i));
     float scale = float(1.0 / std::tan(fov * 3.14159265358979 / 360.0));
-    StoreF(base, copy, LoadF(base, copy) * scale);
+    StoreF(base, copy, LoadF(base, copy) * scale / wide);
     StoreF(base, copy + 20, LoadF(base, copy + 20) * scale);
     ctx.r5.u64 = copy;
     __imp__sub_82C7E590(ctx, base);

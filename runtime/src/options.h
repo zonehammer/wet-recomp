@@ -71,6 +71,9 @@ namespace wet::options
     // Horizontal field of view at 16:9 in degrees (90 = the game's own; fov.cpp).
     int Fov();
     void SetFov(int v);
+    // Fill screens and windows wider than 16:9 (Hor+: the view widens).
+    bool Widescreen();
+    void SetWidescreen(bool v);
     int Sharpness();
     void SetSharpness(int v);
 

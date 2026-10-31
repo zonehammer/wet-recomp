@@ -107,7 +107,7 @@ index 8f6087b05..47c87eec0 100644
  
  static void set_name(HANDLE thread, const std::string_view name) {
 diff --git a/src/xenia/gpu/command_processor.cc b/src/xenia/gpu/command_processor.cc
-index ce08d19bd..a72e7b46e 100644
+index ce08d19bd..c3e8f9bc3 100644
 --- a/src/xenia/gpu/command_processor.cc
 +++ b/src/xenia/gpu/command_processor.cc
 @@ -9,6 +9,9 @@
@@ -120,7 +120,7 @@ index ce08d19bd..a72e7b46e 100644
  #include <algorithm>
  #include <cinttypes>
  #include <cmath>
-@@ -32,6 +35,94 @@
+@@ -32,6 +35,96 @@
  namespace xe {
  namespace gpu {
  
@@ -133,6 +133,8 @@ index ce08d19bd..a72e7b46e 100644
 +std::atomic<float> wet_film_grain{1.0f};
 +uint64_t wet_grain_ps_hash = 0xEB5E3543D07E32D1ull;
 +uint32_t wet_grain_const = (256 + 14) * 4;  // pixel shader c14.x
++std::atomic<uint32_t> wet_display_aspect_x{1280};
++std::atomic<uint32_t> wet_display_aspect_y{720};
 +void (*wet_register_sync_hook)() = nullptr;
 +
 +void WetTraceDraw(const RegisterFile& regs, const Memory& memory,
@@ -215,7 +217,7 @@ index ce08d19bd..a72e7b46e 100644
  using namespace xe::gpu::xenos;
  
  CommandProcessor::CommandProcessor(GraphicsSystem* graphics_system,
-@@ -244,6 +335,7 @@ void CommandProcessor::WorkerThreadMain() {
+@@ -244,6 +337,7 @@ void CommandProcessor::WorkerThreadMain() {
        xe::store_and_swap<uint32_t>(
            memory_->TranslatePhysical(read_ptr_writeback_ptr_), read_ptr_index_);
      }
@@ -223,7 +225,7 @@ index ce08d19bd..a72e7b46e 100644
  
      // FIXME: We're supposed to process the WAIT_UNTIL register at this point,
      // but no games seem to actually use it.
-@@ -349,6 +441,7 @@ void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
+@@ -349,6 +443,7 @@ void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
        uint32_t scratch_addr = regs.values[XE_GPU_REG_SCRATCH_ADDR];
        uint32_t mem_addr = scratch_addr + (scratch_reg * 4);
        xe::store_and_swap<uint32_t>(memory_->TranslatePhysical(mem_addr), value);
@@ -231,7 +233,7 @@ index ce08d19bd..a72e7b46e 100644
      }
    } else {
      switch (index) {
-@@ -743,21 +836,26 @@ bool CommandProcessor::ExecutePacketType3(RingBuffer* reader, uint32_t packet) {
+@@ -743,21 +838,26 @@ bool CommandProcessor::ExecutePacketType3(RingBuffer* reader, uint32_t packet) {
        break;
      case PM4_MEM_WRITE:
        result = ExecutePacketType3_MEM_WRITE(reader, packet, count);
@@ -258,7 +260,7 @@ index ce08d19bd..a72e7b46e 100644
        break;
      case PM4_DRAW_INDX:
        result = ExecutePacketType3_DRAW_INDX(reader, packet, count);
-@@ -932,11 +1030,44 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(RingBuffer* reader,
+@@ -932,11 +1032,44 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(RingBuffer* reader,
    uint32_t frontbuffer_ptr = reader->ReadAndSwap<uint32_t>();
    uint32_t frontbuffer_width = reader->ReadAndSwap<uint32_t>();
    uint32_t frontbuffer_height = reader->ReadAndSwap<uint32_t>();
@@ -304,7 +306,7 @@ index ce08d19bd..a72e7b46e 100644
    return true;
  }
  
-@@ -974,7 +1105,19 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -974,7 +1107,19 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
                  : register_file_->values[poll_reg_addr];
  
    bool matched = false;
@@ -324,7 +326,7 @@ index ce08d19bd..a72e7b46e 100644
      uint32_t value = value_ref;
      if (is_memory) {
        trace_writer_.WriteMemoryRead(CpuToGpu(poll_reg_addr & ~uint32_t(0x3)),
-@@ -1017,12 +1160,19 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -1017,12 +1162,19 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
        // Wait.
        if (wait >= 0x100) {
          PrepareForWait();
@@ -344,7 +346,7 @@ index ce08d19bd..a72e7b46e 100644
          xe::threading::SyncMemory();
          ReturnFromWait();
  
-@@ -1036,6 +1186,7 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -1036,6 +1188,7 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
      }
    } while (!matched);
  
@@ -353,10 +355,10 @@ index ce08d19bd..a72e7b46e 100644
  }
  
 diff --git a/src/xenia/gpu/command_processor.h b/src/xenia/gpu/command_processor.h
-index ffc8eeffa..7ed7aad63 100644
+index ffc8eeffa..ba4a4906d 100644
 --- a/src/xenia/gpu/command_processor.h
 +++ b/src/xenia/gpu/command_processor.h
-@@ -35,9 +35,45 @@ class ByteStream;
+@@ -35,9 +35,49 @@ class ByteStream;
  
  namespace gpu {
  
@@ -388,6 +390,10 @@ index ffc8eeffa..7ed7aad63 100644
 +extern std::atomic<float> wet_film_grain;
 +extern uint64_t wet_grain_ps_hash;
 +extern uint32_t wet_grain_const;
++// WET: the shape the output is presented at (default 1280:720; widescreen sets
++// the window's, and the game's projection is widened to match).
++extern std::atomic<uint32_t> wet_display_aspect_x;
++extern std::atomic<uint32_t> wet_display_aspect_y;
 +// Called while WAIT_REG_MEM polls a register (set by the runtime).
 +extern void (*wet_register_sync_hook)();
 +// Draw trace helpers shared by the backends.
@@ -402,7 +408,7 @@ index ffc8eeffa..7ed7aad63 100644
  struct SwapState {
    // Lock must be held when changing data in this structure.
    std::mutex mutex;
-@@ -78,6 +114,10 @@ class CommandProcessor {
+@@ -78,6 +118,10 @@ class CommandProcessor {
    virtual ~CommandProcessor();
  
    uint32_t counter() const { return counter_; }
@@ -413,7 +419,7 @@ index ffc8eeffa..7ed7aad63 100644
    void increment_counter() { counter_++; }
  
    Shader* active_vertex_shader() const { return active_vertex_shader_; }
-@@ -270,6 +310,9 @@ class CommandProcessor {
+@@ -270,6 +314,9 @@ class CommandProcessor {
    std::vector<uint32_t> me_bin_;
  
    uint32_t counter_ = 0;
@@ -424,10 +430,23 @@ index ffc8eeffa..7ed7aad63 100644
    uint32_t primary_buffer_ptr_ = 0;
    uint32_t primary_buffer_size_ = 0;
 diff --git a/src/xenia/gpu/d3d12/d3d12_command_processor.cc b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
-index 0ec70a7d1..d12d1a1a7 100644
+index 0ec70a7d1..eb33f2d10 100644
 --- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
 +++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
-@@ -2052,6 +2052,10 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+@@ -1661,7 +1661,12 @@ void D3D12CommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
+ 
+   presenter->RefreshGuestOutput(
+       uint32_t(swap_texture_desc.Width), uint32_t(swap_texture_desc.Height),
++#if XE_WET_RUNTIME
++      wet_display_aspect_x.load(std::memory_order_relaxed),
++      wet_display_aspect_y.load(std::memory_order_relaxed),
++#else
+       1280, 720,
++#endif
+       [this, &swap_texture_srv_desc, frontbuffer_format, swap_texture_resource,
+        &swap_texture_desc](
+           ui::Presenter::GuestOutputRefreshContext& context) -> bool {
+@@ -2052,6 +2057,10 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
      // cache.
      if (!memexport_used_vertex) {
        // This draw has no effect.
@@ -438,7 +457,7 @@ index 0ec70a7d1..d12d1a1a7 100644
        return true;
      }
    }
-@@ -2070,8 +2074,45 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+@@ -2070,8 +2079,45 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
    }
    if (!primitive_processing_result.host_draw_vertex_count) {
      // Nothing to draw.
@@ -484,7 +503,7 @@ index 0ec70a7d1..d12d1a1a7 100644
  
    reg::RB_DEPTHCONTROL normalized_depth_control =
        draw_util::GetNormalizedDepthControl(regs);
-@@ -2467,6 +2508,11 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+@@ -2467,6 +2513,11 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
      }
    }
  
@@ -695,10 +714,25 @@ index e0fd8440d..15115f823 100644
                                    builder_->makeUintConstant(6)));
          {
 diff --git a/src/xenia/gpu/vulkan/vulkan_command_processor.cc b/src/xenia/gpu/vulkan/vulkan_command_processor.cc
-index 7df306c12..987c0046b 100644
+index 7df306c12..ab2b636ad 100644
 --- a/src/xenia/gpu/vulkan/vulkan_command_processor.cc
 +++ b/src/xenia/gpu/vulkan/vulkan_command_processor.cc
-@@ -2194,6 +2194,10 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type,
+@@ -1258,7 +1258,13 @@ void VulkanCommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
+   }
+ 
+   presenter->RefreshGuestOutput(
+-      frontbuffer_width_scaled, frontbuffer_height_scaled, 1280, 720,
++      frontbuffer_width_scaled, frontbuffer_height_scaled,
++#if XE_WET_RUNTIME
++      wet_display_aspect_x.load(std::memory_order_relaxed),
++      wet_display_aspect_y.load(std::memory_order_relaxed),
++#else
++      1280, 720,
++#endif
+       [this, frontbuffer_width_scaled, frontbuffer_height_scaled,
+        frontbuffer_format, swap_texture_view](
+           ui::Presenter::GuestOutputRefreshContext& context) -> bool {
+@@ -2194,6 +2200,10 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type,
      // cache.
      if (memexport_ranges_.empty()) {
        // This draw has no effect.
@@ -709,7 +743,7 @@ index 7df306c12..987c0046b 100644
        return true;
      }
    }
-@@ -2233,6 +2237,10 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type,
+@@ -2233,6 +2243,10 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type,
      }
      if (!primitive_processing_result.host_draw_vertex_count) {
        // Nothing to draw.
@@ -720,7 +754,7 @@ index 7df306c12..987c0046b 100644
        return true;
      }
      // TODO(Triang3l): Tessellation, geometry-type-specific vertex shader,
-@@ -2516,6 +2524,11 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type,
+@@ -2516,6 +2530,11 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type,
      vertex_buffers_resident[vfetch_index >> 6] |= uint64_t(1)
                                                    << (vfetch_index & 63);
    }
@@ -732,7 +766,7 @@ index 7df306c12..987c0046b 100644
  
    // Synchronize the memory pages backing memory scatter export streams, and
    // calculate the range that includes the streams for the buffer barrier.
-@@ -2600,6 +2613,11 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type,
+@@ -2600,6 +2619,11 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type,
                                        memexport_range.size_bytes);
    }
  

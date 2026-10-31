@@ -22,7 +22,7 @@ namespace wet::options
         std::atomic<int> s_fpsOverride{ 0 };   // video mode: temporary 30 FPS (not saved)
         std::atomic<int> s_videoMode{ 1 };
         int s_scale = 1, s_scaleRunning = 1;
-        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_fov{ 90 }, s_mouseAim{ 1 }, s_mouseSens{ 50 }, s_mouseInvert{ 0 }, s_mouseDirect{ 1 }, s_shaderCache{ 1 }, s_asyncShaders{ 1 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 };
+        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_fov{ 90 }, s_widescreen{ 0 }, s_mouseAim{ 1 }, s_mouseSens{ 50 }, s_mouseInvert{ 0 }, s_mouseDirect{ 1 }, s_shaderCache{ 1 }, s_asyncShaders{ 1 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 };
         constexpr const char* kFile = "wet.ini";
         // Mouse button bindings: left, right, middle, back (X1), forward (X2).
         constexpr const char* kMouseKeys[5] = { "mouse_left", "mouse_right", "mouse_middle", "mouse_back", "mouse_forward" };
@@ -94,6 +94,8 @@ namespace wet::options
             std::fprintf(f, "film_grain = %d\n", s_filmGrain.load());
             std::fprintf(f, "# fov: horizontal field of view in degrees at 16:9, 60-130 (90 = the game's own)\n");
             std::fprintf(f, "fov = %d\n", s_fov.load());
+            std::fprintf(f, "# widescreen: 1 = fill wider screens and windows (21:9, 32:9) instead of 16:9 with bars\n");
+            std::fprintf(f, "widescreen = %d\n", s_widescreen.load());
             std::fprintf(f, "# mouse_aim: 1 = the mouse turns the camera / aims (right stick) while the game window is active\n");
             std::fprintf(f, "mouse_aim = %d\n", s_mouseAim.load());
             std::fprintf(f, "# mouse_sensitivity: 1-100; mouse_invert_y: 1 = up/down inverted\n");
@@ -166,6 +168,7 @@ namespace wet::options
                 else if (!std::strcmp(key, "mouse_direct")) s_mouseDirect = value != 0;
                 else if (!std::strcmp(key, "film_grain")) s_filmGrain = Clamp(value, 0, 100);
                 else if (!std::strcmp(key, "fov")) s_fov = Clamp(value, 60, 130);
+                else if (!std::strcmp(key, "widescreen")) s_widescreen = value != 0;
                 else if (!std::strcmp(key, "vibration")) s_vibration = value != 0;
                 else if (!std::strcmp(key, "gpu_wait")) s_gpuWait = value != 0;
                 else if (!std::strcmp(key, "adaptive_watch")) s_adaptiveWatch = value != 0;
@@ -261,6 +264,8 @@ namespace wet::options
     std::string MouseBinding(int button) { return button >= 0 && button < 5 ? s_mouseBind[button] : std::string(); }
     void SetFilmGrain(int v) { s_filmGrain = Clamp(v, 0, 100); Save(); }
     int Fov() { return s_fov.load(std::memory_order_relaxed); }
+    bool Widescreen() { return s_widescreen.load(std::memory_order_relaxed) != 0; }
+    void SetWidescreen(bool v) { s_widescreen = v; Save(); }
     void SetFov(int v) { s_fov = Clamp(v, 60, 130); Save(); }
     int Sharpness() { return s_sharpness; }
     void SetSharpness(int v) { s_sharpness = Clamp(v, 0, 100); Save(); }

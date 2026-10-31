@@ -816,6 +816,7 @@ GUEST_IMPORT(VdSwap)
     }
     uint64_t n = ++s_swaps;
     TraceEvent('S', uint32_t(n));
+    renderer::DisplayAspect();
     if (n <= 3 || (n & (n - 1)) == 0)
     {
         uint64_t faults, protects, checks, inval, cooled;

@@ -99,7 +99,7 @@ namespace
     enum : int
     {
         kFps = 100, kResolution, kFullscreen, kShowFps,
-        kFilter, kSharpness, kSharpnessValue, kAntialiasing, kGrain, kGrainValue, kFov, kFovValue,
+        kFilter, kSharpness, kSharpnessValue, kAntialiasing, kGrain, kGrainValue, kFov, kFovValue, kWidescreen,
         kMouseAim, kSensitivity, kSensitivityValue, kInvertY, kVibration,
         kShaderCache, kVideoMode, kPopups, kAsyncShaders,
         kStatus, kPlay, kSaves, kClearShaders, kKeyboard,
@@ -323,6 +323,7 @@ namespace
         s_ini.Set("antialiasing", Selected(kAntialiasing));
         s_ini.Set("film_grain", Pos(kGrain));
         s_ini.Set("fov", Pos(kFov));
+        s_ini.Set("widescreen", Checked(kWidescreen));
         s_ini.Set("mouse_aim", Checked(kMouseAim));
         s_ini.Set("mouse_sensitivity", Pos(kSensitivity));
         s_ini.Set("mouse_invert_y", Checked(kInvertY));
@@ -395,6 +396,7 @@ namespace
         Check(kFullscreen, L"Fullscreen", 22, 90, ini.Get("fullscreen", 0) != 0, 140);
         Check(kShowFps, L"Show FPS counter", 170, 90, ini.Get("show_fps", 0) != 0, 160);
         Check(kVideoMode, L"Videos at 30 FPS (avoids video flicker)", 22, 114, ini.Get("video_mode", 1) != 0, 300);
+        Check(kWidescreen, L"Widescreen / ultrawide (fill 21:9 and 32:9 screens)", 22, 140, ini.Get("widescreen", 0) != 0, 310);
 
         // Graphics
         Group(L"Graphics", 350, 8, 330, 164);

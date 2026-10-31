@@ -423,14 +423,40 @@ namespace wet::camscan
                 return;
             }
             std::fprintf(report, "# Perspective matrices: address, x scale, y scale, aspect (y/x), vertical / horizontal FOV\n");
-            std::vector<Candidate> found;
+            std::vector<Candidate> found, ortho;
             static constexpr int kZero[] = { 1, 2, 3, 4, 6, 7, 8, 9, 12, 13, 15 };
+            static constexpr int kOrthoZero[] = { 1, 2, 4, 6, 8, 9 };
             for (auto& r : Snapshot())
             {
                 const uint8_t* d = r.data.data();
                 for (size_t off = 0; off + 64 <= r.data.size(); off += 4)
                 {
                     float m0 = BeFloat(d + off), m5 = BeFloat(d + off + 20);
+                    // 2D (orthographic): scale, +-scale, w = 1, translation in one
+                    // row or column, not the identity.
+                    if (BeFloat(d + off + 60) == 1.0f && m0 != 0.0f && m5 != 0.0f && std::fabs(m0) < 4.0f &&
+                        std::fabs(m5) < 4.0f && !(m0 == 1.0f && m5 == 1.0f) && ortho.size() < 400)
+                    {
+                        bool ok = true;
+                        for (int z : kOrthoZero)
+                            if (BeFloat(d + off + z * 4) != 0.0f)
+                            {
+                                ok = false;
+                                break;
+                            }
+                        bool col = BeFloat(d + off + 12) == 0.0f && BeFloat(d + off + 28) == 0.0f && BeFloat(d + off + 44) == 0.0f;
+                        bool row = BeFloat(d + off + 48) == 0.0f && BeFloat(d + off + 52) == 0.0f && BeFloat(d + off + 56) == 0.0f;
+                        if (ok && (col || row) && std::isfinite(m0) && std::isfinite(m5))
+                        {
+                            Candidate c{};
+                            c.addr = r.guest + uint32_t(off);
+                            c.v[0] = m0;
+                            c.v[1] = m5;
+                            c.v[2] = col ? BeFloat(d + off + 48) : BeFloat(d + off + 12);   // x translation
+                            c.v[3] = col ? BeFloat(d + off + 52) : BeFloat(d + off + 28);   // y translation
+                            ortho.push_back(c);
+                        }
+                    }
                     if (!(m0 > 0.2f && m0 < 8.0f && m5 > 0.2f && m5 < 8.0f))
                         continue;
                     float m11 = BeFloat(d + off + 44), m14 = BeFloat(d + off + 56);
@@ -456,9 +482,19 @@ namespace wet::camscan
             for (auto& c : found)
                 std::fprintf(report, "%08X  x %.5f  y %.5f  aspect %.4f  vfov %.2f  hfov %.2f\n", c.addr, c.v[0], c.v[1],
                              c.v[1] / c.v[0], 2 * std::atan(1.0 / c.v[1]) * kDeg, 2 * std::atan(1.0 / c.v[0]) * kDeg);
-            Log("Projection scan: %zu perspective matrices", found.size());
-            if (found.size() > 150)
-                found.resize(150);
+            std::fprintf(report, "\n# 2D (orthographic) matrices: address, x scale, y scale, implied width x height, x / y translation\n");
+            for (auto& c : ortho)
+                std::fprintf(report, "%08X  x %.6f  y %.6f  (%.1f x %.1f)  tx %.4f  ty %.4f\n", c.addr, c.v[0], c.v[1],
+                             2.0 / std::fabs(c.v[0]), 2.0 / std::fabs(c.v[1]), c.v[2], c.v[3]);
+            Log("Projection scan: %zu perspective, %zu 2D matrices", found.size(), ortho.size());
+            // Watch the first wide perspective ones and the 2D ones.
+            std::vector<Candidate> wide;
+            for (auto& c : found)
+                if (c.v[1] / c.v[0] > 1.2f && wide.size() < 60)
+                    wide.push_back(c);
+            found = wide;
+            for (size_t i = 0; i < ortho.size() && found.size() < 150; i++)
+                found.push_back(ortho[i]);
             // Watch each matrix's x scale (m00) for 2 s.
             {
                 std::lock_guard lock(s_watchLock);
@@ -492,7 +528,7 @@ namespace wet::camscan
                 s_watching = false;
                 ReleaseAll();
             }
-            std::fprintf(report, "\n== Writers of m00 (address: host instruction x count; resolve exe:offsets with the map) ==\n");
+            std::fprintf(report, "\n== Writers of x scale (address: host instruction x count; resolve exe:offsets with the map) ==\n");
             for (auto& [key, count] : s_writers)
                 std::fprintf(report, "%08X: %s x%u\n", key.first, Describe(key.second).c_str(), count);
             std::fclose(report);

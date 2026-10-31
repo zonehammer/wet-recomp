@@ -30,6 +30,7 @@
 #include <cctype>
 #include <condition_variable>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -225,6 +226,17 @@ namespace
     std::unique_ptr<xe::kernel::KernelState> s_kernel;
     std::unique_ptr<xe::gpu::GraphicsSystem> s_graphics;
     uint32_t s_resolutionScale = 1;   // rendering resolution = 1280x720 x this
+
+    // Width / height of the main monitor (16:9 if unknown).
+    float ScreenAspect()
+    {
+#if XE_PLATFORM_WIN32
+        int w = GetSystemMetrics(SM_CXSCREEN), h = GetSystemMetrics(SM_CYSCREEN);
+        if (w > 0 && h > 0)
+            return float(w) / float(h);
+#endif
+        return 16.0f / 9.0f;
+    }
     const char* s_backend = "Vulkan";
     std::atomic<bool> s_running{ false };
 
@@ -251,8 +263,10 @@ namespace
             bool ok = self->app->Initialize();
             if (ok)
             {
-                self->window = xe::ui::Window::Create(*self->app, "WET (recompiled)", s_resolutionScale >= 2 ? 1920 : 1280,
-                                                      s_resolutionScale >= 2 ? 1080 : 720);
+                uint32_t height = s_resolutionScale >= 2 ? 1080 : 720;
+                float aspect = wet::options::Widescreen() ? std::max(16.0f / 9.0f, ScreenAspect()) : 16.0f / 9.0f;
+                self->window = xe::ui::Window::Create(*self->app, "WET (recompiled)", uint32_t(height * aspect + 0.5f),
+                                                      height);
                 ok = self->window && (self->window->AddListener(self), self->window->Open());
             }
             {
@@ -721,6 +735,10 @@ namespace
                 ApplyPostProcessing();
             }
 
+            bool wide = wet::options::Widescreen();
+            if (ImGui::Checkbox("Widescreen / ultrawide (fill wider screens; sharpest after a restart)", &wide))
+                wet::options::SetWidescreen(wide);
+
             int fov = wet::options::Fov(), fovPick = fov;
             ImGui::SliderInt("Field of view (90 = original)", &fovPick, 60, 130, "%d deg");
             if (fovPick != fov)
@@ -981,6 +999,18 @@ namespace wet::renderer
         // Rendering resolution: the game's 1280x720 times the option's scale.
         cvars::draw_resolution_scale_x = int32_t(s_resolutionScale);
         cvars::draw_resolution_scale_y = int32_t(s_resolutionScale);
+        // Widescreen: the 16:9 frame is shown stretched across the wider screen
+        // (with the game's view widened to match), so render more columns to keep
+        // it sharp: X scale = Y scale x how much wider than 16:9 the screen is.
+        if (float wide = ScreenAspect() / (16.0f / 9.0f); wet::options::Widescreen() && wide > 1.01f)
+        {
+            int x = int(std::ceil(float(s_resolutionScale) * wide - 0.1f));
+            cvars::draw_resolution_scale_x = std::clamp(x, int(s_resolutionScale), 6);
+            char text[128];
+            std::snprintf(text, sizeof(text), "Renderer: widescreen %.2f:1 - rendering at %dx%d", ScreenAspect(),
+                          1280 * cvars::draw_resolution_scale_x, 720 * cvars::draw_resolution_scale_y);
+            wet::renderer_host::Log(text);
+        }
         if (const char* level = std::getenv("WET_GPU_LOG_LEVEL"))
             cvars::log_level = std::atoi(level);
         xe::InitializeLogging("xenia_gpu");
@@ -1139,6 +1169,28 @@ namespace wet::renderer
     void SetVsyncRate(uint32_t hz) { xe::gpu::wet_vsync_hz = hz; }
 
     void SetResolutionScale(uint32_t scale) { s_resolutionScale = std::clamp<uint32_t>(scale, 1, 3); }
+
+    float DisplayAspect()
+    {
+        constexpr float k169 = 16.0f / 9.0f;
+        uint32_t w = 1280, h = 720;
+#if XE_PLATFORM_WIN32
+        if (wet::options::Widescreen() && s_window && s_window->window)
+        {
+            uint32_t ww = s_window->window->GetActualPhysicalWidth(), wh = s_window->window->GetActualPhysicalHeight();
+            if (ww && wh && float(ww) / float(wh) > k169 + 0.01f)
+            {
+                w = ww;
+                h = wh;
+                if (float(w) / float(h) > 4.0f)
+                    w = h * 4;   // wider than 36:9 isn't worth it
+            }
+        }
+#endif
+        xe::gpu::wet_display_aspect_x.store(w, std::memory_order_relaxed);
+        xe::gpu::wet_display_aspect_y.store(h, std::memory_order_relaxed);
+        return float(w) / float(h);
+    }
 
     void ToggleFullscreen()
     {
