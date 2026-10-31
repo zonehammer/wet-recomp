@@ -1189,6 +1189,8 @@ namespace wet::renderer
 #endif
         xe::gpu::wet_display_aspect_x.store(w, std::memory_order_relaxed);
         xe::gpu::wet_display_aspect_y.store(h, std::memory_order_relaxed);
+        // The HUD (drawn after the final composite) stays 16:9 in the middle.
+        xe::gpu::wet_hud_squeeze.store((16.0f / 9.0f) * float(h) / float(w), std::memory_order_relaxed);
         return float(w) / float(h);
     }
 

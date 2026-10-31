@@ -107,7 +107,7 @@ index 8f6087b05..47c87eec0 100644
  
  static void set_name(HANDLE thread, const std::string_view name) {
 diff --git a/src/xenia/gpu/command_processor.cc b/src/xenia/gpu/command_processor.cc
-index ce08d19bd..c3e8f9bc3 100644
+index ce08d19bd..007e90746 100644
 --- a/src/xenia/gpu/command_processor.cc
 +++ b/src/xenia/gpu/command_processor.cc
 @@ -9,6 +9,9 @@
@@ -120,7 +120,7 @@ index ce08d19bd..c3e8f9bc3 100644
  #include <algorithm>
  #include <cinttypes>
  #include <cmath>
-@@ -32,6 +35,96 @@
+@@ -32,6 +35,111 @@
  namespace xe {
  namespace gpu {
  
@@ -135,6 +135,21 @@ index ce08d19bd..c3e8f9bc3 100644
 +uint32_t wet_grain_const = (256 + 14) * 4;  // pixel shader c14.x
 +std::atomic<uint32_t> wet_display_aspect_x{1280};
 +std::atomic<uint32_t> wet_display_aspect_y{720};
++std::atomic<float> wet_hud_squeeze{1.0f};
++
++float WetHudSqueeze(const Shader* pixel_shader, uint32_t swap_count) {
++  // The frame (swap count) the composite was last drawn in; draws after it in the
++  // same frame are the HUD.
++  static uint32_t composite_frame = ~0u;
++  if (pixel_shader && pixel_shader->ucode_data_hash() == wet_grain_ps_hash) {
++    composite_frame = swap_count;
++    return 1.0f;
++  }
++  if (composite_frame != swap_count) {
++    return 1.0f;
++  }
++  return wet_hud_squeeze.load(std::memory_order_relaxed);
++}
 +void (*wet_register_sync_hook)() = nullptr;
 +
 +void WetTraceDraw(const RegisterFile& regs, const Memory& memory,
@@ -217,7 +232,7 @@ index ce08d19bd..c3e8f9bc3 100644
  using namespace xe::gpu::xenos;
  
  CommandProcessor::CommandProcessor(GraphicsSystem* graphics_system,
-@@ -244,6 +337,7 @@ void CommandProcessor::WorkerThreadMain() {
+@@ -244,6 +352,7 @@ void CommandProcessor::WorkerThreadMain() {
        xe::store_and_swap<uint32_t>(
            memory_->TranslatePhysical(read_ptr_writeback_ptr_), read_ptr_index_);
      }
@@ -225,7 +240,7 @@ index ce08d19bd..c3e8f9bc3 100644
  
      // FIXME: We're supposed to process the WAIT_UNTIL register at this point,
      // but no games seem to actually use it.
-@@ -349,6 +443,7 @@ void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
+@@ -349,6 +458,7 @@ void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
        uint32_t scratch_addr = regs.values[XE_GPU_REG_SCRATCH_ADDR];
        uint32_t mem_addr = scratch_addr + (scratch_reg * 4);
        xe::store_and_swap<uint32_t>(memory_->TranslatePhysical(mem_addr), value);
@@ -233,7 +248,7 @@ index ce08d19bd..c3e8f9bc3 100644
      }
    } else {
      switch (index) {
-@@ -743,21 +838,26 @@ bool CommandProcessor::ExecutePacketType3(RingBuffer* reader, uint32_t packet) {
+@@ -743,21 +853,26 @@ bool CommandProcessor::ExecutePacketType3(RingBuffer* reader, uint32_t packet) {
        break;
      case PM4_MEM_WRITE:
        result = ExecutePacketType3_MEM_WRITE(reader, packet, count);
@@ -260,7 +275,7 @@ index ce08d19bd..c3e8f9bc3 100644
        break;
      case PM4_DRAW_INDX:
        result = ExecutePacketType3_DRAW_INDX(reader, packet, count);
-@@ -932,11 +1032,44 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(RingBuffer* reader,
+@@ -932,11 +1047,44 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(RingBuffer* reader,
    uint32_t frontbuffer_ptr = reader->ReadAndSwap<uint32_t>();
    uint32_t frontbuffer_width = reader->ReadAndSwap<uint32_t>();
    uint32_t frontbuffer_height = reader->ReadAndSwap<uint32_t>();
@@ -306,7 +321,7 @@ index ce08d19bd..c3e8f9bc3 100644
    return true;
  }
  
-@@ -974,7 +1107,19 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -974,7 +1122,19 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
                  : register_file_->values[poll_reg_addr];
  
    bool matched = false;
@@ -326,7 +341,7 @@ index ce08d19bd..c3e8f9bc3 100644
      uint32_t value = value_ref;
      if (is_memory) {
        trace_writer_.WriteMemoryRead(CpuToGpu(poll_reg_addr & ~uint32_t(0x3)),
-@@ -1017,12 +1162,19 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -1017,12 +1177,19 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
        // Wait.
        if (wait >= 0x100) {
          PrepareForWait();
@@ -346,7 +361,7 @@ index ce08d19bd..c3e8f9bc3 100644
          xe::threading::SyncMemory();
          ReturnFromWait();
  
-@@ -1036,6 +1188,7 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -1036,6 +1203,7 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
      }
    } while (!matched);
  
@@ -355,10 +370,10 @@ index ce08d19bd..c3e8f9bc3 100644
  }
  
 diff --git a/src/xenia/gpu/command_processor.h b/src/xenia/gpu/command_processor.h
-index ffc8eeffa..ba4a4906d 100644
+index ffc8eeffa..1ef8b8872 100644
 --- a/src/xenia/gpu/command_processor.h
 +++ b/src/xenia/gpu/command_processor.h
-@@ -35,9 +35,49 @@ class ByteStream;
+@@ -35,9 +35,55 @@ class ByteStream;
  
  namespace gpu {
  
@@ -394,6 +409,12 @@ index ffc8eeffa..ba4a4906d 100644
 +// the window's, and the game's projection is widened to match).
 +extern std::atomic<uint32_t> wet_display_aspect_x;
 +extern std::atomic<uint32_t> wet_display_aspect_y;
++// WET: widescreen HUD. Draws after the final composite (the film grain pixel
++// shader) in a frame are the HUD and menus; their x is multiplied by this (16:9
++// width / display width, 1 = off) so they stay 16:9 in the middle of the screen.
++extern std::atomic<float> wet_hud_squeeze;
++// Called per draw by the backends: the factor for this draw (1 = leave it).
++float WetHudSqueeze(const Shader* pixel_shader, uint32_t swap_count);
 +// Called while WAIT_REG_MEM polls a register (set by the runtime).
 +extern void (*wet_register_sync_hook)();
 +// Draw trace helpers shared by the backends.
@@ -408,7 +429,7 @@ index ffc8eeffa..ba4a4906d 100644
  struct SwapState {
    // Lock must be held when changing data in this structure.
    std::mutex mutex;
-@@ -78,6 +118,10 @@ class CommandProcessor {
+@@ -78,6 +124,10 @@ class CommandProcessor {
    virtual ~CommandProcessor();
  
    uint32_t counter() const { return counter_; }
@@ -419,7 +440,7 @@ index ffc8eeffa..ba4a4906d 100644
    void increment_counter() { counter_++; }
  
    Shader* active_vertex_shader() const { return active_vertex_shader_; }
-@@ -270,6 +314,9 @@ class CommandProcessor {
+@@ -270,6 +320,9 @@ class CommandProcessor {
    std::vector<uint32_t> me_bin_;
  
    uint32_t counter_ = 0;
@@ -430,7 +451,7 @@ index ffc8eeffa..ba4a4906d 100644
    uint32_t primary_buffer_ptr_ = 0;
    uint32_t primary_buffer_size_ = 0;
 diff --git a/src/xenia/gpu/d3d12/d3d12_command_processor.cc b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
-index 0ec70a7d1..eb33f2d10 100644
+index 0ec70a7d1..f43fa6f10 100644
 --- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
 +++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
 @@ -1661,7 +1661,12 @@ void D3D12CommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
@@ -503,7 +524,21 @@ index 0ec70a7d1..eb33f2d10 100644
  
    reg::RB_DEPTHCONTROL normalized_depth_control =
        draw_util::GetNormalizedDepthControl(regs);
-@@ -2467,6 +2513,11 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+@@ -2169,6 +2215,13 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+           render_target_cache_->depth_float24_convert_in_pixel_shader(),
+       host_render_targets_used, pixel_shader && pixel_shader->writes_depth(),
+       viewport_info);
++#if XE_WET_RUNTIME
++  if (float squeeze = WetHudSqueeze(pixel_shader, wet_swap_count());
++      squeeze != 1.0f) {
++    viewport_info.ndc_scale[0] *= squeeze;
++    viewport_info.ndc_offset[0] *= squeeze;
++  }
++#endif
+   draw_util::Scissor scissor;
+   draw_util::GetScissor(regs, scissor);
+   scissor.offset[0] *= draw_resolution_scale_x;
+@@ -2467,6 +2520,11 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
      }
    }
  
@@ -714,7 +749,7 @@ index e0fd8440d..15115f823 100644
                                    builder_->makeUintConstant(6)));
          {
 diff --git a/src/xenia/gpu/vulkan/vulkan_command_processor.cc b/src/xenia/gpu/vulkan/vulkan_command_processor.cc
-index 7df306c12..ab2b636ad 100644
+index 7df306c12..6baab4e5f 100644
 --- a/src/xenia/gpu/vulkan/vulkan_command_processor.cc
 +++ b/src/xenia/gpu/vulkan/vulkan_command_processor.cc
 @@ -1258,7 +1258,13 @@ void VulkanCommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
@@ -754,7 +789,21 @@ index 7df306c12..ab2b636ad 100644
        return true;
      }
      // TODO(Triang3l): Tessellation, geometry-type-specific vertex shader,
-@@ -2516,6 +2530,11 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type,
+@@ -2442,6 +2456,13 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type,
+       device_properties.maxViewportDimensions[1], true,
+       normalized_depth_control, false, host_render_targets_used,
+       pixel_shader && pixel_shader->writes_depth(), viewport_info);
++#if XE_WET_RUNTIME
++  if (float squeeze = WetHudSqueeze(pixel_shader, wet_swap_count());
++      squeeze != 1.0f) {
++    viewport_info.ndc_scale[0] *= squeeze;
++    viewport_info.ndc_offset[0] *= squeeze;
++  }
++#endif
+ 
+   // Update dynamic graphics pipeline state.
+   UpdateDynamicState(viewport_info, primitive_polygonal,
+@@ -2516,6 +2537,11 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type,
      vertex_buffers_resident[vfetch_index >> 6] |= uint64_t(1)
                                                    << (vfetch_index & 63);
    }
@@ -766,7 +815,7 @@ index 7df306c12..ab2b636ad 100644
  
    // Synchronize the memory pages backing memory scatter export streams, and
    // calculate the range that includes the streams for the buffer barrier.
-@@ -2600,6 +2619,11 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type,
+@@ -2600,6 +2626,11 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type,
                                        memexport_range.size_bytes);
    }
  
