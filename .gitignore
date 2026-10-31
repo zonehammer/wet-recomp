@@ -25,3 +25,4 @@ __pycache__/
 
 # Your own launcher icon (may be game artwork: keep it out of git)
 /launcher/launcher.ico
+/wet_image.bin
