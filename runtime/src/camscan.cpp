@@ -167,6 +167,11 @@ namespace wet::camscan
                 for (float v : x.v)
                     if (!Plausible(v))
                         return false;
+                // Values flipping between two exact states (double-buffered render
+                // data, flags) repeat bit for bit; a turned angle never lands exactly
+                // where it was.
+                if (x.v[7] == x.v[1] || x.v[4] == x.v[0] || x.v[6] == x.v[0])
+                    return false;
                 // An angle holds where it was left (allowing for a little smoothing).
                 float push = std::fabs(x.v[1] - x.v[0]);
                 return std::fabs(x.v[3] - x.v[1]) <= 0.5f * push;
@@ -194,11 +199,17 @@ namespace wet::camscan
         }
 
         // ---- Write watchpoints on the best candidates ----
+        // Each watched guest page is read-only in every view it has; a write records
+        // the instruction, unprotects just that page for the one instruction (the
+        // thread single-steps) and the step handler protects it again. Writes to
+        // physical pages also go through PrepareHostWrite, so the GPU emulation's
+        // own write watches still see them.
         std::mutex s_watchLock;
-        std::vector<std::pair<uint8_t*, uint32_t>> s_watchPages;   // host page, guest page
+        std::map<uintptr_t, uint32_t> s_watchPages;                // host page -> guest page
         std::map<uint32_t, uint32_t> s_watchAddrs;                 // guest candidate address -> index
         std::map<std::pair<uint32_t, uintptr_t>, uint32_t> s_writers; // (candidate, host pc) -> count
         std::atomic<bool> s_watching{ false };
+        thread_local uintptr_t t_steppingPage = 0;
 
         uint32_t HostToGuest(uintptr_t host)
         {
@@ -213,35 +224,50 @@ namespace wet::camscan
             return uint32_t(off);
         }
 
-        void ProtectAll(bool readOnly)
+        bool Writable(uintptr_t page)
         {
-            for (auto& [page, guest] : s_watchPages)
-                readOnly ? os::ProtectReadOnly(page, 0x1000) : os::ProtectReadWrite(page, 0x1000);
+            MEMORY_BASIC_INFORMATION mbi;
+            return VirtualQuery(reinterpret_cast<void*>(page), &mbi, sizeof(mbi)) &&
+                   (mbi.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE));
         }
 
         int OnDiagFault(uintptr_t host, uintptr_t pc)
         {
-            std::lock_guard lock(s_watchLock);
             uintptr_t page = host & ~uintptr_t(0xFFF);
-            bool ours = false;
-            for (auto& [p, g] : s_watchPages)
-                ours = ours || uintptr_t(p) == page;
-            if (!ours)
+            std::lock_guard lock(s_watchLock);
+            auto it = s_watchPages.find(page);
+            if (it == s_watchPages.end())
                 return 0;
             if (!s_watching.load())
-                return 2;   // released while this write was faulting: just retry it
+                return Writable(page) ? 2 : 0;   // released meanwhile: retry; else not ours any more
             uint32_t guest = HostToGuest(host) & ~3u;
             if (s_watchAddrs.count(guest))
                 s_writers[{ guest, pc }]++;
-            ProtectAll(false);   // let this one write through; the step handler re-arms
+            if (it->second >= 0xA0000000u)
+                PrepareHostWrite(it->second, 0x1000);   // the GPU watches' invalidation
+            os::ProtectReadWrite(reinterpret_cast<void*>(page), 0x1000);
+            t_steppingPage = page;
             return 1;
         }
 
         void OnDiagStep()
         {
+            uintptr_t page = t_steppingPage;
+            t_steppingPage = 0;
             std::lock_guard lock(s_watchLock);
-            if (s_watching.load())
-                ProtectAll(true);
+            if (page && s_watching.load())
+                os::ProtectReadOnly(reinterpret_cast<void*>(page), 0x1000);
+        }
+
+        void ReleaseAll()
+        {
+            for (auto& [page, guest] : s_watchPages)
+            {
+                if (guest >= 0xA0000000u)
+                    RestorePhysicalPageProtection((guest - 0xA0000000u) / 0x1000);
+                else
+                    os::ProtectReadWrite(reinterpret_cast<void*>(page), 0x1000);
+            }
         }
 
         std::string Describe(uintptr_t pc)
@@ -276,19 +302,18 @@ namespace wet::camscan
                             PhysicalPageViews((a - 0xA0000000u) / 0x1000, views);
                             for (auto* v : views)
                                 if (v)
-                                    s_watchPages.push_back({ v, gpage });
+                                    s_watchPages[uintptr_t(v)] = gpage;
                         }
                         else
-                            s_watchPages.push_back({ g_mem.base + gpage, gpage });
+                            s_watchPages[uintptr_t(g_mem.base + gpage)] = gpage;
                     }
                 };
                 add(yaw);
                 add(pitch);
-                std::sort(s_watchPages.begin(), s_watchPages.end());
-                s_watchPages.erase(std::unique(s_watchPages.begin(), s_watchPages.end()), s_watchPages.end());
                 os::SetDiagnosticWatch(OnDiagFault, OnDiagStep);
                 s_watching = true;
-                ProtectAll(true);
+                for (auto& [page, guest] : s_watchPages)
+                    os::ProtectReadOnly(reinterpret_cast<void*>(page), 0x1000);
             }
             // Turn both ways meanwhile so the angles are written.
             Hold(32767, 0, 0.6);
@@ -299,7 +324,7 @@ namespace wet::camscan
             {
                 std::lock_guard lock(s_watchLock);
                 s_watching = false;
-                ProtectAll(false);
+                ReleaseAll();
             }
             // The handler stays installed: a write that faulted just before the pages
             // were released retries instead of crashing (OnDiagFault returns 2).

@@ -393,6 +393,7 @@ namespace wet
 
     void PhysicalPageViews(uint32_t page, uint8_t* out[3]) { PageViews(page, out); }
 
+
     static void SetRangeProtection(uint32_t firstPage, uint32_t count, bool readOnly)
     {
         uint8_t* views[3];
@@ -411,6 +412,15 @@ namespace wet
         }
     }
     static void SetPageProtection(uint32_t page, bool readOnly) { SetRangeProtection(page, 1, readOnly); }
+
+    void RestorePhysicalPageProtection(uint32_t page)
+    {
+        std::lock_guard lock(s_watchLock);
+        if (page >= kPhysPages)
+            return;
+        bool readOnly = !s_watched.empty() && s_watched[page] == kWatchProtected;
+        SetRangeProtection(page, 1, readOnly);
+    }
 
     static std::atomic<uint64_t> s_watchFaults{0}, s_protectCalls{0};
 
