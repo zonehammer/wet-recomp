@@ -27,6 +27,10 @@ namespace wet::os
     // if it made the access valid (the faulting instruction is then retried).
     using WriteFaultHandler = bool (*)(uintptr_t hostAddress);
     void SetWriteFaultHandler(WriteFaultHandler handler);
+    // The instruction of the write fault being handled on this thread (diagnostics).
+    uintptr_t LastFaultPc();
+    // Offset of a code address in the exe (0 if it's elsewhere), for the map.
+    uintptr_t ExeOffset(uintptr_t pc);
     // Diagnostic write watchpoints (camscan.cpp), checked before everything else:
     // the fault handler gets the written address and the writing instruction and
     // returns true if the page is one of its own (it unprotects it); the faulting

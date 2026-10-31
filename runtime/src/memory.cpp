@@ -443,6 +443,46 @@ namespace wet
         armed ? os::ProtectReadOnly(p, kHostPage) : os::ProtectReadWrite(p, kHostPage);
     }
 
+    // ---- Diagnostics: who invalidates the front buffers ----
+    // At 1440p / 4K a front buffer exists only in Xenia's scaled copy; any
+    // invalidation of its pages makes Xenia forget that copy (a black or stale
+    // frame). Every invalidation inside the last front buffers is logged (first
+    // ones, then powers of two) with its source: F = guest CPU write (with the
+    // host instruction), H = hot page changed, P = host write (runtime).
+    static std::atomic<uint32_t> s_fbStart[3], s_fbEnd[3];
+    static std::atomic<uint32_t> s_fbNext{ 0 }, s_fbHits{ 0 };
+
+    void NoteFrontBuffer(uint32_t physStart, uint32_t length)
+    {
+        physStart &= 0x1FFFFFFF;
+        for (int i = 0; i < 3; i++)
+            if (s_fbStart[i].load(std::memory_order_relaxed) == physStart)
+                return;
+        uint32_t slot = s_fbNext.fetch_add(1) % 3;
+        s_fbEnd[slot] = physStart + length;
+        s_fbStart[slot] = physStart;
+    }
+
+    static void FrontBufferHit(char source, uint32_t page, uint32_t pages)
+    {
+        uint32_t a = page * kHostPage, b = a + pages * kHostPage;
+        for (int i = 0; i < 3; i++)
+        {
+            uint32_t s = s_fbStart[i].load(std::memory_order_relaxed), e = s_fbEnd[i].load(std::memory_order_relaxed);
+            if (s && a < e && b > s)
+            {
+                uint32_t n = s_fbHits.fetch_add(1) + 1;
+                if (n <= 40 || (n & (n - 1)) == 0)
+                {
+                    uintptr_t off = source == 'F' ? os::ExeOffset(os::LastFaultPc()) : 0;
+                    Log("Front buffer %08X invalidated (%c) at %08X, %u page(s), by exe:%llx #%u", s, source, a, pages,
+                        (unsigned long long)off, n);
+                }
+                return;
+            }
+        }
+    }
+
     static bool OnWriteFault(uintptr_t host)
     {
         uintptr_t base = uintptr_t(g_mem.base);
@@ -483,6 +523,7 @@ namespace wet
         // Outside the lock: the callback takes the renderer's own locks, and the
         // renderer may be adding watches meanwhile.
         s_watchFaults.fetch_add(1, std::memory_order_relaxed);
+        FrontBufferHit('F', page, 1);
         if (s_watchCallback)
             s_watchCallback(page * kHostPage, kHostPage);
         return true;
@@ -523,6 +564,8 @@ namespace wet
                 p = run;
             }
         }
+        for (auto& [p, n] : runs)
+            FrontBufferHit('P', p, n);
         if (s_watchCallback)
             for (auto& [p, n] : runs)
                 s_watchCallback(p * kHostPage, n * kHostPage);
@@ -674,6 +717,7 @@ namespace wet
             size_t j = i + 1;
             while (j < changed.size() && changed[j] == changed[j - 1] + 1)
                 j++;
+            FrontBufferHit('H', changed[i], uint32_t(j - i));
             s_watchCallback(changed[i] * kHostPage, uint32_t(j - i) * kHostPage);
             i = j;
         }

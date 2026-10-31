@@ -794,6 +794,8 @@ GUEST_IMPORT(VdSwap)
     uint32_t front = frontPtr ? Ld32(frontPtr) : 0;
     uint32_t width = widthPtr ? Ld32(widthPtr) : 0, height = heightPtr ? Ld32(heightPtr) : 0;
     uint32_t frontPhys = ViewToPhysical(front);
+    if (front && width && height)
+        NoteFrontBuffer(frontPhys, width * height * 4 + 0x2000);
     if (buffer)
     {
         uint32_t o = buffer;

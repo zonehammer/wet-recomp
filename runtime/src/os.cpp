@@ -49,6 +49,7 @@ namespace wet::os
 
     static HANDLE s_physicalSection = nullptr;
     static WriteFaultHandler s_writeFaultHandler = nullptr;
+    static thread_local uintptr_t t_faultPc = 0;
 
     // Placeholder APIs (Windows 10 1803+), loaded at run time so older headers work.
     using VirtualAlloc2Fn = PVOID(WINAPI*)(HANDLE, PVOID, SIZE_T, ULONG, ULONG, void*, ULONG);
@@ -153,6 +154,16 @@ namespace wet::os
         return VirtualProtect(p, size, PAGE_READWRITE, &old) != 0;
     }
     void SetWriteFaultHandler(WriteFaultHandler handler) { s_writeFaultHandler = handler; }
+    uintptr_t LastFaultPc() { return t_faultPc; }
+    uintptr_t ExeOffset(uintptr_t pc)
+    {
+        HMODULE mod = nullptr;
+        if (pc && GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                     reinterpret_cast<LPCWSTR>(pc), &mod) &&
+            mod == GetModuleHandleW(nullptr))
+            return pc - uintptr_t(mod);
+        return 0;
+    }
 
     // First in line for every exception: resolves write-watch faults.
     static DiagFaultHandler s_diagFault = nullptr;
@@ -189,7 +200,7 @@ namespace wet::os
         }
         if (rec->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && rec->NumberParameters >= 2 &&
             rec->ExceptionInformation[0] == 1 && s_writeFaultHandler &&
-            s_writeFaultHandler(uintptr_t(rec->ExceptionInformation[1])))
+            (t_faultPc = uintptr_t(rec->ExceptionAddress), s_writeFaultHandler(uintptr_t(rec->ExceptionInformation[1]))))
             return EXCEPTION_CONTINUE_EXECUTION;
         return EXCEPTION_CONTINUE_SEARCH;
     }
@@ -351,6 +362,8 @@ namespace wet::os
     bool ProtectReadOnly(void* p, size_t size) { return mprotect(p, size, PROT_READ) == 0; }
     bool ProtectReadWrite(void* p, size_t size) { return mprotect(p, size, PROT_READ | PROT_WRITE) == 0; }
     void SetWriteFaultHandler(WriteFaultHandler handler) { s_writeFaultHandler = handler; }
+    uintptr_t LastFaultPc() { return 0; }
+    uintptr_t ExeOffset(uintptr_t) { return 0; }
 
     void Release(uint8_t* base, uint64_t total) { munmap(base, size_t(total)); }
 

@@ -110,6 +110,8 @@ namespace wet
     // cannot take a write-watch fault, so watched pages in the range are unwatched
     // (and their caches invalidated) up front.
     void PrepareHostWrite(uint32_t guest, uint32_t length);
+    // Diagnostics: the physical range of a front buffer just presented (VdSwap).
+    void NoteFrontBuffer(uint32_t physStart, uint32_t length);
     // A mapping of physical memory that is never watched (index = physical address).
     uint8_t* PhysicalHostView();
     // Write-watch counters since start: faults taken, protect (watch) calls.
