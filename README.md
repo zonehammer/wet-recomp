@@ -85,7 +85,8 @@ action, press a key), with the launcher's **Keyboard...** button, or in `wet.ini
 | F10 | Profiler on/off (`profile.txt`, bug reports) |
 
 Settings live in `wet.ini` next to the exe; the mouse buttons can be rebound there
-(`mouse_left = RT` ...) as well as the keys. The field of view is `fov` (horizontal degrees at 16:9, 90 = original; also in F1 and
+(`mouse_left = RT` ...) as well as the keys. Widescreen / ultrawide (`widescreen = 1`, also in F1 and the launcher) fills 21:9 and
+32:9 screens with a wider view and keeps the HUD 16:9 in the middle. The field of view is `fov` (horizontal degrees at 16:9, 90 = original; also in F1 and
 the launcher). Direct mouse aim (`mouse_direct`, on by default) turns the camera
 by how far the mouse moves, with no stick speed limit. Saves, `achievements.ini` and the shader cache are in
 `game\hdd`. `WetRecomp.exe --console` shows the log live; `wet.log` always has it.
