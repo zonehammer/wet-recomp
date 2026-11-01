@@ -688,8 +688,11 @@ namespace
             bool videoMode = wet::options::VideoMode();
             if (ImGui::Checkbox("Videos at 30 FPS (avoids video flicker)", &videoMode))
                 wet::options::SetVideoMode(videoMode);
+            bool cutsceneFps = wet::options::CutsceneFps30();
+            if (ImGui::Checkbox("In-game cutscenes at 30 FPS (keeps speech in sync)", &cutsceneFps))
+                wet::options::SetCutsceneFps30(cutsceneFps);
             if (wet::options::Fps() != (wet::options::ConfiguredFps() ? wet::options::ConfiguredFps() : wet::options::MonitorRefreshRate()))
-                ImGui::TextDisabled("A video is playing: %d FPS until it ends", wet::options::Fps());
+                ImGui::TextDisabled("A video or cutscene is playing: %d FPS until it ends", wet::options::Fps());
             bool showFps = wet::options::ShowFps();
             if (ImGui::Checkbox("Show FPS counter", &showFps))
                 wet::options::SetShowFps(showFps);

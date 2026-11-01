@@ -15,6 +15,10 @@ namespace wet::options
     // Video mode (fs.cpp opens/closes .bik files): temporary FPS, 0 = none.
     void SetFpsOverride(int fps);
     bool VideoMode();
+    // In-game cutscenes at 30 FPS (cutscene_30fps); the world update reports whether one is running.
+    bool CutsceneFps30();
+    void SetCutsceneFps30(bool v);
+    void SetInCutscene(bool v);
     void SetVideoMode(bool v);
     void SetFps(int fps);
     void CycleFps();

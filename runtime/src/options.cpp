@@ -24,6 +24,8 @@ namespace wet::options
         std::atomic<int> s_monitorHz{ 0 };   // read once, when "match monitor" is first used
         std::atomic<int> s_fps{ 30 };
         std::atomic<int> s_fpsOverride{ 0 };   // video mode: temporary 30 FPS (not saved)
+        std::atomic<int> s_cutsceneFps{ 1 };   // in-game cutscenes at 30 FPS
+        std::atomic<bool> s_inCutscene{ false };
         std::atomic<int> s_videoMode{ 1 };
         int s_scale = 1, s_scaleRunning = 1;
         std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_fov{ 90 }, s_widescreen{ 0 }, s_widescreenHud{ 1 }, s_hideBorders{ 0 }, s_vsync{ 0 }, s_buttonPrompts{ 0 }, s_mouseAim{ 1 }, s_mouseSens{ 50 }, s_mouseInvert{ 0 }, s_mouseDirect{ 1 }, s_shaderCache{ 1 }, s_asyncShaders{ 1 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 };
@@ -107,6 +109,8 @@ namespace wet::options
             std::fprintf(f, "achievement_popups = %d\n", s_achievementPopups.load());
             std::fprintf(f, "# video_mode: 1 = while a video plays, run at 30 FPS with the slower thread wake-ups (avoids video flicker)\n");
             std::fprintf(f, "video_mode = %d\n", s_videoMode.load());
+            std::fprintf(f, "# cutscene_30fps: 1 = in-game cutscenes run at 30 FPS, as on the console (keeps speech in sync)\n");
+            std::fprintf(f, "cutscene_30fps = %d\n", s_cutsceneFps.load());
             std::fprintf(f, "# film_grain: the game's film grain, 0 (off) to 100 (as designed)\n");
             std::fprintf(f, "film_grain = %d\n", s_filmGrain.load());
             std::fprintf(f, "# fov: horizontal field of view in degrees at 16:9, 60-130 (90 = the game's own)\n");
@@ -200,6 +204,7 @@ namespace wet::options
                 else if (!std::strcmp(key, "filter")) s_filter = Clamp(value, 0, 3);
                 else if (!std::strcmp(key, "achievement_popups")) s_achievementPopups = value != 0;
                 else if (!std::strcmp(key, "video_mode")) s_videoMode = value != 0;
+                else if (!std::strcmp(key, "cutscene_30fps")) s_cutsceneFps = value != 0;
                 else if (!std::strcmp(key, "async_shaders")) s_asyncShaders = value != 0;
                 else if (!std::strcmp(key, "shader_cache")) s_shaderCache = value != 0;
                 else if (!std::strcmp(key, "mouse_aim")) s_mouseAim = value != 0;
@@ -245,6 +250,8 @@ namespace wet::options
         int o = s_fpsOverride.load(std::memory_order_relaxed);
         if (o)
             return o;
+        if (s_inCutscene.load(std::memory_order_relaxed) && s_cutsceneFps.load(std::memory_order_relaxed))
+            return 30;
         int f = s_fps.load(std::memory_order_relaxed);
         return f ? f : MonitorHz();
     }
@@ -252,6 +259,21 @@ namespace wet::options
     int ConfiguredFps() { return s_fps; }
     namespace { int CurrentFps() { return Fps(); } }
     bool VideoMode() { return s_videoMode != 0; }
+    bool CutsceneFps30() { return s_cutsceneFps != 0; }
+    void SetCutsceneFps30(bool v)
+    {
+        s_cutsceneFps = v;
+        ApplyFps();
+        Save();
+    }
+    void SetInCutscene(bool v)
+    {
+        if (s_inCutscene.exchange(v) == v)
+            return;
+        ApplyFps();
+        if (s_cutsceneFps.load())
+            Log(v ? "Cutscene: 30 FPS until it ends" : "Cutscene over: back to %d FPS", Fps());
+    }
     void SetVideoMode(bool v) { s_videoMode = v; Save(); }
     void SetFpsOverride(int fps)
     {
@@ -363,8 +385,20 @@ void WetPresentIntervalHook(PPCRegister& r11)
 // stores it at +196 for everything else). The game steps 1/30 s every frame, so
 // at higher frame rates everything sped up: the step becomes 1/fps.
 extern "C" void __imp__sub_82C32BF8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_828D5AE0(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_82C32BF8)
 {
+    // GameStateUtil::IsCutsceneActive (sub_828D5AE0): the top game state is
+    // GSCutscene. Real-time cutscenes are timed for 30 FPS: their speech
+    // drifts out of sync at higher frame rates, so they run at 30 (as videos do).
+    if (wet::options::CutsceneFps30())
+    {
+        PPCContext saved = ctx;
+        __imp__sub_828D5AE0(ctx, base);
+        bool active = ctx.r3.u32 != 0;
+        ctx = saved;
+        wet::options::SetInCutscene(active);
+    }
     static uint64_t calls = 0;
     static int lastHalved = -1;
     double dt = ctx.f1.f64;
