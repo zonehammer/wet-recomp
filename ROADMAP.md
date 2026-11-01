@@ -23,7 +23,7 @@ Make a full playthrough reliable before adding more features.
 |---|---|---|
 | ~~Direct mouse aim~~ (done: `mouse_direct`, uncapped stick values written into the game's pad object) | True 1:1 aim, no stick speed cap or acceleration | M–L |
 | ~~Keyboard rebinding~~ (done: wet.ini `key_*`, the F1 overlay and the launcher) | Everything except the mouse buttons is fixed today | S |
-| **PlayStation button prompts** (swap the game's Xbox button icons) | Matches the controller in hand | L |
+| ~~PlayStation button prompts~~ (done: `button_prompts`; the game's button textures redrawn with PlayStation symbols as they load) | Matches the controller in hand | L |
 
 ## 0.4 — Performance and visuals
 
