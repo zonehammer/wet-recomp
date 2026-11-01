@@ -17093,7 +17093,7 @@ index e0fd8440d..15115f823 100644
                                    builder_->makeUintConstant(6)));
          {
 diff --git a/src/xenia/gpu/texture_cache.cc b/src/xenia/gpu/texture_cache.cc
-index 46820e2bb..a8a9da466 100644
+index 46820e2bb..d4020c968 100644
 --- a/src/xenia/gpu/texture_cache.cc
 +++ b/src/xenia/gpu/texture_cache.cc
 @@ -73,6 +73,11 @@ DEFINE_uint32(
@@ -17135,7 +17135,36 @@ index 46820e2bb..a8a9da466 100644
  
    if (IsDrawResolutionScaled()) {
      uint32_t page_first = start_unscaled >> 12;
-@@ -867,6 +892,24 @@ void TextureCache::ScaledResolveGlobalWatchCallback(
+@@ -558,6 +583,28 @@ TextureCache::Texture* TextureCache::FindOrCreateTexture(TextureKey key) {
+              scaled_resolve_guest_layout.mips_total_extent_bytes))) {
+       key.scaled_resolve = 1;
+     }
++#if XE_WET_RUNTIME
++    {
++      TextureKey plain = key;
++      plain.scaled_resolve = 0;
++      auto global_lock = global_critical_region_.Acquire();
++      if (key.scaled_resolve) {
++        wet_scaled_keys_[key.base_page] = plain;
++      } else {
++        auto it = wet_scaled_keys_.find(key.base_page);
++        if (it != wet_scaled_keys_.end() && it->second == plain) {
++          key.scaled_resolve = 1;
++          uint32_t n = ++wet_scaled_fallbacks_;
++          if (n <= 10 || (n & (n - 1)) == 0) {
++            XELOGW(
++                "WET: texture {:08X} ({}x{}) wasn't recognised as scaled; "
++                "using its scaled copy (#{})",
++                key.base_page << 12, key.GetWidth(), key.GetHeight(), n);
++          }
++        }
++      }
++    }
++#endif
+   }
+ 
+   uint32_t host_width = key.GetWidth();
+@@ -867,6 +914,34 @@ void TextureCache::ScaledResolveGlobalWatchCallback(
      // Resolves themselves do exactly the opposite of what this should do.
      return;
    }
@@ -17157,11 +17186,21 @@ index 46820e2bb..a8a9da466 100644
 +    }
 +  }
 +#endif
++#if XE_WET_RUNTIME
++  // A real CPU write: these textures aren't scaled resolve targets any more.
++  for (auto it = wet_scaled_keys_.begin(); it != wet_scaled_keys_.end();) {
++    if ((it->first << 12) >= address_first && (it->first << 12) <= address_last) {
++      it = wet_scaled_keys_.erase(it);
++    } else {
++      ++it;
++    }
++  }
++#endif
    // Mark scaled resolve ranges as non-scaled. Textures themselves will be
    // invalidated by their shared memory watches.
    uint32_t resolve_page_first = address_first >> 12;
 diff --git a/src/xenia/gpu/texture_cache.h b/src/xenia/gpu/texture_cache.h
-index c892eee32..1f0ee4f69 100644
+index c892eee32..68a57f0e4 100644
 --- a/src/xenia/gpu/texture_cache.h
 +++ b/src/xenia/gpu/texture_cache.h
 @@ -53,6 +53,13 @@ namespace gpu {
@@ -17192,6 +17231,22 @@ index c892eee32..1f0ee4f69 100644
    struct TextureKey {
      // Dimensions minus 1 are stored similarly to how they're stored in fetch
      // constants so fewer bits can be used, while the maximum size (8192 for 2D)
+@@ -594,6 +608,15 @@ class TextureCache {
+   uint64_t current_submission_index_ = 0;
+   uint64_t current_submission_time_ = 0;
+ 
++#if XE_WET_RUNTIME
++  // WET: textures that were scaled resolve targets, by base page (key without
++  // the scaled flag). Under resolution scaling a resolve target sometimes isn't
++  // recognised as scaled when sampled, and the unscaled memory (never written by
++  // the GPU) showed as black surfaces; such a texture keeps its scaled copy
++  // until the CPU really writes its memory (ScaledResolveGlobalWatchCallback).
++  std::unordered_map<uint32_t, TextureKey> wet_scaled_keys_;
++  uint32_t wet_scaled_fallbacks_ = 0;
++#endif
+   std::unordered_map<TextureKey, std::unique_ptr<Texture>, TextureKey::Hasher>
+       textures_;
+ 
 diff --git a/src/xenia/gpu/vulkan/vulkan_command_processor.cc b/src/xenia/gpu/vulkan/vulkan_command_processor.cc
 index 7df306c12..6baab4e5f 100644
 --- a/src/xenia/gpu/vulkan/vulkan_command_processor.cc
