@@ -110,6 +110,9 @@ ever look wrong after a driver update, delete game\\hdd\\shaders.
 Problems
 --------
 wet.log (next to WetRecomp.exe) records what happened, including crash details.
+"Report a bug..." in the launcher zips the logs, settings and system info (nothing
+else) and opens the GitHub issue page. "Check for updates" compares this build with
+the latest release.
 
 This package contains code translated from your copy of WET: it is for your own
 use. Don't share it publicly. Each player needs their own copy of the game.

@@ -10,6 +10,7 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <shellapi.h>
+#include <winhttp.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -18,7 +19,9 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -103,6 +106,7 @@ namespace
         kMouseAim, kSensitivity, kSensitivityValue, kInvertY, kVibration,
         kShaderCache, kVideoMode, kPopups, kAsyncShaders,
         kStatus, kPlay, kSaves, kClearShaders, kKeyboard,
+        kVsync, kHideBorders, kWideHud, kCheckUpdates, kReportBug, kUpdateText,
         kKeyFirst = 300,                       // one combo per keybinds action
         kKeysOk = kKeyFirst + wet::keybinds::kActionCount, kKeysReset, kKeysCancel,
     };
@@ -325,6 +329,9 @@ namespace
         s_ini.Set("film_grain", Pos(kGrain));
         s_ini.Set("fov", Pos(kFov));
         s_ini.Set("widescreen", Checked(kWidescreen));
+        s_ini.Set("vsync", Checked(kVsync));
+        s_ini.Set("hide_borders", Checked(kHideBorders));
+        s_ini.Set("widescreen_hud", Checked(kWideHud));
         s_ini.Set("mouse_aim", Checked(kMouseAim));
         s_ini.Set("mouse_sensitivity", Pos(kSensitivity));
         s_ini.Set("mouse_invert_y", Checked(kInvertY));
@@ -378,6 +385,166 @@ namespace
         fs::remove_all(dir, ec);
         MessageBoxW(s_window, ec ? L"Some files could not be deleted (is the game running?)." : L"Shader cache cleared.",
                     L"WET Launcher", ec ? MB_ICONWARNING : MB_ICONINFORMATION);
+    }
+
+    // ---- Update check: the latest release on GitHub vs. this build ----
+    constexpr UINT kUpdateResult = WM_APP + 1;   // lParam: new std::wstring*
+
+    std::string HttpsGet(const wchar_t* host, const wchar_t* path)
+    {
+        std::string body;
+        HINTERNET session = WinHttpOpen(L"WET-Launcher", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
+                                        WINHTTP_NO_PROXY_BYPASS, 0);
+        if (!session)
+            return body;
+        WinHttpSetTimeouts(session, 5000, 5000, 5000, 5000);
+        HINTERNET connect = WinHttpConnect(session, host, INTERNET_DEFAULT_HTTPS_PORT, 0);
+        HINTERNET request = connect ? WinHttpOpenRequest(connect, L"GET", path, nullptr, WINHTTP_NO_REFERER,
+                                                         WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE)
+                                    : nullptr;
+        if (request && WinHttpSendRequest(request, L"Accept: application/vnd.github+json\r\n", DWORD(-1), nullptr, 0,
+                                          0, 0) &&
+            WinHttpReceiveResponse(request, nullptr))
+        {
+            DWORD size = 0;
+            while (WinHttpQueryDataAvailable(request, &size) && size)
+            {
+                std::string chunk(size, '\0');
+                DWORD read = 0;
+                if (!WinHttpReadData(request, chunk.data(), size, &read) || !read)
+                    break;
+                body.append(chunk.data(), read);
+            }
+        }
+        if (request)
+            WinHttpCloseHandle(request);
+        if (connect)
+            WinHttpCloseHandle(connect);
+        WinHttpCloseHandle(session);
+        return body;
+    }
+
+    // "0.1.0" -> {0, 1, 0}
+    std::vector<int> VersionNumbers(const std::string& v)
+    {
+        std::vector<int> out;
+        int n = -1;
+        for (char c : v)
+        {
+            if (c >= '0' && c <= '9')
+                n = (n < 0 ? 0 : n * 10) + (c - '0');
+            else if (c == '.' && n >= 0)
+            {
+                out.push_back(n);
+                n = -1;
+            }
+            else if (n >= 0 || !out.empty())
+                break;
+        }
+        if (n >= 0)
+            out.push_back(n);
+        return out;
+    }
+
+    void CheckForUpdates()
+    {
+        SetWindowTextW(Item(kUpdateText), L"Checking...");
+        EnableWindow(Item(kCheckUpdates), FALSE);
+        std::thread([] {
+            std::string json = HttpsGet(L"api.github.com", L"/repos/zonehammer/wet-recomp/releases/latest");
+            std::wstring* text = new std::wstring;
+            size_t at = json.find("\"tag_name\"");
+            size_t q1 = at == std::string::npos ? at : json.find('"', json.find(':', at) + 1);
+            size_t q2 = q1 == std::string::npos ? q1 : json.find('"', q1 + 1);
+            if (q2 == std::string::npos)
+                *text = L"Couldn't reach GitHub (offline?).";
+            else
+            {
+                std::string tag = json.substr(q1 + 1, q2 - q1 - 1);
+                std::vector<int> latest = VersionNumbers(tag), mine = VersionNumbers(WET_VERSION);
+                std::wstring wtag(tag.begin(), tag.end());
+                if (latest > mine)
+                    *text = L"New version " + wtag + L" available - pull and rebuild (see the GitHub page).";
+                else
+                    *text = L"Up to date (latest release " + wtag + L").";
+            }
+            PostMessageW(s_window, kUpdateResult, 0, LPARAM(text));
+        }).detach();
+    }
+
+    // ---- Bug report: wet.log, wet.ini, xenia_gpu.log and system info in a zip ----
+    std::wstring RegString(const wchar_t* key, const wchar_t* value)
+    {
+        wchar_t buf[256] = {};
+        DWORD size = sizeof(buf);
+        if (RegGetValueW(HKEY_LOCAL_MACHINE, key, value, RRF_RT_REG_SZ, nullptr, buf, &size) == ERROR_SUCCESS)
+            return buf;
+        return L"?";
+    }
+
+    void ReportBug()
+    {
+        std::error_code ec;
+        fs::path dir = s_dir / L"bug-report";
+        fs::remove_all(dir, ec);
+        fs::create_directories(dir, ec);
+        for (const wchar_t* name : { L"wet.log", L"wet.ini", L"xenia_gpu.log", L"profile.txt" })
+            if (fs::exists(s_dir / name, ec))
+                fs::copy_file(s_dir / name, dir / name, fs::copy_options::overwrite_existing, ec);
+        {
+            std::wofstream info(dir / L"system.txt");
+            info << L"WET Recomp " << std::wstring(WET_VERSION, WET_VERSION + std::strlen(WET_VERSION)) << L"\n";
+            const wchar_t* nt = L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion";
+            info << L"Windows: " << RegString(nt, L"ProductName") << L" " << RegString(nt, L"DisplayVersion")
+                 << L" build " << RegString(nt, L"CurrentBuild") << L"\n";
+            info << L"CPU: " << RegString(L"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", L"ProcessorNameString")
+                 << L"\n";
+            DISPLAY_DEVICEW dev{ sizeof(dev) };
+            for (DWORD i = 0; EnumDisplayDevicesW(nullptr, i, &dev, 0); i++)
+                if (dev.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP)
+                    info << L"GPU: " << dev.DeviceString << L"\n";
+            MEMORYSTATUSEX mem{ sizeof(mem) };
+            GlobalMemoryStatusEx(&mem);
+            info << L"RAM: " << (mem.ullTotalPhys >> 20) << L" MB\n";
+            info << L"Screen: " << GetSystemMetrics(SM_CXSCREEN) << L"x" << GetSystemMetrics(SM_CYSCREEN) << L"\n";
+        }
+        SYSTEMTIME t;
+        GetLocalTime(&t);
+        wchar_t name[64];
+        std::swprintf(name, 64, L"WET-bug-report-%04d%02d%02d-%02d%02d.zip", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute);
+        fs::path zip = s_dir / name;
+        std::wstring cmd = L"powershell -NoProfile -NonInteractive -Command \"Compress-Archive -Force -Path '" +
+                           (dir / L"*").wstring() + L"' -DestinationPath '" + zip.wstring() + L"'\"";
+        STARTUPINFOW si{ sizeof(si) };
+        si.dwFlags = STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_HIDE;
+        PROCESS_INFORMATION pi{};
+        bool ok = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr,
+                                 s_dir.c_str(), &si, &pi);
+        if (ok)
+        {
+            WaitForSingleObject(pi.hProcess, 30000);
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+        }
+        if (!ok || !fs::exists(zip, ec))
+        {
+            MessageBoxW(s_window, (L"Couldn't make the zip. The files are in:\n" + dir.wstring()).c_str(),
+                        L"WET Launcher", MB_ICONWARNING);
+            ShellExecuteW(s_window, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            return;
+        }
+        fs::remove_all(dir, ec);
+        std::wstring select = L"/select,\"" + zip.wstring() + L"\"";
+        ShellExecuteW(s_window, L"open", L"explorer.exe", select.c_str(), nullptr, SW_SHOWNORMAL);
+        if (MessageBoxW(s_window,
+                        (std::wstring(L"Saved ") + name +
+                         L" (logs, settings and system info - nothing else).\n\nOpen the GitHub issue page to "
+                         L"report the bug? Attach the zip and describe what happened.")
+                            .c_str(),
+                        L"WET Launcher", MB_YESNO | MB_ICONINFORMATION) == IDYES)
+            ShellExecuteW(s_window, L"open", L"https://github.com/zonehammer/wet-recomp/issues/new", nullptr, nullptr,
+                          SW_SHOWNORMAL);
     }
 
     void BuildControls()
@@ -441,8 +608,20 @@ namespace
         Make(L"BUTTON", L"Open saves folder", BS_PUSHBUTTON | WS_TABSTOP, 362, 278, 145, 26, kSaves);
         Make(L"BUTTON", L"Clear shader cache", BS_PUSHBUTTON | WS_TABSTOP, 517, 278, 150, 26, kClearShaders);
 
-        Make(L"STATIC", L"", SS_LEFT | SS_PATHELLIPSIS, 12, 330, 540, 18, kStatus);
-        Make(L"BUTTON", L"Play", BS_DEFPUSHBUTTON | WS_TABSTOP, 570, 324, 110, 32, kPlay);
+        // Screen
+        Group(L"Screen", 10, 322, 330, 92);
+        Check(kVsync, L"V-Sync: no tearing (off for G-Sync / FreeSync)", 22, 342, ini.Get("vsync", 0) != 0, 310);
+        Check(kHideBorders, L"Hide the dark frame at the screen edges", 22, 364, ini.Get("hide_borders", 0) != 0, 310);
+        Check(kWideHud, L"Widescreen: keep the HUD 16:9 in the middle", 22, 386, ini.Get("widescreen_hud", 1) != 0, 310);
+
+        // Help
+        Group(L"Help", 350, 322, 330, 92);
+        Make(L"BUTTON", L"Check for updates", BS_PUSHBUTTON | WS_TABSTOP, 362, 342, 145, 26, kCheckUpdates);
+        Make(L"BUTTON", L"Report a bug...", BS_PUSHBUTTON | WS_TABSTOP, 517, 342, 150, 26, kReportBug);
+        Make(L"STATIC", L"", SS_LEFT, 362, 378, 305, 30, kUpdateText);
+
+        Make(L"STATIC", L"", SS_LEFT | SS_PATHELLIPSIS, 12, 428, 540, 18, kStatus);
+        Make(L"BUTTON", L"Play", BS_DEFPUSHBUTTON | WS_TABSTOP, 570, 422, 110, 32, kPlay);
         UpdateStatus();
     }
 
@@ -463,12 +642,21 @@ namespace
             case kSaves: OpenSaves(); return 0;
             case kClearShaders: ClearShaders(); return 0;
             case kKeyboard: OpenKeys(); return 0;
+            case kCheckUpdates: CheckForUpdates(); return 0;
+            case kReportBug: ReportBug(); return 0;
             case IDCANCEL: DestroyWindow(hwnd); return 0;
             }
             break;
         case WM_CTLCOLORSTATIC:
             SetBkMode(HDC(wp), TRANSPARENT);
             return LRESULT(GetSysColorBrush(COLOR_WINDOW));
+        case kUpdateResult:
+        {
+            std::unique_ptr<std::wstring> text(reinterpret_cast<std::wstring*>(lp));
+            SetWindowTextW(Item(kUpdateText), text->c_str());
+            EnableWindow(Item(kCheckUpdates), TRUE);
+            return 0;
+        }
         case WM_CLOSE:
             SaveSettings();   // keep changes even without playing
             DestroyWindow(hwnd);
@@ -515,7 +703,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show)
     kc.lpszClassName = L"WetLauncherKeys";
     RegisterClassExW(&kc);
 
-    RECT rc{ 0, 0, S(690), S(366) };
+    RECT rc{ 0, 0, S(690), S(464) };
     DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
     AdjustWindowRect(&rc, style, FALSE);
     int w = rc.right - rc.left, h = rc.bottom - rc.top;

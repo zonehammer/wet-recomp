@@ -124,7 +124,7 @@ generated/    generated C++ (ignored by git)
 - Intro and cutscene videos run at 30 FPS ("Videos at 30 FPS", on by default) to avoid a
   flicker at the top of the picture caused by a timing race at higher frame rates.
 - Achievements earned in saves from before achievement support aren't shown as unlocked.
-- Tested on one game copy and a few PCs; please report problems with `wet.log` attached.
+- Tested on one game copy and a few PCs; please report problems with "Report a bug..." in the launcher (it zips `wet.log`, `wet.ini` and system info).
 
 Planned work is in [ROADMAP.md](ROADMAP.md).
 

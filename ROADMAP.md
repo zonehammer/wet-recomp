@@ -33,7 +33,7 @@ Make a full playthrough reliable before adding more features.
 | ~~Widescreen and ultrawide~~ (done: `widescreen`, Hor+ view, extra horizontal resolution, HUD kept 16:9) | The game renders 16:9 only | M–L |
 | ~~Field of view slider~~ (done: `fov`, overlay and launcher) | Common request, especially with wide screens | M |
 | ~~Any frame rate~~ (done: 30-360 or match the monitor; VRR works. Truly uncapped would need a variable time step) | Today it's 30 / 60 / 120 / 144 | M |
-| **Better anti-aliasing** (SMAA, or MSAA through Xenia's render targets) | FXAA is soft | M |
+| ~~Better anti-aliasing~~ (done: SMAA, `antialiasing = 3`) | FXAA is soft | M |
 | **Further GPU-thread work** (fewer memory traps, cheaper fence wake-ups) | Headroom for 4K at 144 FPS on slower CPUs | M |
 
 ## 0.5 — Packaging and ease of use
@@ -41,8 +41,8 @@ Make a full playthrough reliable before adding more features.
 | Item | Why | Effort |
 |---|---|---|
 | **One-click setup**: the launcher (or a setup window) takes the ISO and runs extraction and the build | No command prompt needed | M |
-| **Update check** in the launcher (new tag on GitHub) | Players know when to rebuild | S |
-| **Bug report button**: zips `wet.log`, `wet.ini` and system info | Better reports, less back-and-forth | S |
+| ~~Update check~~ (done: launcher, Help > Check for updates) | Players know when to rebuild | S |
+| ~~Bug report button~~ (done: launcher, Help > Report a bug: zip of logs, settings and system info) | Better reports, less back-and-forth | S |
 | **Launcher extras**: display / monitor choice, controller test, achievements list | Fewer reasons to open wet.ini | S–M |
 | **Linux / Steam Deck**: test under Proton, then a native Linux build (the runtime already builds on Linux) | Many players are on Deck | L |
 
