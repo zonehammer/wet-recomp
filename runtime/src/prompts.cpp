@@ -15,12 +15,26 @@
 // constructor's push, whose "X360" pool index becomes the "PS3" one - before
 // the movie ever runs. setConfig("PS3") only switches the key names the menus
 // use (CROSS for A, ...); the movies handle both, as on the PS3.
+#include "prompts.h"
 #include "input.h"
 #include "log.h"
+#include "memory.h"
 #include "options.h"
 #include "ppc_context.h"
 
+#include <algorithm>
+#include <cctype>
+#include <chrono>
 #include <cstring>
+#include <functional>
+#include <mutex>
+#include <set>
+#include <string>
+#include <thread>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace
 {
@@ -36,6 +50,8 @@ namespace
 
     // Pool indices of the last CApplication constant pool seen (-1 = none yet).
     int s_ctIndex = -1, s_x360Index = -1, s_ps3Index = -1;
+    std::mutex s_lock;                 // the indices; inflate hooks and the memory scan
+    std::set<uint32_t> s_patched;      // constructor bytecode already handled
 
     constexpr char kPoolMark[] = "gameEnginePresent\0consoleType\0X360\0";   // inside CApplication's pool
 
@@ -94,8 +110,14 @@ namespace
             if (base[a] == 0x96 && !std::memcmp(base + a, pat, sizeof(pat)))
             {
                 bool ps = WantPlayStation();
+                if (!s_patched.insert(a).second)
+                    continue;
                 if (ps)
+                {
+                    if (a >= 0xA0000000u)
+                        wet::PrepareHostWrite(a + 8, 1);
                     base[a + 8] = uint8_t(s_ps3Index);
+                }
                 wet::Log("Prompts: menu console set to %s (bytecode at %08X)", ps ? "PS3" : "X360", a);
             }
     }
@@ -127,6 +149,7 @@ namespace
             return;
         uint32_t start = out0 - total0;
         // A little before the new data too, for a pattern split between calls.
+        std::lock_guard lock(s_lock);
         ScanOutput(base, start, out0 - start >= 16 ? out0 - 16 : start, out1);
     }
 }
@@ -141,4 +164,80 @@ extern "C" void __imp__sub_8314D3D8(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_8314D3D8)
 {
     Inflate(ctx, base, __imp__sub_8314D3D8);
+}
+
+// ---- Memory scan after a menu file is opened ----
+// The menus may reach memory already decompressed; their code only runs when
+// the menu is first shown (the pause menu: when the game is first paused), so
+// the CApplication pool and constructor are searched for in guest memory a few
+// times after the file opens, and patched in place.
+namespace
+{
+    void ScanGuestMemory()
+    {
+#ifdef _WIN32
+        uint8_t* base = wet::g_mem.base;
+        static const std::boyer_moore_horspool_searcher<const char*> finder(kPoolMark, kPoolMark + sizeof(kPoolMark) - 1);
+        uint64_t addr = 0x10000;
+        int found = 0;
+        while (addr < 0x100000000ull)
+        {
+            MEMORY_BASIC_INFORMATION mbi;
+            if (!VirtualQuery(base + addr, &mbi, sizeof(mbi)))
+                break;
+            uint64_t start = uint64_t(static_cast<uint8_t*>(mbi.BaseAddress) - base);
+            uint64_t end = std::min<uint64_t>(start + mbi.RegionSize, 0x100000000ull);
+            bool readable = mbi.State == MEM_COMMIT && !(mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) &&
+                            (mbi.Protect & (PAGE_READWRITE | PAGE_READONLY | PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE));
+            bool mmio = start >= 0x7FC00000ull && start < 0x80000000ull;
+            if (readable && !mmio && end > start && start < 0xC0000000ull)   // 0xC/0xE views repeat 0xA
+            {
+                const char* first = reinterpret_cast<const char*>(base + start);
+                const char* last = reinterpret_cast<const char*>(base + end);
+                for (const char* it = first;;)
+                {
+                    it = std::search(it, last, finder);
+                    if (it == last)
+                        break;
+                    uint32_t mark = uint32_t(reinterpret_cast<const uint8_t*>(it) - base);
+                    found++;
+                    std::lock_guard lock(s_lock);
+                    ReadPool(base, mark, mark - uint32_t(start) > 70000 ? mark - 70000 : uint32_t(start));
+                    // The constructor follows the pool (same DoInitAction).
+                    uint32_t to = uint32_t(std::min<uint64_t>(end, uint64_t(mark) + 200000));
+                    ScanOutput(base, uint32_t(start), mark, to);
+                    it += sizeof(kPoolMark) - 1;
+                }
+            }
+            addr = end > addr ? end : addr + 0x1000;
+        }
+        static int logged = 0;
+        if (logged++ < 20)
+            wet::Log("Prompts: memory scan found %d menu constant pool(s)", found);
+#endif
+    }
+}
+
+namespace wet::prompts
+{
+    void FileOpened(const std::string& name)
+    {
+        if (options::ButtonPrompts() == 1)
+            return;
+        std::string lower = name;
+        for (auto& c : lower)
+            c = char(std::tolower((unsigned char)c));
+        if (lower.find("menu") == std::string::npos && lower.find("extracontent") == std::string::npos)
+            return;
+        if (lower.find('.') != std::string::npos && lower.find("_") != std::string::npos &&
+            lower.find("menu.") == std::string::npos && lower.find("extracontent.") == std::string::npos)
+            return;
+        std::thread([] {
+            for (int ms : { 300, 1000, 2500, 6000, 15000 })
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+                ScanGuestMemory();
+            }
+        }).detach();
+    }
 }
