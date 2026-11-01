@@ -317,6 +317,19 @@ GUEST_IMPORT(NetDll_inet_addr)
     Ret(ctx, result);
 }
 
+// Name lookups fail cleanly (no network): XNetDnsLookup(caller, name, event,
+// XNDNS** out) -> *out = 0, WSAENETDOWN; the event the title makes for it is
+// never waited on (WSA_INVALID_EVENT = 0).
+GUEST_IMPORT(NetDll_WSACreateEvent) { Ret(ctx, 0); }
+GUEST_IMPORT(NetDll_WSACloseEvent) { Ret(ctx, 1); }
+GUEST_IMPORT(NetDll_XNetDnsLookup)
+{
+    if (uint32_t out = Arg(ctx, 3))
+        St32(out, 0);
+    Ret(ctx, WSAENETDOWN);
+}
+GUEST_IMPORT(NetDll_XNetDnsRelease) { Ret(ctx, 0); }
+
 // XamGetSystemVersion(): 0, as Xenia reports - the system libraries pick
 // their oldest (simplest) code paths for it.
 GUEST_IMPORT(XamGetSystemVersion) { Ret(ctx, 0); }
