@@ -11,6 +11,7 @@
 #include "wet_version.h"
 #include "gpu/renderer.h"
 #include "options.h"
+#include "os.h"
 #include "input.h"
 #include "achievements.h"
 #include "keybinds.h"
@@ -62,6 +63,7 @@
 #include "xenia/ui/window.h"
 #include "xenia/ui/window_listener.h"
 #include "xenia/ui/windowed_app_context_win.h"
+#include "xenia/ui/window_win.h"
 #include "xenia/ui/imgui_dialog.h"
 #include "xenia/ui/imgui_drawer.h"
 #include "xenia/ui/immediate_drawer.h"
@@ -238,7 +240,9 @@ namespace
     float ScreenAspect()
     {
 #if XE_PLATFORM_WIN32
-        int w = GetSystemMetrics(SM_CXSCREEN), h = GetSystemMetrics(SM_CYSCREEN);
+        int x, y, w, h;
+        if (!wet::GameDisplayRect(x, y, w, h))
+            w = GetSystemMetrics(SM_CXSCREEN), h = GetSystemMetrics(SM_CYSCREEN);
         if (w > 0 && h > 0)
             return float(w) / float(h);
 #endif
@@ -275,6 +279,18 @@ namespace
                 self->window = xe::ui::Window::Create(*self->app, "WET (recompiled)", uint32_t(height * aspect + 0.5f),
                                                       height);
                 ok = self->window && (self->window->AddListener(self), self->window->Open());
+                // On the chosen display (wet.ini monitor): centred there, so
+                // fullscreen (which uses the window's display) goes there too.
+                int mx, my, mw, mh;
+                if (ok && !wet::options::Monitor().empty() && wet::GameDisplayRect(mx, my, mw, mh))
+                {
+                    HWND hwnd = static_cast<xe::ui::Win32Window*>(self->window.get())->hwnd();
+                    RECT r;
+                    GetWindowRect(hwnd, &r);
+                    int ww = std::min<int>(r.right - r.left, mw), wh = std::min<int>(r.bottom - r.top, mh);
+                    SetWindowPos(hwnd, nullptr, mx + (mw - ww) / 2, my + (mh - wh) / 2, ww, wh,
+                                 SWP_NOZORDER | SWP_NOACTIVATE);
+                }
             }
             {
                 std::lock_guard l(self->lock);
