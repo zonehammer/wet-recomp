@@ -112,6 +112,21 @@ PPC_FUNC(sub_831B6120)
     if (!strm || wet::options::ButtonPrompts() == 1)
         return;
     uint32_t out1 = PPC_LOAD_U32(strm + 12);
+    // Diagnostics: the first calls, and any output naming the menu classes.
+    static uint32_t calls = 0;
+    if (++calls <= 12)
+        wet::Log("Prompts: inflate #%u: out %08X -> %08X (total %u), in %08X", calls, out0, out1, total0,
+                 PPC_LOAD_U32(strm));
+    if (out1 > out0 && out1 - out0 < (64u << 20))
+        for (uint32_t a = out0; a + 12 <= out1; a++)
+            if (base[a] == 'C' && !std::memcmp(base + a, "CApplication", 12))
+            {
+                static int logged = 0;
+                if (++logged <= 10)
+                    wet::Log("Prompts: inflate #%u output has CApplication at %08X (out %08X-%08X, total %u)", calls, a,
+                             out0, out1, total0);
+                break;
+            }
     if (out1 <= out0 || out1 - out0 > (64u << 20) || total0 > out0)
         return;
     uint32_t start = out0 - total0;
