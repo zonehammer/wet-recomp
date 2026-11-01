@@ -10,6 +10,8 @@
 // loader is about to read one of the button textures, its pixels in the
 // archive are replaced by the PlayStation version (prompt_art.h) - same shape,
 // tint and size, a cross / circle / square / triangle or L1 / R1 / L2 / R2.
+// Each texture is only redrawn the first time it is read: the game then
+// converts it to the GPU's layout in place, so the choice is made at startup.
 //
 // The stream (sub_82B9C1A8): +16 the archive entry { +0 name, +8 data, +12 size }.
 //
@@ -40,7 +42,7 @@ namespace
     }
 
     std::mutex s_lock;
-    std::unordered_map<uint32_t, uint64_t> s_done;   // data address -> hash of what we wrote
+    std::unordered_map<uint32_t, uint64_t> s_seen;   // data address -> hash of its DDS header
     int s_logged = 0, s_redrawn = 0;
 
     uint64_t Hash(const uint8_t* p, size_t n)
@@ -71,12 +73,20 @@ namespace
             s_logged++;
             wet::Log("Prompts: image \"%s\" (%u bytes at %08X)%s", name.c_str(), size, data, button ? " - a button" : "");
         }
-        if (!button || !WantPlayStation())
+        if (!button)
             return;
+        // Only the first time a texture is read: after that the game has
+        // converted its pixels to the GPU's layout in place (redrawing those
+        // gave garbage when the setting changed mid-game).
         uint8_t* dds = base + data;
-        auto it = s_done.find(data);
-        if (it != s_done.end() && it->second == Hash(dds, size))
-            return;   // already ours
+        auto it = s_seen.find(data);
+        if (it != s_seen.end() && it->second == Hash(dds, 128))
+            return;
+        if (!WantPlayStation())
+        {
+            s_seen[data] = Hash(dds, 128);
+            return;
+        }
         if (data >= 0xA0000000u)
             wet::PrepareHostWrite(data, size);
         if (!wet::prompt_art::RedrawDds(name, dds, size))
@@ -84,7 +94,7 @@ namespace
             wet::Log("Prompts: \"%s\" isn't in a format the PlayStation art handles", name.c_str());
             return;
         }
-        s_done[data] = Hash(dds, size);
+        s_seen[data] = Hash(dds, 128);
         if (++s_redrawn <= 3 || s_redrawn % 20 == 0)
             wet::Log("Prompts: \"%s\" redrawn with PlayStation art (%d so far)", name.c_str(), s_redrawn);
     }
