@@ -26,7 +26,7 @@ namespace wet::options
         std::atomic<int> s_fpsOverride{ 0 };   // video mode: temporary 30 FPS (not saved)
         std::atomic<int> s_videoMode{ 1 };
         int s_scale = 1, s_scaleRunning = 1;
-        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_fov{ 90 }, s_widescreen{ 0 }, s_widescreenHud{ 1 }, s_hideBorders{ 0 }, s_mouseAim{ 1 }, s_mouseSens{ 50 }, s_mouseInvert{ 0 }, s_mouseDirect{ 1 }, s_shaderCache{ 1 }, s_asyncShaders{ 1 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 };
+        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_fov{ 90 }, s_widescreen{ 0 }, s_widescreenHud{ 1 }, s_hideBorders{ 0 }, s_vsync{ 0 }, s_mouseAim{ 1 }, s_mouseSens{ 50 }, s_mouseInvert{ 0 }, s_mouseDirect{ 1 }, s_shaderCache{ 1 }, s_asyncShaders{ 1 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 };
         constexpr const char* kFile = "wet.ini";
         // Mouse button bindings: left, right, middle, back (X1), forward (X2).
         constexpr const char* kMouseKeys[5] = { "mouse_left", "mouse_right", "mouse_middle", "mouse_back", "mouse_forward" };
@@ -115,6 +115,8 @@ namespace wet::options
             std::fprintf(f, "widescreen_hud = %d\n", s_widescreenHud.load());
             std::fprintf(f, "# hide_borders: 1 = don't draw the dark frame at the screen edges (vignette / cinematic borders)\n");
             std::fprintf(f, "hide_borders = %d\n", s_hideBorders.load());
+            std::fprintf(f, "# vsync: 1 = never tear (frames wait for the screen's refresh); 0 = present at once (best with G-Sync / FreeSync); restart\n");
+            std::fprintf(f, "vsync = %d\n", s_vsync.load());
             std::fprintf(f, "# mouse_aim: 1 = the mouse turns the camera / aims (right stick) while the game window is active\n");
             std::fprintf(f, "mouse_aim = %d\n", s_mouseAim.load());
             std::fprintf(f, "# mouse_sensitivity: 1-100; mouse_invert_y: 1 = up/down inverted\n");
@@ -190,6 +192,7 @@ namespace wet::options
                 else if (!std::strcmp(key, "widescreen")) s_widescreen = value != 0;
                 else if (!std::strcmp(key, "widescreen_hud")) s_widescreenHud = value != 0;
                 else if (!std::strcmp(key, "hide_borders")) s_hideBorders = value != 0;
+                else if (!std::strcmp(key, "vsync")) s_vsync = value != 0;
                 else if (!std::strcmp(key, "vibration")) s_vibration = value != 0;
                 else if (!std::strcmp(key, "gpu_wait")) s_gpuWait = value != 0;
                 else if (!std::strcmp(key, "adaptive_watch")) s_adaptiveWatch = value != 0;
@@ -301,6 +304,8 @@ namespace wet::options
     bool WidescreenHud() { return s_widescreenHud.load(std::memory_order_relaxed) != 0; }
     void SetWidescreenHud(bool v) { s_widescreenHud = v; Save(); }
     bool HideBorders() { return s_hideBorders.load(std::memory_order_relaxed) != 0; }
+    bool Vsync() { return s_vsync.load(std::memory_order_relaxed) != 0; }
+    void SetVsync(bool v) { s_vsync = v; Save(); }
     void SetHideBorders(bool v) { s_hideBorders = v; Save(); }
     void SetFov(int v) { s_fov = Clamp(v, 60, 130); Save(); }
     int Sharpness() { return s_sharpness; }

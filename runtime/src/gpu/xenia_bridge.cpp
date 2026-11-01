@@ -73,6 +73,10 @@ DECLARE_bool(host_present_from_non_ui_thread);
 DECLARE_int32(log_level);
 DECLARE_int32(draw_resolution_scale_x);
 DECLARE_int32(draw_resolution_scale_y);
+#if WET_HAVE_D3D12
+DECLARE_bool(d3d12_allow_variable_refresh_rate_and_tearing);
+#endif
+DECLARE_bool(vulkan_allow_present_mode_immediate);
 DECLARE_path(dump_shaders);
 DECLARE_path(log_file);
 
@@ -757,6 +761,9 @@ namespace
                 if (ImGui::Checkbox("Keep the HUD and menus 16:9 in the middle", &hud))
                     wet::options::SetWidescreenHud(hud);
             }
+            bool vsync = wet::options::Vsync();
+            if (ImGui::Checkbox("V-Sync: no tearing (turn off for G-Sync / FreeSync; after a restart)", &vsync))
+                wet::options::SetVsync(vsync);
             bool borders = wet::options::HideBorders();
             if (ImGui::Checkbox("Hide the dark frame at the screen edges (vignette / cinematic borders)", &borders))
                 wet::options::SetHideBorders(borders);
@@ -1022,6 +1029,11 @@ namespace wet::renderer
         // Rendering resolution: the game's 1280x720 times the option's scale.
         cvars::draw_resolution_scale_x = int32_t(s_resolutionScale);
         cvars::draw_resolution_scale_y = int32_t(s_resolutionScale);
+        // V-Sync option: no tearing (otherwise frames are shown at once, for VRR).
+#if WET_HAVE_D3D12
+        cvars::d3d12_allow_variable_refresh_rate_and_tearing = !wet::options::Vsync();
+#endif
+        cvars::vulkan_allow_present_mode_immediate = !wet::options::Vsync();
         // Widescreen: the 16:9 frame is shown stretched across the wider screen
         // (with the game's view widened to match), so render more columns to keep
         // it sharp: X scale = Y scale x how much wider than 16:9 the screen is.

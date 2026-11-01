@@ -80,6 +80,9 @@ namespace wet::options
     void SetWidescreenHud(bool v);
     // Don't draw the dark frame at the screen edges (vignette / cinematic borders).
     bool HideBorders();
+    // No tearing: presentation never splits a frame (off = immediate, for VRR). Restart.
+    bool Vsync();
+    void SetVsync(bool v);
     void SetHideBorders(bool v);
     int Sharpness();
     void SetSharpness(int v);
