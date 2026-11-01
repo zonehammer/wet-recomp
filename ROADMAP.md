@@ -40,7 +40,7 @@ Make a full playthrough reliable before adding more features.
 
 | Item | Why | Effort |
 |---|---|---|
-| **One-click setup**: the launcher (or a setup window) takes the ISO and runs extraction and the build | No command prompt needed | M |
+| ~~One-click setup~~ (done: `WetSetup.exe`, attached to releases: ISO in, tools fetched, built, desktop shortcut) | No command prompt needed | M |
 | ~~Update check~~ (done: launcher, Help > Check for updates) | Players know when to rebuild | S |
 | ~~Bug report button~~ (done: launcher, Help > Report a bug: zip of logs, settings and system info) | Better reports, less back-and-forth | S |
 | **Launcher extras**: display / monitor choice, controller test, achievements list | Fewer reasons to open wet.ini | S–M |
