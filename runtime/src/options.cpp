@@ -117,7 +117,7 @@ namespace wet::options
             std::fprintf(f, "hide_borders = %d\n", s_hideBorders.load());
             std::fprintf(f, "# vsync: 1 = never tear (frames wait for the screen's refresh); 0 = present at once (best with G-Sync / FreeSync); restart\n");
             std::fprintf(f, "vsync = %d\n", s_vsync.load());
-            std::fprintf(f, "# button_prompts: 0 = automatic (PlayStation symbols with a PlayStation controller), 1 = Xbox, 2 = PlayStation\n");
+            std::fprintf(f, "# button_prompts: 0 = automatic (PlayStation symbols with a PlayStation controller at startup), 1 = Xbox, 2 = PlayStation\n");
             std::fprintf(f, "button_prompts = %d\n", s_buttonPrompts.load());
             std::fprintf(f, "# mouse_aim: 1 = the mouse turns the camera / aims (right stick) while the game window is active\n");
             std::fprintf(f, "mouse_aim = %d\n", s_mouseAim.load());

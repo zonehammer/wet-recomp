@@ -710,7 +710,7 @@ namespace
                 Radio("PlayStation", &promptsPick, 2);
                 if (promptsPick != prompts)
                     wet::options::SetButtonPrompts(promptsPick);
-                ImGui::TextDisabled("Automatic: PlayStation symbols with a PlayStation controller. Menus pick it up when they load.");
+                ImGui::TextDisabled("Automatic: PlayStation symbols when a PlayStation controller is connected at startup. Applies after a restart.");
             }
 
             Section("Mouse");

@@ -8,7 +8,6 @@
 //   \Device\Harddisk0\Cache0        -> game/hdd/cache (read/write)
 #include "fs.h"
 #include "../options.h"
-#include "../prompts.h"
 #include <atomic>
 #include "kernel.h"
 #include "objects.h"
@@ -405,8 +404,6 @@ namespace
                 f->video = true;
                 VideoFileOpened(r.host.filename().string());
             }
-            if (ext == ".lu")
-                prompts::FileOpened(r.host.filename().string());
         }
         St32(handlePtr, CreateHandle(f));
         if (ioStatus) { St32(ioStatus, STATUS_SUCCESS); St32(ioStatus + 4, info); }
