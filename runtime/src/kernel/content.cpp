@@ -327,6 +327,10 @@ static void XMsgRequest(PPCContext& ctx, const char* name)
         achievements::UnlockMany(ids);
         return Ret(ctx, Finish(ov, ERROR_SUCCESS));
     }
+    // Requests that need no answer: XGI user context / property (rich
+    // presence), XMP set playback controller (custom soundtracks).
+    if ((app == 0xFB && (message == 0x000B0006 || message == 0x000B0007)) || (app == 0xFA && message == 0x0007001A))
+        return Ret(ctx, Finish(ov, ERROR_SUCCESS));
     // Every other XGI (0xFB) / XLiveBase (0xFC) request, logged in full (the
     // generic stub log is rate-limited), to see how the title reports progress.
     static int logged = 0;
@@ -340,6 +344,22 @@ static void XMsgRequest(PPCContext& ctx, const char* name)
         Log("%s(app %X, message %08X, buffer %08X len %u:%s)", name, app, message, buffer, len, words);
     }
     StubCall(name, ctx);
+}
+
+// XMsgInProcessCall(app, message, param1, param2). Only the XMP (music player,
+// app 0xFA) GetPlaybackController is seen: param1 = { client, u32* controller,
+// u32* locked } -> the title controls playback, not locked (as Xenia answers).
+GUEST_IMPORT(XMsgInProcessCall)
+{
+    uint32_t app = Arg(ctx, 0), message = Arg(ctx, 1), args = Arg(ctx, 2);
+    if (app == 0xFA && message == 0x0007001B && args)
+    {
+        for (uint32_t field : { 4u, 8u })
+            if (uint32_t p = Ld32(args + field); p >= 0x10000 && p < 0xFFFF0000u)
+                St32(p, 0);
+        return Ret(ctx, ERROR_SUCCESS);
+    }
+    StubCall("XMsgInProcessCall", ctx);
 }
 
 // XMsgStartIORequest(app, message, overlapped, buffer, buffer_length)

@@ -5,13 +5,16 @@
 #include "apu/apu.h"
 #include "gpu/renderer.h"
 #include "os.h"
+#include "memory.h"
 
 #include <algorithm>
 #include <TinySHA1.hpp>
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
+#include <cstdio>
 #include <mutex>
+#include <random>
 
 using namespace wet;
 
@@ -278,6 +281,45 @@ GUEST_IMPORT(NetDll_XNetStartup) { Ret(ctx, 0); }
 GUEST_IMPORT(NetDll_XNetCleanup) { Ret(ctx, 0); }
 GUEST_IMPORT(NetDll_WSAGetLastError) { Ret(ctx, WSAENETDOWN); }
 GUEST_IMPORT(NetDll_socket) { Ret(ctx, 0xFFFFFFFF); } // INVALID_SOCKET
+
+// NetDll_XNetRandom(caller, buffer, length): random bytes (the title's session nonces).
+GUEST_IMPORT(NetDll_XNetRandom)
+{
+    uint32_t buffer = Arg(ctx, 1), length = Arg(ctx, 2);
+    if (buffer && length && length < (1u << 20))
+    {
+        static std::mutex lock;
+        static std::mt19937_64 rng{ std::random_device{}() };
+        if (buffer >= 0xA0000000u)
+            PrepareHostWrite(buffer, length);
+        std::lock_guard guard(lock);
+        for (uint32_t i = 0; i < length; i++)
+            St8(buffer + i, uint8_t(rng()));
+    }
+    Ret(ctx, 0);
+}
+
+// NetDll_inet_addr(cp): dotted IPv4 -> address in network byte order
+// (big-endian, as the guest reads it), INADDR_NONE if it isn't one.
+GUEST_IMPORT(NetDll_inet_addr)
+{
+    uint32_t cp = Arg(ctx, 0), result = 0xFFFFFFFF;
+    if (cp)
+    {
+        char text[64] = {};
+        for (uint32_t i = 0; i + 1 < sizeof(text) && Ld8(cp + i); i++)
+            text[i] = char(Ld8(cp + i));
+        unsigned a, b, c, d;
+        char tail;
+        if (std::sscanf(text, "%u.%u.%u.%u%c", &a, &b, &c, &d, &tail) == 4 && a < 256 && b < 256 && c < 256 && d < 256)
+            result = a << 24 | b << 16 | c << 8 | d;
+    }
+    Ret(ctx, result);
+}
+
+// XamGetSystemVersion(): 0, as Xenia reports - the system libraries pick
+// their oldest (simplest) code paths for it.
+GUEST_IMPORT(XamGetSystemVersion) { Ret(ctx, 0); }
 
 // ---------------------------------------------------------------------------
 // Crypto
