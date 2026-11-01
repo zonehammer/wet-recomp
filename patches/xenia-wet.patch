@@ -994,10 +994,10 @@ index 88bdcb438..97a4623a8 100644
    std::vector<D3D12_RESOURCE_BARRIER> barriers_;
  
 diff --git a/src/xenia/gpu/d3d12/d3d12_texture_cache.cc b/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
-index b96c200b9..c51dd1af5 100644
+index b96c200b9..aa1008d93 100644
 --- a/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
 +++ b/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
-@@ -1416,6 +1416,57 @@ ID3D12Resource* D3D12TextureCache::RequestSwapTexture(
+@@ -1416,6 +1416,68 @@ ID3D12Resource* D3D12TextureCache::RequestSwapTexture(
        key.dimension != xenos::DataDimension::k2DOrStacked) {
      return nullptr;
    }
@@ -1044,10 +1044,21 @@ index b96c200b9..c51dd1af5 100644
 +    } else if (!scaled && known) {
 +      key.scaled_resolve = 1;
 +      if (++fallbacks <= 20 || (fallbacks & (fallbacks - 1)) == 0) {
++        // Which parts of it are still marked (first page, middle, last page).
++        uint32_t extent = layout.base.level_data_extent_bytes;
++        uint32_t start = key.base_page << 12;
 +        XELOGW(
 +            "WET: front buffer {:08X} lost its scaled copy; showing the scaled "
-+            "one (#{})",
-+            key.base_page << 12, fallbacks);
++            "one (#{}) - extent {:X}, {}x{} pitch {} format {}, marked: "
++            "first {} middle {} last {}",
++            start, fallbacks, extent, key.GetWidth(), key.GetHeight(),
++            key.pitch, uint32_t(key.format),
++            WetIsRangeScaledResolved(start, 4096),
++            WetIsRangeScaledResolved(start + (extent / 2 & ~4095u), 4096),
++            WetIsRangeScaledResolved(start + ((extent - 1) & ~4095u), 4096));
++        if (fallbacks <= 6) {
++          wet_trace_resolves = 6;
++        }
 +      }
 +    }
 +  }
@@ -17082,21 +17093,49 @@ index e0fd8440d..15115f823 100644
                                    builder_->makeUintConstant(6)));
          {
 diff --git a/src/xenia/gpu/texture_cache.cc b/src/xenia/gpu/texture_cache.cc
-index 46820e2bb..8b145d52b 100644
+index 46820e2bb..a8a9da466 100644
 --- a/src/xenia/gpu/texture_cache.cc
 +++ b/src/xenia/gpu/texture_cache.cc
-@@ -73,6 +73,10 @@ DEFINE_uint32(
+@@ -73,6 +73,11 @@ DEFINE_uint32(
  namespace xe {
  namespace gpu {
  
 +#if XE_WET_RUNTIME
 +std::atomic<uint32_t> wet_front_buffer_first[2], wet_front_buffer_last[2];
++std::atomic<int> wet_trace_resolves{0};
 +#endif
 +
  const TextureCache::LoadShaderInfo
      TextureCache::load_shader_info_[kLoadShaderCount] = {
          {1, 4},   // k8bpb
-@@ -867,6 +871,24 @@ void TextureCache::ScaledResolveGlobalWatchCallback(
+@@ -236,6 +241,26 @@ void TextureCache::MarkRangeAsResolved(uint32_t start_unscaled,
+   }
+   start_unscaled &= 0x1FFFFFFF;
+   length_unscaled = std::min(length_unscaled, 0x20000000 - start_unscaled);
++#if XE_WET_RUNTIME
++  // WET diagnostics: resolves into the front buffers (first ones).
++  for (uint32_t fb = 0; fb < 2; ++fb) {
++    uint32_t fb_first = wet_front_buffer_first[fb].load(std::memory_order_relaxed);
++    uint32_t fb_last = wet_front_buffer_last[fb].load(std::memory_order_relaxed);
++    if (fb_last && start_unscaled <= fb_last &&
++        start_unscaled + length_unscaled - 1 >= fb_first) {
++      static uint32_t logged = 0;
++      if (++logged <= 12 || wet_trace_resolves.load() > 0) {
++        if (logged > 12) {
++          wet_trace_resolves.fetch_sub(1);
++        }
++        XELOGW("WET: resolve into front buffer {:08X}: {:08X} + {:X}{}",
++               fb_first, start_unscaled, length_unscaled,
++               IsDrawResolutionScaled() ? " (scaled)" : "");
++      }
++      break;
++    }
++  }
++#endif
+ 
+   if (IsDrawResolutionScaled()) {
+     uint32_t page_first = start_unscaled >> 12;
+@@ -867,6 +892,24 @@ void TextureCache::ScaledResolveGlobalWatchCallback(
      // Resolves themselves do exactly the opposite of what this should do.
      return;
    }
@@ -17122,22 +17161,24 @@ index 46820e2bb..8b145d52b 100644
    // invalidated by their shared memory watches.
    uint32_t resolve_page_first = address_first >> 12;
 diff --git a/src/xenia/gpu/texture_cache.h b/src/xenia/gpu/texture_cache.h
-index c892eee32..bb9ae86d5 100644
+index c892eee32..1f0ee4f69 100644
 --- a/src/xenia/gpu/texture_cache.h
 +++ b/src/xenia/gpu/texture_cache.h
-@@ -53,6 +53,11 @@ namespace gpu {
+@@ -53,6 +53,13 @@ namespace gpu {
  // TODO(Triang3l): Attach the largest LOD to existing textures with a valid
  // mip_address but no base ever used yet (no base_address) to save memory
  // because textures are streamed this way anyway.
 +#if XE_WET_RUNTIME
 +// WET diagnostics: the last swap texture's guest range (D3D12 swap).
 +extern std::atomic<uint32_t> wet_front_buffer_first[2], wet_front_buffer_last[2];
++// After a swap texture fallback, the next few resolves into front buffers are logged.
++extern std::atomic<int> wet_trace_resolves;
 +#endif
 +
  class TextureCache {
   public:
    // Hard limit, originating from the half-pixel offset filling hack in the
-@@ -122,6 +127,13 @@ class TextureCache {
+@@ -122,6 +129,13 @@ class TextureCache {
    }
  
   protected:
