@@ -76,6 +76,8 @@ namespace wet::os
     void ShowFatalMessage(const char* text);
     // Opens a console window for the log (--console / WET_CONSOLE=1).
     void OpenConsole();
-    // Refresh rate of the main display in Hz (60 if unknown).
+    // Refresh rate of the game's display (options::Monitor, else the main one) in Hz (60 if unknown).
     int DisplayRefreshRate();
+    // The game's display: its desktop rectangle (false if unknown).
+    bool GameDisplayRect(int& x, int& y, int& width, int& height);
 }

@@ -1,4 +1,5 @@
 #include "os.h"
+#include "options.h"
 #include "log.h"
 
 #include <chrono>
@@ -287,13 +288,47 @@ namespace wet::os
             MessageBoxA(nullptr, text, "WET Recomp", MB_OK | MB_ICONERROR | MB_TOPMOST | MB_SETFOREGROUND);
     }
 
+    // The display chosen in wet.ini (monitor = \\.\DISPLAYn), else the main one.
+    static bool GameDisplay(MONITORINFOEXW& out)
+    {
+        struct Search { std::wstring want; MONITORINFOEXW found; bool hit; MONITORINFOEXW primary; bool havePrimary; };
+        Search s{};
+        std::string want = options::Monitor();
+        s.want.assign(want.begin(), want.end());
+        EnumDisplayMonitors(nullptr, nullptr, [](HMONITOR m, HDC, LPRECT, LPARAM p) -> BOOL {
+            auto* s = reinterpret_cast<Search*>(p);
+            MONITORINFOEXW info{};
+            info.cbSize = sizeof(info);
+            if (!GetMonitorInfoW(m, &info)) return TRUE;
+            if (!s->want.empty() && _wcsicmp(info.szDevice, s->want.c_str()) == 0) { s->found = info; s->hit = true; }
+            if (info.dwFlags & MONITORINFOF_PRIMARY) { s->primary = info; s->havePrimary = true; }
+            return TRUE;
+        }, reinterpret_cast<LPARAM>(&s));
+        if (s.hit) { out = s.found; return true; }
+        if (s.havePrimary) { out = s.primary; return true; }
+        return false;
+    }
+
     int DisplayRefreshRate()
     {
         DEVMODEW mode{};
         mode.dmSize = sizeof(mode);
-        if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &mode) && mode.dmDisplayFrequency >= 30)
+        MONITORINFOEXW info{};
+        const wchar_t* device = GameDisplay(info) ? info.szDevice : nullptr;
+        if (EnumDisplaySettingsW(device, ENUM_CURRENT_SETTINGS, &mode) && mode.dmDisplayFrequency >= 30)
             return int(mode.dmDisplayFrequency);
         return 60;
+    }
+
+    bool GameDisplayRect(int& x, int& y, int& width, int& height)
+    {
+        MONITORINFOEXW info{};
+        if (!GameDisplay(info)) return false;
+        x = info.rcMonitor.left;
+        y = info.rcMonitor.top;
+        width = info.rcMonitor.right - info.rcMonitor.left;
+        height = info.rcMonitor.bottom - info.rcMonitor.top;
+        return width > 0 && height > 0;
     }
 
     void OpenConsole()
@@ -400,6 +435,7 @@ namespace wet::os
     void SetDiagnosticWatch(DiagFaultHandler, DiagStepHandler) {}
     void OpenConsole() {}
     int DisplayRefreshRate() { return 60; }
+    bool GameDisplayRect(int&, int&, int&, int&) { return false; }
     uint32_t CurrentHostThreadId() { return uint32_t(syscall(SYS_gettid)); }
 
     struct WakeEvent { int fd; };

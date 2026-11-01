@@ -11,6 +11,8 @@
 #include <commctrl.h>
 #include <shellapi.h>
 #include <winhttp.h>
+#include <xinput.h>
+#include <mmsystem.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -107,6 +109,7 @@ namespace
         kShaderCache, kVideoMode, kPopups, kAsyncShaders,
         kStatus, kPlay, kSaves, kClearShaders, kKeyboard,
         kVsync, kHideBorders, kWideHud, kCheckUpdates, kReportBug, kUpdateText, kPrompts,
+        kMonitor, kPadTest, kAchievements,
         kKeyFirst = 300,                       // one combo per keybinds action
         kKeysOk = kKeyFirst + wet::keybinds::kActionCount, kKeysReset, kKeysCancel,
     };
@@ -316,6 +319,8 @@ namespace
     int Selected(int id) { return int(SendMessageW(Item(id), CB_GETCURSEL, 0, 0)); }
     int Pos(int id) { return int(SendMessageW(Item(id), TBM_GETPOS, 0, 0)); }
 
+    std::string ChosenMonitor(int sel);
+
     void SaveSettings()
     {
         int fps = Selected(kFps);
@@ -341,6 +346,7 @@ namespace
         s_ini.Set("video_mode", Checked(kVideoMode));
         s_ini.Set("achievement_popups", Checked(kPopups));
         s_ini.Set("async_shaders", Checked(kAsyncShaders));
+        s_ini.SetString("monitor", ChosenMonitor(Selected(kMonitor)));
         if (!s_ini.Save(s_iniPath))
             MessageBoxW(s_window, L"Could not save wet.ini.", L"WET Launcher", MB_ICONERROR);
     }
@@ -548,6 +554,273 @@ namespace
                           SW_SHOWNORMAL);
     }
 
+    // ---- Monitor choice (wet.ini monitor = \\.\DISPLAYn; empty = the main display) ----
+    std::vector<std::wstring> s_monitors;   // device names, in the combo's order after "Main display"
+
+    void FillMonitors(HWND combo, const std::string& chosen)
+    {
+        struct Ctx { HWND combo; const std::string* chosen; int sel; };
+        Ctx c{ combo, &chosen, 0 };
+        SendMessageW(combo, CB_ADDSTRING, 0, LPARAM(L"Main display"));
+        s_monitors.clear();
+        EnumDisplayMonitors(nullptr, nullptr, [](HMONITOR m, HDC, LPRECT, LPARAM p) -> BOOL {
+            auto* c = reinterpret_cast<Ctx*>(p);
+            MONITORINFOEXW info{};
+            info.cbSize = sizeof(info);
+            if (!GetMonitorInfoW(m, &info)) return TRUE;
+            DEVMODEW mode{};
+            mode.dmSize = sizeof(mode);
+            EnumDisplaySettingsW(info.szDevice, ENUM_CURRENT_SETTINGS, &mode);
+            std::wstring name = info.szDevice;
+            std::wstring shortName = name.substr(name.find_last_of(L'\\') + 1);   // DISPLAY2
+            wchar_t text[160];
+            std::swprintf(text, 160, L"%ls: %ldx%ld, %lu Hz%ls", shortName.c_str(), info.rcMonitor.right - info.rcMonitor.left,
+                          info.rcMonitor.bottom - info.rcMonitor.top, mode.dmDisplayFrequency,
+                          (info.dwFlags & MONITORINFOF_PRIMARY) ? L" (main)" : L"");
+            SendMessageW(c->combo, CB_ADDSTRING, 0, LPARAM(text));
+            s_monitors.push_back(name);
+            std::wstring want(c->chosen->begin(), c->chosen->end());
+            if (!want.empty() && _wcsicmp(want.c_str(), name.c_str()) == 0)
+                c->sel = int(s_monitors.size());
+            return TRUE;
+        }, reinterpret_cast<LPARAM>(&c));
+        SendMessageW(combo, CB_SETCURSEL, WPARAM(c.sel), 0);
+    }
+
+    std::string ChosenMonitor(int sel)
+    {
+        if (sel <= 0 || size_t(sel) > s_monitors.size()) return {};
+        const std::wstring& w = s_monitors[size_t(sel) - 1];
+        return std::string(w.begin(), w.end());   // \\.\DISPLAYn: ASCII
+    }
+
+    // ---- Small tool windows: achievements, controller test ----
+    HWND s_toolWindow = nullptr;
+
+    HWND OpenTool(const wchar_t* cls, const wchar_t* title, int w, int h)
+    {
+        if (s_toolWindow)
+            DestroyWindow(s_toolWindow);
+        RECT rc{ 0, 0, S(w), S(h) };
+        DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU;
+        AdjustWindowRect(&rc, style, FALSE);
+        RECT owner;
+        GetWindowRect(s_window, &owner);
+        int ww = rc.right - rc.left, hh = rc.bottom - rc.top;
+        s_toolWindow = CreateWindowExW(0, cls, title, style, (owner.left + owner.right - ww) / 2,
+                                       (owner.top + owner.bottom - hh) / 2, ww, hh, s_window, nullptr,
+                                       GetModuleHandleW(nullptr), nullptr);
+        return s_toolWindow;
+    }
+
+    std::wstring FromUtf8(const std::string& s)
+    {
+        if (s.empty()) return {};
+        int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), int(s.size()), nullptr, 0);
+        std::wstring w(size_t(std::max(n, 0)), L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, s.data(), int(s.size()), w.data(), n);
+        return w;
+    }
+
+    // The game writes <hdd>/achievements_list.txt (tab-separated: id, gamerscore,
+    // unlocked, unlock time, secret, name, description).
+    void OpenAchievements()
+    {
+        std::ifstream in(s_hddDir / "achievements_list.txt");
+        if (!in)
+        {
+            MessageBoxW(s_window, L"No achievements list yet: start the game once and it is written.", L"WET Launcher",
+                        MB_ICONINFORMATION);
+            return;
+        }
+        struct Row { std::wstring name, desc, when; int points; bool unlocked; };
+        std::vector<Row> rows;
+        int got = 0, total = 0, pts = 0, totalPts = 0;
+        std::string line;
+        while (std::getline(in, line))
+        {
+            if (line.empty() || line[0] == '#') continue;
+            std::vector<std::string> f;
+            size_t a = 0;
+            for (size_t b; (b = line.find('\t', a)) != std::string::npos; a = b + 1)
+                f.push_back(line.substr(a, b - a));
+            f.push_back(line.substr(a));
+            if (f.size() < 7) continue;
+            Row r;
+            r.points = std::atoi(f[1].c_str());
+            r.unlocked = f[2] == "1";
+            r.name = FromUtf8(f[5]);
+            r.desc = FromUtf8(f[6]);
+            if (!f[6].empty() && f[6].back() == '\r') r.desc.pop_back();
+            unsigned long long t = std::strtoull(f[3].c_str(), nullptr, 10);
+            if (r.unlocked && t)
+            {
+                // A FILETIME (100 ns since 1601) or a Unix time.
+                FILETIME ft;
+                ULARGE_INTEGER u;
+                u.QuadPart = t > 100000000000ull ? t : t * 10000000ull + 116444736000000000ull;
+                ft.dwLowDateTime = u.LowPart;
+                ft.dwHighDateTime = u.HighPart;
+                SYSTEMTIME st, local;
+                FileTimeToSystemTime(&ft, &st);
+                SystemTimeToTzSpecificLocalTime(nullptr, &st, &local);
+                wchar_t d[64];
+                std::swprintf(d, 64, L"%04d-%02d-%02d", local.wYear, local.wMonth, local.wDay);
+                r.when = d;
+            }
+            else if (r.unlocked)
+                r.when = L"yes";
+            total++;
+            totalPts += r.points;
+            if (r.unlocked) { got++; pts += r.points; }
+            rows.push_back(std::move(r));
+        }
+        std::stable_sort(rows.begin(), rows.end(), [](const Row& x, const Row& y) { return x.unlocked > y.unlocked; });
+        wchar_t title[128];
+        std::swprintf(title, 128, L"Achievements: %d of %d, %d of %d G", got, total, pts, totalPts);
+        HWND w = OpenTool(L"WetLauncherTool", title, 640, 420);
+        HWND list = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"", WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_NOSORTHEADER,
+                                    S(8), S(8), S(624), S(404), w, nullptr, GetModuleHandleW(nullptr), nullptr);
+        SendMessageW(list, WM_SETFONT, WPARAM(s_font), TRUE);
+        ListView_SetExtendedListViewStyle(list, LVS_EX_FULLROWSELECT);
+        const struct { const wchar_t* name; int width; } cols[] = {
+            { L"Achievement", 170 }, { L"Description", 300 }, { L"G", 40 }, { L"Unlocked", 90 },
+        };
+        for (int i = 0; i < 4; i++)
+        {
+            LVCOLUMNW c{};
+            c.mask = LVCF_TEXT | LVCF_WIDTH;
+            c.pszText = const_cast<wchar_t*>(cols[i].name);
+            c.cx = S(cols[i].width);
+            ListView_InsertColumn(list, i, &c);
+        }
+        for (size_t i = 0; i < rows.size(); i++)
+        {
+            LVITEMW item{};
+            item.mask = LVIF_TEXT;
+            item.iItem = int(i);
+            item.pszText = rows[i].name.data();
+            ListView_InsertItem(list, &item);
+            ListView_SetItemText(list, int(i), 1, rows[i].desc.data());
+            std::wstring p = std::to_wstring(rows[i].points);
+            ListView_SetItemText(list, int(i), 2, p.data());
+            ListView_SetItemText(list, int(i), 3, rows[i].when.data());
+        }
+        ShowWindow(w, SW_SHOW);
+    }
+
+    // Controller test: XInput pads (Xbox and compatible) and other game
+    // controllers (DirectInput / WinMM: PlayStation pads and the like), live.
+    typedef DWORD(WINAPI* XInputGetStateFn)(DWORD, XINPUT_STATE*);
+    XInputGetStateFn s_xinput = nullptr;
+    constexpr UINT_PTR kPadTimer = 1;
+    constexpr int kPadText = 900;
+
+    std::wstring PadReport()
+    {
+        std::wstring out;
+        bool any = false;
+        if (s_xinput)
+            for (DWORD i = 0; i < 4; i++)
+            {
+                XINPUT_STATE st{};
+                if (s_xinput(i, &st) != ERROR_SUCCESS) continue;
+                any = true;
+                const XINPUT_GAMEPAD& g = st.Gamepad;
+                static const struct { WORD bit; const wchar_t* name; } buttons[] = {
+                    { XINPUT_GAMEPAD_A, L"A" }, { XINPUT_GAMEPAD_B, L"B" }, { XINPUT_GAMEPAD_X, L"X" },
+                    { XINPUT_GAMEPAD_Y, L"Y" }, { XINPUT_GAMEPAD_LEFT_SHOULDER, L"LB" },
+                    { XINPUT_GAMEPAD_RIGHT_SHOULDER, L"RB" }, { XINPUT_GAMEPAD_BACK, L"Back" },
+                    { XINPUT_GAMEPAD_START, L"Start" }, { XINPUT_GAMEPAD_LEFT_THUMB, L"L-stick" },
+                    { XINPUT_GAMEPAD_RIGHT_THUMB, L"R-stick" }, { XINPUT_GAMEPAD_DPAD_UP, L"Up" },
+                    { XINPUT_GAMEPAD_DPAD_DOWN, L"Down" }, { XINPUT_GAMEPAD_DPAD_LEFT, L"Left" },
+                    { XINPUT_GAMEPAD_DPAD_RIGHT, L"Right" },
+                };
+                std::wstring pressed;
+                for (auto& b : buttons)
+                    if (g.wButtons & b.bit) pressed += std::wstring(pressed.empty() ? L"" : L" ") + b.name;
+                wchar_t line[400];
+                std::swprintf(line, 400,
+                              L"Xbox controller %lu\r\n   Left stick %+5.2f %+5.2f    Right stick %+5.2f %+5.2f\r\n"
+                              L"   Triggers  LT %3d%%  RT %3d%%\r\n   Buttons: %ls\r\n\r\n",
+                              i + 1, g.sThumbLX / 32767.0, g.sThumbLY / 32767.0, g.sThumbRX / 32767.0,
+                              g.sThumbRY / 32767.0, g.bLeftTrigger * 100 / 255, g.bRightTrigger * 100 / 255,
+                              pressed.empty() ? L"-" : pressed.c_str());
+                out += line;
+            }
+        // Other controllers (WinMM also lists XInput pads: skip ones with the XInput name).
+        UINT n = joyGetNumDevs();
+        for (UINT i = 0; i < n && i < 16; i++)
+        {
+            JOYINFOEX ji{ sizeof(ji) };
+            ji.dwFlags = JOY_RETURNALL;
+            if (joyGetPosEx(i, &ji) != JOYERR_NOERROR) continue;
+            JOYCAPSW caps{};
+            joyGetDevCapsW(i, &caps, sizeof(caps));
+            std::wstring name = caps.szPname;
+            if (name.find(L"XINPUT") != std::wstring::npos || name.find(L"Xbox") != std::wstring::npos) continue;
+            any = true;
+            std::wstring pressed;
+            for (int b = 0; b < 32; b++)
+                if (ji.dwButtons & (1u << b)) pressed += (pressed.empty() ? L"" : L" ") + std::to_wstring(b + 1);
+            auto axis = [](DWORD v, UINT lo, UINT hi) { return hi > lo ? (int(v) - int(lo)) * 2.0 / (hi - lo) - 1.0 : 0.0; };
+            wchar_t line[400];
+            std::swprintf(line, 400,
+                          L"%ls (game controller %u)\r\n   Axes X %+5.2f  Y %+5.2f  Z %+5.2f  R %+5.2f\r\n"
+                          L"   Buttons: %ls\r\n\r\n",
+                          name.empty() ? L"Controller" : name.c_str(), i + 1, axis(ji.dwXpos, caps.wXmin, caps.wXmax),
+                          axis(ji.dwYpos, caps.wYmin, caps.wYmax), axis(ji.dwZpos, caps.wZmin, caps.wZmax),
+                          axis(ji.dwRpos, caps.wRmin, caps.wRmax), pressed.empty() ? L"-" : pressed.c_str());
+            out += line;
+        }
+        if (!any)
+            out = L"No controller found. Connect one (USB or Bluetooth) - it shows up here within a second.";
+        else
+            out += L"The game reads PlayStation and other controllers through SDL, with the Xbox layout.";
+        return out;
+    }
+
+    LRESULT CALLBACK ToolProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+    {
+        switch (msg)
+        {
+        case WM_TIMER:
+            if (wp == kPadTimer)
+            {
+                std::wstring text = PadReport();
+                wchar_t old[2048] = {};
+                GetDlgItemTextW(hwnd, kPadText, old, 2048);
+                if (text != old)
+                    SetDlgItemTextW(hwnd, kPadText, text.c_str());
+            }
+            return 0;
+        case WM_CTLCOLORSTATIC:
+            SetBkMode(HDC(wp), TRANSPARENT);
+            return LRESULT(GetSysColorBrush(COLOR_WINDOW));
+        case WM_DESTROY:
+            KillTimer(hwnd, kPadTimer);
+            if (hwnd == s_toolWindow) s_toolWindow = nullptr;
+            return 0;
+        }
+        return DefWindowProcW(hwnd, msg, wp, lp);
+    }
+
+    void OpenPadTest()
+    {
+        if (!s_xinput)
+            if (HMODULE x = LoadLibraryW(L"xinput1_4.dll"); x || (x = LoadLibraryW(L"xinput9_1_0.dll")))
+                s_xinput = reinterpret_cast<XInputGetStateFn>(reinterpret_cast<void*>(GetProcAddress(x, "XInputGetState")));
+        HWND w = OpenTool(L"WetLauncherTool", L"Controller test", 460, 300);
+        HWND t = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_LEFT, S(12), S(10), S(436), S(280), w,
+                                 reinterpret_cast<HMENU>(intptr_t(kPadText)), GetModuleHandleW(nullptr), nullptr);
+        HFONT mono = CreateFontW(-S(13), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY,
+                                 FIXED_PITCH, L"Consolas");
+        SendMessageW(t, WM_SETFONT, WPARAM(mono), TRUE);
+        SetWindowTextW(t, PadReport().c_str());
+        SetTimer(w, kPadTimer, 50, nullptr);
+        ShowWindow(w, SW_SHOW);
+    }
+
     void BuildControls()
     {
         const Ini& ini = s_ini;
@@ -613,19 +886,24 @@ namespace
         Make(L"BUTTON", L"Clear shader cache", BS_PUSHBUTTON | WS_TABSTOP, 517, 278, 150, 26, kClearShaders);
 
         // Screen
-        Group(L"Screen", 10, 322, 330, 92);
+        Group(L"Screen", 10, 322, 330, 122);
         Check(kVsync, L"V-Sync: no tearing (off for G-Sync / FreeSync)", 22, 342, ini.Get("vsync", 0) != 0, 310);
         Check(kHideBorders, L"Hide the dark frame at the screen edges", 22, 364, ini.Get("hide_borders", 0) != 0, 310);
         Check(kWideHud, L"Widescreen: keep the HUD 16:9 in the middle", 22, 386, ini.Get("widescreen_hud", 1) != 0, 310);
+        Label(L"Monitor", 22, 414, 56);
+        FillMonitors(Make(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 80, 412, 246, 200, kMonitor),
+                     ini.GetString("monitor", ""));
 
         // Help
-        Group(L"Help", 350, 322, 330, 92);
+        Group(L"Help", 350, 322, 330, 122);
         Make(L"BUTTON", L"Check for updates", BS_PUSHBUTTON | WS_TABSTOP, 362, 342, 145, 26, kCheckUpdates);
         Make(L"BUTTON", L"Report a bug...", BS_PUSHBUTTON | WS_TABSTOP, 517, 342, 150, 26, kReportBug);
-        Make(L"STATIC", L"", SS_LEFT, 362, 378, 305, 30, kUpdateText);
+        Make(L"BUTTON", L"Controller test...", BS_PUSHBUTTON | WS_TABSTOP, 362, 372, 145, 26, kPadTest);
+        Make(L"BUTTON", L"Achievements...", BS_PUSHBUTTON | WS_TABSTOP, 517, 372, 150, 26, kAchievements);
+        Make(L"STATIC", L"", SS_LEFT, 362, 406, 305, 32, kUpdateText);
 
-        Make(L"STATIC", L"", SS_LEFT | SS_PATHELLIPSIS, 12, 428, 540, 18, kStatus);
-        Make(L"BUTTON", L"Play", BS_DEFPUSHBUTTON | WS_TABSTOP, 570, 422, 110, 32, kPlay);
+        Make(L"STATIC", L"", SS_LEFT | SS_PATHELLIPSIS, 12, 458, 540, 18, kStatus);
+        Make(L"BUTTON", L"Play", BS_DEFPUSHBUTTON | WS_TABSTOP, 570, 452, 110, 32, kPlay);
         UpdateStatus();
     }
 
@@ -648,6 +926,8 @@ namespace
             case kKeyboard: OpenKeys(); return 0;
             case kCheckUpdates: CheckForUpdates(); return 0;
             case kReportBug: ReportBug(); return 0;
+            case kPadTest: OpenPadTest(); return 0;
+            case kAchievements: OpenAchievements(); return 0;
             case IDCANCEL: DestroyWindow(hwnd); return 0;
             }
             break;
@@ -676,7 +956,7 @@ namespace
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show)
 {
     SetProcessDPIAware();
-    INITCOMMONCONTROLSEX icc{ sizeof(icc), ICC_STANDARD_CLASSES | ICC_BAR_CLASSES };
+    INITCOMMONCONTROLSEX icc{ sizeof(icc), ICC_STANDARD_CLASSES | ICC_BAR_CLASSES | ICC_LISTVIEW_CLASSES };
     InitCommonControlsEx(&icc);
 
     wchar_t self[MAX_PATH];
@@ -706,8 +986,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show)
     kc.lpfnWndProc = KeysProc;
     kc.lpszClassName = L"WetLauncherKeys";
     RegisterClassExW(&kc);
+    WNDCLASSEXW tc = wc;
+    tc.lpfnWndProc = ToolProc;
+    tc.lpszClassName = L"WetLauncherTool";
+    RegisterClassExW(&tc);
 
-    RECT rc{ 0, 0, S(690), S(464) };
+    RECT rc{ 0, 0, S(690), S(494) };
     DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
     AdjustWindowRect(&rc, style, FALSE);
     int w = rc.right - rc.left, h = rc.bottom - rc.top;

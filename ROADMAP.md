@@ -43,7 +43,7 @@ Make a full playthrough reliable before adding more features.
 | ~~One-click setup~~ (done: `WetSetup.exe`, attached to releases: ISO in, tools fetched, built, desktop shortcut) | No command prompt needed | M |
 | ~~Update check~~ (done: launcher, Help > Check for updates) | Players know when to rebuild | S |
 | ~~Bug report button~~ (done: launcher, Help > Report a bug: zip of logs, settings and system info) | Better reports, less back-and-forth | S |
-| **Launcher extras**: display / monitor choice, controller test, achievements list | Fewer reasons to open wet.ini | S–M |
+| ~~Launcher extras~~ (done: monitor choice, controller test, achievements list) | Fewer reasons to open wet.ini | S–M |
 | **Linux / Steam Deck**: test under Proton, then a native Linux build (the runtime already builds on Linux) | Many players are on Deck | L |
 
 ## Ongoing
