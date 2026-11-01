@@ -31,8 +31,6 @@ namespace wet::options
         // Mouse button bindings: left, right, middle, back (X1), forward (X2).
         constexpr const char* kMouseKeys[5] = { "mouse_left", "mouse_right", "mouse_middle", "mouse_back", "mouse_forward" };
         std::string s_mouseBind[5] = { "RT", "LT", "RTHUMB", "LB", "RB" };
-        std::mutex s_monitorLock;
-        std::string s_monitor;   // display device name (\\.\DISPLAY2), empty = the main display
 
         // Keyboard bindings (keybinds.h), key_<action> = KEY[, KEY].
         std::mutex s_keyLock;
@@ -143,11 +141,6 @@ namespace wet::options
             std::fprintf(f, "shader_cache = %d\n", s_shaderCache.load());
             std::fprintf(f, "# async_shaders: 1 = don't wait for new shaders (an object may appear a frame or two late instead of a stutter), 0 = wait\n");
             std::fprintf(f, "async_shaders = %d\n", s_asyncShaders.load());
-            {
-                std::lock_guard lock(s_monitorLock);
-                std::fprintf(f, "# monitor: the display the game opens on (as the launcher lists it, e.g. \\\\.\\DISPLAY2); empty = the main display\n");
-                std::fprintf(f, "monitor = %s\n", s_monitor.c_str());
-            }
             std::fprintf(f, "fullscreen = %d\n", s_fullscreen.load());
             std::fprintf(f, "show_fps = %d\n", s_showFps.load());
             std::fclose(f);
@@ -172,16 +165,6 @@ namespace wet::options
                             s_keyBind[i] = Upper(rest);
                         }
                     s_keyVersion++;
-                    continue;
-                }
-                if (const char* m = std::strstr(line, "monitor"); m && std::strspn(line, " \t") == size_t(m - line) && (m[7] == ' ' || m[7] == '='))
-                {
-                    const char* eq = std::strchr(m, '=');
-                    std::string v = eq ? eq + 1 : "";
-                    size_t x = v.find_first_not_of(" \t"), y = v.find_last_not_of(" \t\r\n");
-                    v = x == std::string::npos ? std::string() : v.substr(x, y - x + 1);
-                    std::lock_guard lock(s_monitorLock);
-                    s_monitor = v.find("DISPLAY") != std::string::npos ? v : std::string();
                     continue;
                 }
                 if (std::sscanf(line, " %63[a-z0-9_] = %63s", key, text) == 2)
@@ -332,11 +315,6 @@ namespace wet::options
     void SetFov(int v) { s_fov = Clamp(v, 60, 130); Save(); }
     int Sharpness() { return s_sharpness; }
     void SetSharpness(int v) { s_sharpness = Clamp(v, 0, 100); Save(); }
-    std::string Monitor()
-    {
-        std::lock_guard lock(s_monitorLock);
-        return s_monitor;
-    }
     bool Fullscreen() { return s_fullscreen; }
     void SetFullscreen(bool v) { s_fullscreen = v; Save(); }
     bool AchievementPopups() { return s_achievementPopups.load() != 0; }

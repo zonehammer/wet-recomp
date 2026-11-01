@@ -114,32 +114,8 @@ namespace wet::achievements
             }
         };
 
-        // The whole list for the launcher (it can't read default.xex itself):
-        // <hdd>/achievements_list.txt, one per line, tab-separated:
-        // id, gamerscore, unlocked 0/1, unlock time, secret 0/1, name, description.
-        void WriteListLocked()
-        {
-            if (s_file.empty())
-                return;
-            FILE* f = std::fopen((s_file.parent_path() / "achievements_list.txt").string().c_str(), "w");
-            if (!f)
-                return;
-            auto clean = [](std::string t) {
-                for (auto& c : t)
-                    if (c == '\t' || c == '\n' || c == '\r') c = ' ';
-                return t;
-            };
-            std::fprintf(f, "# Written by WET Recomp for the launcher's achievements list.\n");
-            for (auto& a : s_list)
-                std::fprintf(f, "%u\t%u\t%d\t%llu\t%d\t%s\t%s\n", a.id, a.gamerscore, a.unlocked ? 1 : 0,
-                             (unsigned long long)a.unlockTime, a.secret ? 1 : 0, clean(a.name).c_str(),
-                             clean(a.unlocked || !a.secret ? a.description : a.lockedDescription).c_str());
-            std::fclose(f);
-        }
-
         void SaveLocked()
         {
-            WriteListLocked();
             if (s_file.empty())
                 return;
             FILE* f = std::fopen(s_file.string().c_str(), "w");
@@ -213,7 +189,6 @@ namespace wet::achievements
             }
             std::fclose(f);
         }
-        WriteListLocked();
         uint32_t total = 0, got = 0, unlocked = 0;
         for (auto& a : s_list)
         {

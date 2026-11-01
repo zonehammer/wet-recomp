@@ -90,8 +90,6 @@ namespace wet::options
     int Sharpness();
     void SetSharpness(int v);
 
-    // The display to open on: its device name (\\.\DISPLAY2), empty = the main one.
-    std::string Monitor();
     bool Fullscreen();
     void SetFullscreen(bool v);
     bool ShowFps();
