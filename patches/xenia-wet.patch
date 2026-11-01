@@ -994,10 +994,10 @@ index 88bdcb438..97a4623a8 100644
    std::vector<D3D12_RESOURCE_BARRIER> barriers_;
  
 diff --git a/src/xenia/gpu/d3d12/d3d12_texture_cache.cc b/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
-index b96c200b9..3c1194dcf 100644
+index b96c200b9..c51dd1af5 100644
 --- a/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
 +++ b/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
-@@ -1416,6 +1416,43 @@ ID3D12Resource* D3D12TextureCache::RequestSwapTexture(
+@@ -1416,6 +1416,57 @@ ID3D12Resource* D3D12TextureCache::RequestSwapTexture(
        key.dimension != xenos::DataDimension::k2DOrStacked) {
      return nullptr;
    }
@@ -1017,8 +1017,22 @@ index b96c200b9..3c1194dcf 100644
 +                  WetIsRangeScaledResolved(key.base_page << 12,
 +                                           layout.base.level_data_extent_bytes);
 +    if (scaled) {
-+      wet_front_buffer_first = key.base_page << 12;
-+      wet_front_buffer_last =
++      // Two front buffers alternate: keep both (slot by the page's order).
++      uint32_t slot = wet_front_buffer_first[0].load() == (key.base_page << 12)
++                          ? 0
++                          : wet_front_buffer_first[1].load() ==
++                                    (key.base_page << 12)
++                                ? 1
++                                : (wet_front_buffer_first[0].load() == 0 ? 0 : 1);
++      if (wet_front_buffer_first[slot].load() != (key.base_page << 12) &&
++          wet_front_buffer_first[0].load() && wet_front_buffer_first[1].load()) {
++        // A third buffer: replace the older slot.
++        wet_front_buffer_first[0] = wet_front_buffer_first[1].load();
++        wet_front_buffer_last[0] = wet_front_buffer_last[1].load();
++        slot = 1;
++      }
++      wet_front_buffer_first[slot] = key.base_page << 12;
++      wet_front_buffer_last[slot] =
 +          (key.base_page << 12) + layout.base.level_data_extent_bytes - 1;
 +    }
 +    bool known = false;
@@ -17068,7 +17082,7 @@ index e0fd8440d..15115f823 100644
                                    builder_->makeUintConstant(6)));
          {
 diff --git a/src/xenia/gpu/texture_cache.cc b/src/xenia/gpu/texture_cache.cc
-index 46820e2bb..06539f277 100644
+index 46820e2bb..8b145d52b 100644
 --- a/src/xenia/gpu/texture_cache.cc
 +++ b/src/xenia/gpu/texture_cache.cc
 @@ -73,6 +73,10 @@ DEFINE_uint32(
@@ -17076,7 +17090,7 @@ index 46820e2bb..06539f277 100644
  namespace gpu {
  
 +#if XE_WET_RUNTIME
-+std::atomic<uint32_t> wet_front_buffer_first{0}, wet_front_buffer_last{0};
++std::atomic<uint32_t> wet_front_buffer_first[2], wet_front_buffer_last[2];
 +#endif
 +
  const TextureCache::LoadShaderInfo
@@ -17088,9 +17102,9 @@ index 46820e2bb..06539f277 100644
    }
 +#if XE_WET_RUNTIME
 +  // WET diagnostics: who clears the scaled mark of a front buffer.
-+  {
-+    uint32_t fb_first = wet_front_buffer_first.load(std::memory_order_relaxed);
-+    uint32_t fb_last = wet_front_buffer_last.load(std::memory_order_relaxed);
++  for (uint32_t fb = 0; fb < 2; ++fb) {
++    uint32_t fb_first = wet_front_buffer_first[fb].load(std::memory_order_relaxed);
++    uint32_t fb_last = wet_front_buffer_last[fb].load(std::memory_order_relaxed);
 +    if (fb_last && address_first <= fb_last && address_last >= fb_first &&
 +        IsRangeScaledResolved(fb_first, fb_last - fb_first + 1)) {
 +      static uint32_t hits = 0;
@@ -17108,7 +17122,7 @@ index 46820e2bb..06539f277 100644
    // invalidated by their shared memory watches.
    uint32_t resolve_page_first = address_first >> 12;
 diff --git a/src/xenia/gpu/texture_cache.h b/src/xenia/gpu/texture_cache.h
-index c892eee32..250fe9258 100644
+index c892eee32..bb9ae86d5 100644
 --- a/src/xenia/gpu/texture_cache.h
 +++ b/src/xenia/gpu/texture_cache.h
 @@ -53,6 +53,11 @@ namespace gpu {
@@ -17117,7 +17131,7 @@ index c892eee32..250fe9258 100644
  // because textures are streamed this way anyway.
 +#if XE_WET_RUNTIME
 +// WET diagnostics: the last swap texture's guest range (D3D12 swap).
-+extern std::atomic<uint32_t> wet_front_buffer_first, wet_front_buffer_last;
++extern std::atomic<uint32_t> wet_front_buffer_first[2], wet_front_buffer_last[2];
 +#endif
 +
  class TextureCache {
