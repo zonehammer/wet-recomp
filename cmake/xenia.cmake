@@ -75,7 +75,7 @@ function(xe_target name)
         target_compile_options(${name} PRIVATE /utf-8 /W0 -Wno-everything -Wno-address-of-temporary /arch:AVX /FI${XE_COMPAT_HEADER})
     else()
         target_compile_options(${name} PRIVATE -w -mavx -fno-strict-aliasing -Wno-address-of-temporary
-                               "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include ${XE_COMPAT_HEADER}>")
+                               "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include \"${XE_COMPAT_HEADER}\">")
     endif()
     if(MINGW)
         target_compile_definitions(${name} PUBLIC WINVER=0x0A00 _WIN32_WINNT=0x0A00 NOMINMAX)

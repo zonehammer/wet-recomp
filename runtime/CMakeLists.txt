@@ -17,7 +17,7 @@ if(MSVC) # clang-cl
     # Always optimise the generated code: unoptimised it uses enormous stack frames.
     target_compile_options(WetPPC PRIVATE /W0 /O2 /clang:-fno-strict-aliasing)
 else()
-    target_compile_options(WetPPC PUBLIC -include ${WET_HOOKS_HEADER} -msse4.1)
+    target_compile_options(WetPPC PUBLIC "SHELL:-include \"${WET_HOOKS_HEADER}\"" -msse4.1)
     target_compile_options(WetPPC PRIVATE -w -O2 -fno-strict-aliasing)
 endif()
 
