@@ -56,17 +56,91 @@ namespace wet::os
     using VirtualAlloc2Fn = PVOID(WINAPI*)(HANDLE, PVOID, SIZE_T, ULONG, ULONG, void*, ULONG);
     using MapViewOfFile3Fn = PVOID(WINAPI*)(HANDLE, HANDLE, PVOID, ULONG64, SIZE_T, ULONG, ULONG, void*, ULONG);
 
+    // Segments in address order: the views and the plain gaps between them.
+    struct AliasSeg { uint64_t start, size; bool view; };
+
+    static std::vector<AliasSeg> AliasSegments(uint64_t total, const AliasView* views, int viewCount)
+    {
+        std::vector<AliasSeg> segs;
+        uint64_t cursor = 0;
+        for (int i = 0; i < viewCount; i++)
+        {
+            if (views[i].offset > cursor)
+                segs.push_back({ cursor, views[i].offset - cursor, false });
+            segs.push_back({ views[i].offset, views[i].size, true });
+            cursor = views[i].offset + views[i].size;
+        }
+        if (cursor < total)
+            segs.push_back({ cursor, total - cursor, false });
+        return segs;
+    }
+
+    // Without placeholders (Wine / Proton, older Windows): find a free range
+    // big enough, then map the views and reserve the gaps at fixed addresses in
+    // it. Another thread could take part of the range in between, so retry a
+    // few times. Views must be 64 KB aligned here.
+    static uint8_t* ReserveWithAliasesFixed(uint64_t total, const AliasView* views, int viewCount,
+                                            uint64_t physicalSize, const char** failureReason)
+    {
+        for (int i = 0; i < viewCount; i++)
+            if ((views[i].offset | views[i].size) & 0xFFFF)
+            {
+                *failureReason = "views not 64 KB aligned (fixed-address mapping)";
+                return nullptr;
+            }
+        HANDLE section = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
+                                            DWORD(physicalSize >> 32), DWORD(physicalSize), nullptr);
+        if (!section)
+        {
+            *failureReason = "CreateFileMapping failed";
+            return nullptr;
+        }
+        std::vector<AliasSeg> segs = AliasSegments(total, views, viewCount);
+        for (int attempt = 0; attempt < 16; attempt++)
+        {
+            auto* base = static_cast<uint8_t*>(VirtualAlloc(nullptr, SIZE_T(total), MEM_RESERVE, PAGE_NOACCESS));
+            if (!base)
+                break;
+            VirtualFree(base, 0, MEM_RELEASE);
+            size_t done = 0;
+            for (; done < segs.size(); done++)
+            {
+                const AliasSeg& sg = segs[done];
+                void* r = sg.view ? MapViewOfFileEx(section, FILE_MAP_ALL_ACCESS, 0, 0, SIZE_T(sg.size), base + sg.start)
+                                  : VirtualAlloc(base + sg.start, SIZE_T(sg.size), MEM_RESERVE, PAGE_NOACCESS);
+                if (r != base + sg.start)
+                {
+                    if (r && sg.view) UnmapViewOfFile(r);
+                    else if (r) VirtualFree(r, 0, MEM_RELEASE);
+                    break;
+                }
+            }
+            if (done == segs.size())
+            {
+                s_physicalSection = section;
+                return base;
+            }
+            for (size_t i = 0; i < done; i++)
+            {
+                if (segs[i].view) UnmapViewOfFile(base + segs[i].start);
+                else VirtualFree(base + segs[i].start, 0, MEM_RELEASE);
+            }
+        }
+        CloseHandle(section);
+        *failureReason = "no free address range for the guest memory (fixed-address mapping)";
+        return nullptr;
+    }
+
     uint8_t* ReserveWithAliases(uint64_t total, const AliasView* views, int viewCount, uint64_t physicalSize,
                                 const char** failureReason)
     {
         HMODULE kb = GetModuleHandleW(L"kernelbase.dll");
         auto va2 = kb ? reinterpret_cast<VirtualAlloc2Fn>(reinterpret_cast<void*>(GetProcAddress(kb, "VirtualAlloc2"))) : nullptr;
         auto mv3 = kb ? reinterpret_cast<MapViewOfFile3Fn>(reinterpret_cast<void*>(GetProcAddress(kb, "MapViewOfFile3"))) : nullptr;
-        if (!va2 || !mv3)
-        {
-            *failureReason = "VirtualAlloc2/MapViewOfFile3 unavailable (needs Windows 10 1803 or later)";
-            return nullptr;
-        }
+        // WET_NO_PLACEHOLDERS=1 tests the fallback on Windows.
+        static const bool noPlaceholders = std::getenv("WET_NO_PLACEHOLDERS") != nullptr;
+        if (!va2 || !mv3 || noPlaceholders)
+            return ReserveWithAliasesFixed(total, views, viewCount, physicalSize, failureReason);
 
         HANDLE section = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
                                             DWORD(physicalSize >> 32), DWORD(physicalSize), nullptr);
@@ -81,24 +155,12 @@ namespace wet::os
                                                PAGE_NOACCESS, nullptr, 0));
         if (!base)
         {
+            // Placeholders exist but don't work (some Wine versions): fall back.
             CloseHandle(section);
-            *failureReason = "VirtualAlloc2 placeholder reservation failed";
-            return nullptr;
+            return ReserveWithAliasesFixed(total, views, viewCount, physicalSize, failureReason);
         }
 
-        // Segments in address order: views and the plain gaps between them.
-        struct Seg { uint64_t start, size; bool view; };
-        std::vector<Seg> segs;
-        uint64_t cursor = 0;
-        for (int i = 0; i < viewCount; i++)
-        {
-            if (views[i].offset > cursor)
-                segs.push_back({ cursor, views[i].offset - cursor, false });
-            segs.push_back({ views[i].offset, views[i].size, true });
-            cursor = views[i].offset + views[i].size;
-        }
-        if (cursor < total)
-            segs.push_back({ cursor, total - cursor, false });
+        std::vector<AliasSeg> segs = AliasSegments(total, views, viewCount);
 
         bool ok = true;
         // Split the placeholder into one placeholder per segment.
@@ -131,7 +193,7 @@ namespace wet::os
                 VirtualFree(base + sg.start, 0, MEM_RELEASE);
             }
             VirtualFree(base, 0, MEM_RELEASE);
-            return nullptr;
+            return ReserveWithAliasesFixed(total, views, viewCount, physicalSize, failureReason);
         }
         return base;
     }

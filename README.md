@@ -71,6 +71,27 @@ This extracts the disc into `game\extracted`, recompiles `default.xex` into
 licence notices. It contains code translated from your copy of the game, so it is for
 **your own machines only**: don't upload or share it.
 
+## Steam Deck, Bazzite and other Linux (experimental)
+
+The game is built as the Windows program and runs with Proton. Everything is built on the
+Deck / PC itself from your disc image; no root and nothing installed system-wide (the
+tools go into the install folder). You need git and python3, which SteamOS and Bazzite
+already have. On the Deck, use Desktop Mode and open Konsole:
+
+```sh
+git clone https://github.com/zonehammer/wet-recomp.git ~/wet-setup
+python3 ~/wet-setup/tools/setup_linux.py --iso ~/path/to/WET.iso
+```
+
+It downloads CMake, Ninja, llvm-mingw and (when there's no clang) zig into `~/WET-Recomp/tools`,
+builds the latest release into `~/WET-Recomp/wet-recomp`, and prints what to add to Steam:
+`build/windows/runtime/WetLauncher.exe` as a non-Steam game, with Proton forced in its
+Compatibility settings. The first build takes a long time on the Deck (an hour or more);
+run the same command again (without `--iso`) to update.
+
+By hand: `python3 tools/build.py --iso ... --llvm-mingw <llvm-mingw folder>` (needs clang,
+CMake and Ninja).
+
 ## Controls
 
 | Action | Controller | Keyboard / mouse |

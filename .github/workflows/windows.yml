@@ -95,6 +95,12 @@ jobs:
           $selftest = $p.ExitCode
           Get-Content selftest.log | ForEach-Object { Write-Output "::notice::$_" }
           if ($selftest -ne 0) { throw "memory self-test failed" }
+          # The same with the fixed-address mapping Wine / Proton get (no placeholders).
+          $env:WET_NO_PLACEHOLDERS = '1'
+          $p = Start-Process build\runtime\WetRecomp.exe -ArgumentList '--selftest' -Wait -PassThru -NoNewWindow
+          Remove-Item Env:WET_NO_PLACEHOLDERS
+          Get-Content selftest.log | ForEach-Object { Write-Output "::notice::(no placeholders) $_" }
+          if ($p.ExitCode -ne 0) { throw "memory self-test without placeholders failed" }
           & build\thirdparty\XenonRecomp\XenonRecomp\XenonRecomp.exe
           if ($LASTEXITCODE -ne 0) { throw "XenonRecomp.exe failed to start" }
 

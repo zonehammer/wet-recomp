@@ -1,0 +1,45 @@
+# Linux build check (the Steam Deck / Bazzite route): the recompiler built for
+# Linux, then the Windows game cross-compiled with llvm-mingw against
+# ci/stub_ppc (no game files involved), as tools/build.py does on Linux.
+name: Linux build (for Proton)
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  cross:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch submodules
+        run: python3 tools/fetch_deps.py
+
+      - name: Tools
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build clang
+          url=$(gh api repos/mstorsjo/llvm-mingw/releases/latest --jq '.assets[] | select(.name | test("ucrt-ubuntu-[0-9.]+-x86_64.tar.xz$")) | .browser_download_url' | head -1)
+          echo "Using $url"
+          curl -sSL "$url" | tar -xJ -C "$HOME"
+          echo "LLVM_MINGW=$(ls -d $HOME/llvm-mingw-*)" >> "$GITHUB_ENV"
+
+      - name: Recompiler for Linux
+        run: |
+          cmake -S . -B build/host -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DWET_HOST_TOOLS_ONLY=ON
+          cmake --build build/host --target XenonRecomp
+          build/host/thirdparty/XenonRecomp/XenonRecomp/XenonRecomp || true
+
+      - name: Windows game, cross-compiled
+        run: |
+          cmake -S . -B build/windows -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-cross.cmake \
+            -DLLVM_MINGW="$LLVM_MINGW" -DWET_CI_STUB=ON \
+            -DWET_HOST_XENONRECOMP="$PWD/build/host/thirdparty/XenonRecomp/XenonRecomp/XenonRecomp"
+          cmake --build build/windows --target WetRecomp WetLauncher
+          ls -la build/windows/runtime/*.exe
+
+      - name: setup_linux.py parses
+        run: python3 tools/setup_linux.py --help

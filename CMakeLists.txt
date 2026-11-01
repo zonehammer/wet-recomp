@@ -109,13 +109,36 @@ wet_apply_patch(${XR_DIR} xenonrecomp-wet.patch)
 add_subdirectory(${XR_DIR} thirdparty/XenonRecomp EXCLUDE_FROM_ALL)
 
 # `cmake --build build --target recompile` : default.xex -> generated/ppc/*.cpp
-add_custom_target(recompile
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${WET_GENERATED_DIR}
-    COMMAND $<TARGET_FILE:XenonRecomp> ${WET_ROOT}/config/WET_config.toml ${XR_DIR}/XenonUtils/ppc_context.h
-    WORKING_DIRECTORY ${WET_ROOT}/config
-    DEPENDS XenonRecomp
-    COMMENT "Recompiling game/extracted/default.xex into generated/ppc (re-run CMake configure afterwards)"
-    VERBATIM)
+# Cross-compiling (Windows build made on Linux), XenonRecomp has to run on the
+# build machine: WET_HOST_XENONRECOMP names a native build of it.
+set(WET_HOST_XENONRECOMP "" CACHE FILEPATH "XenonRecomp built for the build machine (cross-compiling)")
+if(CMAKE_CROSSCOMPILING AND NOT WET_HOST_XENONRECOMP)
+    add_custom_target(recompile
+        COMMAND ${CMAKE_COMMAND} -E echo "Cross-compiling: set WET_HOST_XENONRECOMP to a XenonRecomp built for this machine"
+        COMMAND ${CMAKE_COMMAND} -E false
+        VERBATIM)
+else()
+    if(CMAKE_CROSSCOMPILING)
+        set(WET_RECOMPILER ${WET_HOST_XENONRECOMP})
+        set(WET_RECOMPILER_DEPENDS "")
+    else()
+        set(WET_RECOMPILER $<TARGET_FILE:XenonRecomp>)
+        set(WET_RECOMPILER_DEPENDS XenonRecomp)
+    endif()
+    add_custom_target(recompile
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${WET_GENERATED_DIR}
+        COMMAND ${WET_RECOMPILER} ${WET_ROOT}/config/WET_config.toml ${XR_DIR}/XenonUtils/ppc_context.h
+        WORKING_DIRECTORY ${WET_ROOT}/config
+        DEPENDS ${WET_RECOMPILER_DEPENDS}
+        COMMENT "Recompiling game/extracted/default.xex into generated/ppc (re-run CMake configure afterwards)"
+        VERBATIM)
+endif()
+
+# Only the recompiler tools (the native half of a cross build).
+option(WET_HOST_TOOLS_ONLY "Configure only XenonRecomp / XenonAnalyse" OFF)
+if(WET_HOST_TOOLS_ONLY)
+    return()
+endif()
 
 # ---------------------------------------------------------------------------
 # Renderer: Xenia's GPU emulation (Vulkan)
