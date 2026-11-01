@@ -149,6 +149,21 @@ if(WIN32)
 endif()
 
 # ---------------------------------------------------------------------------
+# WET Setup: downloads the tools and the source, builds from the player's ISO
+# (Windows). Contains nothing from the game; published with each release.
+# ---------------------------------------------------------------------------
+if(WIN32)
+    add_executable(WetSetup WIN32 launcher/setup.cpp launcher/launcher.rc)
+    set_target_properties(WetSetup PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/runtime)
+    target_compile_definitions(WetSetup PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
+    target_link_libraries(WetSetup PRIVATE comctl32 comdlg32 shell32 ole32 uuid winhttp)
+    if(MINGW)
+        # One file that runs anywhere (no libc++ / unwind DLLs next to it).
+        target_link_options(WetSetup PRIVATE -municode -static)
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
 # Runtime (only once the generated code exists)
 # ---------------------------------------------------------------------------
 if(EXISTS ${WET_GENERATED_DIR}/ppc_func_mapping.cpp)

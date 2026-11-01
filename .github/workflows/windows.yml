@@ -8,6 +8,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: ${{ matrix.toolchain }}
@@ -58,7 +61,7 @@ jobs:
       - name: Build
         shell: pwsh
         run: |
-          cmake --build build --target XenonAnalyse XenonRecomp WetRecomp -- -k 0 2>&1 | Tee-Object -FilePath build.log
+          cmake --build build --target XenonAnalyse XenonRecomp WetRecomp WetSetup -- -k 0 2>&1 | Tee-Object -FilePath build.log
           if ($LASTEXITCODE -ne 0) {
             # Surface compiler/linker errors as annotations (readable without downloading logs).
             # GitHub keeps only 10 annotations per step, so pack the unique ones into a few.
@@ -94,6 +97,25 @@ jobs:
           if ($selftest -ne 0) { throw "memory self-test failed" }
           & build\thirdparty\XenonRecomp\XenonRecomp\XenonRecomp.exe
           if ($LASTEXITCODE -ne 0) { throw "XenonRecomp.exe failed to start" }
+
+      - name: Upload WetSetup.exe
+        if: matrix.toolchain == 'llvm-mingw'
+        uses: actions/upload-artifact@v4
+        with:
+          name: WetSetup
+          path: build/runtime/WetSetup.exe
+
+      # A release (tag v*) gets WetSetup.exe attached: it holds nothing from the
+      # game, only the setup that builds from the player's own disc.
+      - name: Attach WetSetup.exe to the release
+        if: matrix.toolchain == 'llvm-mingw' && startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view $env:GITHUB_REF_NAME 2>$null
+          if ($LASTEXITCODE -ne 0) { gh release create $env:GITHUB_REF_NAME --title $env:GITHUB_REF_NAME --notes "See the README." }
+          gh release upload $env:GITHUB_REF_NAME build/runtime/WetSetup.exe --clobber
 
       - name: Upload recompiler tools
         if: matrix.toolchain == 'llvm-mingw'

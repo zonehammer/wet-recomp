@@ -26,7 +26,16 @@ nothing derived from the game is ever committed.
 
 ## Building (Windows 10/11, 64-bit)
 
-You need your WET disc image and a Clang toolchain. Visual Studio is **not** required.
+You need your WET disc image. Visual Studio is **not** required.
+
+**The easy way: WetSetup.exe.** Download it from the
+[latest release](https://github.com/zonehammer/wet-recomp/releases/latest), pick your ISO
+and a folder, press Install. It downloads whatever tools are missing (Git, CMake, Ninja,
+Clang, Python - into the install folder, nothing system-wide), the source code, extracts
+your disc and builds; then the desktop shortcut starts the launcher. Run it again to
+update and rebuild. The first build takes 10-30 minutes and about 14 GB of disk.
+
+**By hand:**
 
 **1. Install the tools** (once):
 
