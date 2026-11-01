@@ -145,6 +145,8 @@ if(WIN32)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/launcher)
     if(MINGW)
         target_link_options(WetLauncher PRIVATE -municode)
+    elseif(MSVC)
+        target_link_options(WetLauncher PRIVATE /MANIFEST:NO)
     endif()
 endif()
 
@@ -160,6 +162,9 @@ if(WIN32)
     if(MINGW)
         # One file that runs anywhere (no libc++ / unwind DLLs next to it).
         target_link_options(WetSetup PRIVATE -municode -static)
+    elseif(MSVC)
+        # launcher.rc carries the manifest; don't let the linker add a second one.
+        target_link_options(WetSetup PRIVATE /MANIFEST:NO)
     endif()
 endif()
 
