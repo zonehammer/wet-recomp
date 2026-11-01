@@ -107,20 +107,21 @@ index 8f6087b05..47c87eec0 100644
  
  static void set_name(HANDLE thread, const std::string_view name) {
 diff --git a/src/xenia/gpu/command_processor.cc b/src/xenia/gpu/command_processor.cc
-index ce08d19bd..aa88253f0 100644
+index ce08d19bd..f64a309b4 100644
 --- a/src/xenia/gpu/command_processor.cc
 +++ b/src/xenia/gpu/command_processor.cc
-@@ -9,6 +9,9 @@
+@@ -9,6 +9,10 @@
  
  #include "xenia/gpu/command_processor.h"
  
++#include <chrono>
 +#include <map>
 +#include <tuple>
 +
  #include <algorithm>
  #include <cinttypes>
  #include <cmath>
-@@ -32,6 +35,132 @@
+@@ -32,6 +36,177 @@
  namespace xe {
  namespace gpu {
  
@@ -172,6 +173,51 @@ index ce08d19bd..aa88253f0 100644
 +  return wet_hud_squeeze.load(std::memory_order_relaxed);
 +}
 +void (*wet_register_sync_hook)() = nullptr;
++
++#if XE_WET_RUNTIME
++// WET diagnostics: WAIT_REG_MEM waits that didn't match at once - what they
++// waited for and for how long (logged as the count passes powers of two).
++namespace {
++struct WetWaitStat {
++  uint64_t key = 0;  // is_memory << 63 | wait_info << 40 | address
++  uint32_t ref = 0, mask = 0;
++  uint64_t count = 0, total_us = 0, max_us = 0;
++};
++WetWaitStat wet_wait_stats[24];
++uint64_t wet_wait_total = 0, wet_wait_total_us = 0;
++
++void WetNoteWait(bool is_memory, uint32_t wait_info, uint32_t address,
++                 uint32_t ref, uint32_t mask, uint64_t us) {
++  uint64_t key = (uint64_t(is_memory) << 63) | (uint64_t(wait_info & 0xFF) << 40) |
++                 address;
++  WetWaitStat* slot = nullptr;
++  for (auto& s : wet_wait_stats) {
++    if (s.count && s.key == key) { slot = &s; break; }
++    if (!s.count && !slot) slot = &s;
++  }
++  if (!slot) slot = &wet_wait_stats[23];
++  if (!slot->count) { slot->key = key; }
++  slot->ref = ref;
++  slot->mask = mask;
++  slot->count++;
++  slot->total_us += us;
++  slot->max_us = std::max(slot->max_us, us);
++  wet_wait_total++;
++  wet_wait_total_us += us;
++  if (wet_wait_total >= 1024 && !(wet_wait_total & (wet_wait_total - 1))) {
++    XELOGI("WET WAIT_REG_MEM: {} waits that didn't match at once, {} ms in total",
++           wet_wait_total, wet_wait_total_us / 1000);
++    for (auto& s : wet_wait_stats) {
++      if (!s.count) continue;
++      XELOGI("  {} {:08X} func {} ref {:08X} mask {:08X}: {} waits, {} ms, max {} us",
++             (s.key >> 63) ? "mem" : "reg", uint32_t(s.key & 0xFFFFFFFF),
++             uint32_t((s.key >> 40) & 7), s.ref, s.mask, s.count,
++             s.total_us / 1000, s.max_us);
++    }
++  }
++}
++}  // namespace
++#endif
 +
 +void WetTraceDraw(const RegisterFile& regs, const Memory& memory,
 +                  const Shader& vertex_shader, const Shader* pixel_shader,
@@ -253,7 +299,7 @@ index ce08d19bd..aa88253f0 100644
  using namespace xe::gpu::xenos;
  
  CommandProcessor::CommandProcessor(GraphicsSystem* graphics_system,
-@@ -244,6 +373,7 @@ void CommandProcessor::WorkerThreadMain() {
+@@ -244,6 +419,7 @@ void CommandProcessor::WorkerThreadMain() {
        xe::store_and_swap<uint32_t>(
            memory_->TranslatePhysical(read_ptr_writeback_ptr_), read_ptr_index_);
      }
@@ -261,7 +307,7 @@ index ce08d19bd..aa88253f0 100644
  
      // FIXME: We're supposed to process the WAIT_UNTIL register at this point,
      // but no games seem to actually use it.
-@@ -349,6 +479,7 @@ void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
+@@ -349,6 +525,7 @@ void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
        uint32_t scratch_addr = regs.values[XE_GPU_REG_SCRATCH_ADDR];
        uint32_t mem_addr = scratch_addr + (scratch_reg * 4);
        xe::store_and_swap<uint32_t>(memory_->TranslatePhysical(mem_addr), value);
@@ -269,7 +315,7 @@ index ce08d19bd..aa88253f0 100644
      }
    } else {
      switch (index) {
-@@ -743,21 +874,26 @@ bool CommandProcessor::ExecutePacketType3(RingBuffer* reader, uint32_t packet) {
+@@ -743,21 +920,26 @@ bool CommandProcessor::ExecutePacketType3(RingBuffer* reader, uint32_t packet) {
        break;
      case PM4_MEM_WRITE:
        result = ExecutePacketType3_MEM_WRITE(reader, packet, count);
@@ -296,7 +342,7 @@ index ce08d19bd..aa88253f0 100644
        break;
      case PM4_DRAW_INDX:
        result = ExecutePacketType3_DRAW_INDX(reader, packet, count);
-@@ -932,11 +1068,44 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(RingBuffer* reader,
+@@ -932,11 +1114,44 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(RingBuffer* reader,
    uint32_t frontbuffer_ptr = reader->ReadAndSwap<uint32_t>();
    uint32_t frontbuffer_width = reader->ReadAndSwap<uint32_t>();
    uint32_t frontbuffer_height = reader->ReadAndSwap<uint32_t>();
@@ -342,13 +388,14 @@ index ce08d19bd..aa88253f0 100644
    return true;
  }
  
-@@ -974,7 +1143,19 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -974,7 +1189,20 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
                  : register_file_->values[poll_reg_addr];
  
    bool matched = false;
 +#if XE_WET_RUNTIME
 +  // WET diagnostics: which waits the title issues and how long they take.
 +  uint32_t wet_wait_loops = 0;
++  std::chrono::steady_clock::time_point wet_wait_start{};
 +#endif
    do {
 +#if XE_WET_RUNTIME
@@ -362,7 +409,16 @@ index ce08d19bd..aa88253f0 100644
      uint32_t value = value_ref;
      if (is_memory) {
        trace_writer_.WriteMemoryRead(CpuToGpu(poll_reg_addr & ~uint32_t(0x3)),
-@@ -1017,12 +1198,19 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -1013,16 +1241,28 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+         matched = true;
+         break;
+     }
++#if XE_WET_RUNTIME
++    if (!matched && wet_wait_loops == 1) {
++      wet_wait_start = std::chrono::steady_clock::now();
++    }
++#endif
+     if (!matched) {
        // Wait.
        if (wait >= 0x100) {
          PrepareForWait();
@@ -382,14 +438,21 @@ index ce08d19bd..aa88253f0 100644
          xe::threading::SyncMemory();
          ReturnFromWait();
  
-@@ -1036,6 +1224,7 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -1035,6 +1275,14 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+       }
      }
    } while (!matched);
++#if XE_WET_RUNTIME
++  if (wet_wait_loops > 1) {
++    WetNoteWait(is_memory, wait_info, poll_reg_addr, ref, mask,
++                uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(
++                             std::chrono::steady_clock::now() - wet_wait_start)
++                             .count()));
++  }
++#endif
  
-+
    return true;
  }
- 
 diff --git a/src/xenia/gpu/command_processor.h b/src/xenia/gpu/command_processor.h
 index ffc8eeffa..37bd99fd2 100644
 --- a/src/xenia/gpu/command_processor.h

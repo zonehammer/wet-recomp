@@ -25,7 +25,7 @@ namespace
     std::atomic<int> s_waiting{ 0 };
     std::mutex s_lock;
     std::condition_variable s_cv;
-    std::atomic<uint64_t> s_waits{ 0 }, s_timeouts{ 0 };
+    std::atomic<uint64_t> s_waits{ 0 }, s_timeouts{ 0 }, s_waitUs{ 0 };
 
     constexpr uint32_t kFenceLoopReturn = 0x8305EA78;   // lr of the call in sub_8305E9E0
 
@@ -39,7 +39,8 @@ namespace
 
     void WaitForFence(uint8_t* base, uint32_t device, uint32_t fence)
     {
-        auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(2);
+        auto start = std::chrono::steady_clock::now();
+        auto deadline = start + std::chrono::milliseconds(2);
         bool waited = false;
         for (;;)
         {
@@ -63,10 +64,14 @@ namespace
         if (waited)
         {
             wet::TraceEvent('G', fence);
+            uint64_t us = uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(
+                                       std::chrono::steady_clock::now() - start).count());
+            uint64_t total = s_waitUs.fetch_add(us, std::memory_order_relaxed) + us;
             uint64_t n = s_waits.fetch_add(1, std::memory_order_relaxed) + 1;
             if ((n & (n - 1)) == 0 && n >= 1024)
-                wet::Log("GPU fence waits: %llu, %llu reached the 2 ms limit", (unsigned long long)n,
-                         (unsigned long long)s_timeouts.load());
+                wet::Log("GPU fence waits: %llu, %llu reached the 2 ms limit, %llu ms waited in total",
+                         (unsigned long long)n, (unsigned long long)s_timeouts.load(),
+                         (unsigned long long)(total / 1000));
         }
     }
 }
