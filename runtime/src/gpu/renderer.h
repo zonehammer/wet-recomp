@@ -37,6 +37,8 @@ namespace wet::renderer
     void SetCursorHidden(bool hidden);
     // Guest vblank rate (60 Hz normally).
     void SetVsyncRate(uint32_t hz);
+    // Vblanks released early for a late frame so far (adaptive vblank).
+    uint32_t EarlyVblanks();
     // Rendering resolution scale (1 = 720p, 2 = 1440p, 3 = 2160p); before Start.
     void SetResolutionScale(uint32_t scale);
     void ToggleFullscreen();

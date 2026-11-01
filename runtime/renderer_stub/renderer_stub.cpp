@@ -17,6 +17,7 @@ namespace wet::renderer
     void SetShaderCacheRoot(const std::string&) {}
     void SetCursorHidden(bool) {}
     void SetVsyncRate(uint32_t) {}
+    uint32_t EarlyVblanks() { return 0; }
     void SetResolutionScale(uint32_t) {}
     void ToggleFullscreen() {}
     void ToggleOverlay() {}

@@ -1239,7 +1239,16 @@ namespace wet::renderer
         }
     }
 
-    void SetVsyncRate(uint32_t hz) { xe::gpu::wet_vsync_hz = hz; }
+    void SetVsyncRate(uint32_t hz)
+    {
+        xe::gpu::wet_vsync_hz = hz;
+        // One present per vblank (above 30 FPS): a late frame goes out at once
+        // instead of waiting a whole extra vblank. WET_NO_ADAPTIVE_VBLANK=1 turns it off.
+        static const bool off = std::getenv("WET_NO_ADAPTIVE_VBLANK") != nullptr;
+        xe::gpu::wet_adaptive_vblank = !off && wet::options::Fps() > 30;
+    }
+
+    uint32_t EarlyVblanks() { return xe::gpu::wet_early_vblanks.load(std::memory_order_relaxed); }
 
     void SetResolutionScale(uint32_t scale) { s_resolutionScale = std::clamp<uint32_t>(scale, 1, 3); }
 

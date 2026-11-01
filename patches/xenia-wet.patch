@@ -107,7 +107,7 @@ index 8f6087b05..47c87eec0 100644
  
  static void set_name(HANDLE thread, const std::string_view name) {
 diff --git a/src/xenia/gpu/command_processor.cc b/src/xenia/gpu/command_processor.cc
-index ce08d19bd..957b4a9f4 100644
+index ce08d19bd..ef457c9a5 100644
 --- a/src/xenia/gpu/command_processor.cc
 +++ b/src/xenia/gpu/command_processor.cc
 @@ -9,6 +9,10 @@
@@ -388,11 +388,15 @@ index ce08d19bd..957b4a9f4 100644
    return true;
  }
  
-@@ -974,7 +1189,20 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -974,7 +1189,24 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
                  : register_file_->values[poll_reg_addr];
  
    bool matched = false;
 +#if XE_WET_RUNTIME
++  // The game's wait after a swap for its vblank handler to clear the flip
++  // flag (memory == 0) - see WetCpFlipWait.
++  const bool wet_flip_wait =
++      is_memory && (wait_info & 7) == 3 && ref == 0 && mask == 0xFFFFFFFF;
 +  // WET diagnostics: which waits the title issues and how long they take.
 +  uint32_t wet_wait_loops = 0;
 +  std::chrono::steady_clock::time_point wet_wait_start{};
@@ -409,13 +413,16 @@ index ce08d19bd..957b4a9f4 100644
      uint32_t value = value_ref;
      if (is_memory) {
        trace_writer_.WriteMemoryRead(CpuToGpu(poll_reg_addr & ~uint32_t(0x3)),
-@@ -1013,16 +1241,28 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -1013,16 +1245,31 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
          matched = true;
          break;
      }
 +#if XE_WET_RUNTIME
 +    if (!matched && wet_wait_loops == 1) {
 +      wet_wait_start = std::chrono::steady_clock::now();
++      if (wet_flip_wait) {
++        WetCpFlipWait(false);
++      }
 +    }
 +#endif
      if (!matched) {
@@ -438,11 +445,14 @@ index ce08d19bd..957b4a9f4 100644
          xe::threading::SyncMemory();
          ReturnFromWait();
  
-@@ -1035,6 +1275,14 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -1035,6 +1282,17 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
        }
      }
    } while (!matched);
 +#if XE_WET_RUNTIME
++  if (wet_flip_wait) {
++    WetCpFlipWait(true);
++  }
 +  if (wet_wait_loops > 1) {
 +    WetNoteWait(is_memory, wait_info, poll_reg_addr, ref, mask,
 +                uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(
@@ -17052,31 +17062,66 @@ index 000000000..381928d08
 +
 +#endif  // XENIA_GPU_D3D12_WET_SMAA_TEX_H_
 diff --git a/src/xenia/gpu/graphics_system.cc b/src/xenia/gpu/graphics_system.cc
-index aa96166ef..80caacb94 100644
+index aa96166ef..4f0647268 100644
 --- a/src/xenia/gpu/graphics_system.cc
 +++ b/src/xenia/gpu/graphics_system.cc
-@@ -9,6 +9,9 @@
+@@ -9,6 +9,12 @@
  
  #include "xenia/gpu/graphics_system.h"
  
-+#include <algorithm>
 +#include <chrono>
++#include <condition_variable>
++#include <mutex>
++
++#include <algorithm>
 +
  #include <cstdint>
  #include <functional>
  #include <memory>
-@@ -36,6 +39,10 @@ DEFINE_bool(
+@@ -36,6 +42,42 @@ DEFINE_bool(
  namespace xe {
  namespace gpu {
  
 +#if XE_WET_RUNTIME
 +std::atomic<uint32_t> wet_vsync_hz{60};
++std::atomic<bool> wet_adaptive_vblank{false};
++std::atomic<uint32_t> wet_early_vblanks{0};
++namespace {
++std::mutex wet_vblank_mutex;
++std::condition_variable wet_vblank_cv;
++bool wet_vblank_request = false;
++std::atomic<int64_t> wet_last_flip_ns{0};
++int64_t WetNowNs() {
++  return std::chrono::duration_cast<std::chrono::nanoseconds>(
++             std::chrono::steady_clock::now().time_since_epoch())
++      .count();
++}
++}  // namespace
++
++void WetCpFlipWait(bool done) {
++  int64_t now = WetNowNs();
++  if (done) {
++    wet_last_flip_ns = now;
++    return;
++  }
++  if (!wet_adaptive_vblank.load(std::memory_order_relaxed)) {
++    return;
++  }
++  // Late: a whole vblank interval has passed since the last flip, so on a
++  // real display this frame would go out at once (adaptive vsync).
++  int64_t period = 1000000000ll / std::max<uint32_t>(wet_vsync_hz.load(), 1);
++  if (now - wet_last_flip_ns.load() >= period - period / 32) {
++    std::lock_guard<std::mutex> lock(wet_vblank_mutex);
++    wet_vblank_request = true;
++    wet_vblank_cv.notify_one();
++  }
++}
 +#endif
 +
  // Nvidia Optimus/AMD PowerXpress support.
  // These exports force the process to trigger the discrete GPU in multi-GPU
  // systems.
-@@ -98,6 +105,28 @@ X_STATUS GraphicsSystem::Setup(cpu::Processor* processor,
+@@ -98,6 +140,46 @@ X_STATUS GraphicsSystem::Setup(cpu::Processor* processor,
    vsync_worker_running_ = true;
    vsync_worker_thread_ = kernel::object_ref<kernel::XHostThread>(
        new kernel::XHostThread(kernel_state_, 128 * 1024, 0, [this]() {
@@ -17091,12 +17136,30 @@ index aa96166ef..80caacb94 100644
 +          if (next < now - std::chrono::milliseconds(100)) {
 +            next = now;  // fell far behind (debugger, stall): don't burst
 +          }
++          bool early = false;
 +          while ((now = std::chrono::steady_clock::now()) < next) {
 +            if (next - now > std::chrono::milliseconds(2)) {
-+              xe::threading::Sleep(std::chrono::milliseconds(1));
++              std::unique_lock<std::mutex> lock(wet_vblank_mutex);
++              wet_vblank_cv.wait_for(lock, std::chrono::milliseconds(1),
++                                     [] { return wet_vblank_request; });
 +            } else {
 +              xe::threading::MaybeYield();
 +            }
++            {
++              std::lock_guard<std::mutex> lock(wet_vblank_mutex);
++              if (wet_vblank_request) {
++                wet_vblank_request = false;
++                early = true;
++              }
++            }
++            if (early) {
++              break;
++            }
++          }
++          if (early) {
++            // Re-phase: the next vblank a whole interval after this one.
++            next = std::chrono::steady_clock::now();
++            wet_early_vblanks.fetch_add(1, std::memory_order_relaxed);
 +          }
 +          MarkVblank();
 +        }
@@ -17106,16 +17169,22 @@ index aa96166ef..80caacb94 100644
          uint64_t last_frame_time = Clock::QueryGuestTickCount();
          while (vsync_worker_running_) {
 diff --git a/src/xenia/gpu/graphics_system.h b/src/xenia/gpu/graphics_system.h
-index 8994b20bc..aab0798df 100644
+index 8994b20bc..3dbe3f381 100644
 --- a/src/xenia/gpu/graphics_system.h
 +++ b/src/xenia/gpu/graphics_system.h
-@@ -34,6 +34,11 @@ class Emulator;
+@@ -34,6 +34,17 @@ class Emulator;
  namespace xe {
  namespace gpu {
  
 +#if XE_WET_RUNTIME
 +// WET: guest vblank rate in Hz (set by the runtime's frame rate option).
 +extern std::atomic<uint32_t> wet_vsync_hz;
++// Adaptive vblank (WET): a frame that missed its vblank is released at once
++// instead of waiting for the next one (which halved 60 FPS to 30 on slower
++// PCs). The command processor reports its post-swap waits.
++extern std::atomic<bool> wet_adaptive_vblank;
++extern std::atomic<uint32_t> wet_early_vblanks;  // released early so far
++void WetCpFlipWait(bool done);
 +#endif
 +
  class CommandProcessor;

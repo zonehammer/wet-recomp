@@ -24,8 +24,10 @@
 #include "gpu/renderer.h"
 #include "os.h"
 #include "threads.h"
+#include "options.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -787,6 +789,46 @@ GUEST_IMPORT(VdSetSystemCommandBufferGpuIdentifierAddress)
 // textures the title keeps bound there; the patched XE_SWAP handler restores it.)
 constexpr uint32_t kPm4XeSwap = 0x64;
 
+// Every 10 s: the frame rate the game actually reached, its slowest frame and
+// how many frames took longer than the target, so a slow stretch shows up in
+// wet.log (on any PC) without an overlay.
+static void NotePerformance()
+{
+    using clock = std::chrono::steady_clock;
+    static clock::time_point start, last;
+    static uint32_t frames = 0, over = 0;
+    static double worst = 0;
+    clock::time_point now = clock::now();
+    if (frames == 0 && start == clock::time_point())
+    {
+        start = last = now;
+        frames = 1;
+        return;
+    }
+    double ms = std::chrono::duration<double, std::milli>(now - last).count();
+    last = now;
+    frames++;
+    int fps = wet::options::Fps();
+    double target = 1000.0 / (fps > 0 ? fps : 60);
+    if (ms > target * 1.5)
+        over++;
+    if (ms > worst)
+        worst = ms;
+    double span = std::chrono::duration<double>(now - start).count();
+    if (span >= 10.0)
+    {
+        static uint32_t earlyBefore = 0;
+        uint32_t early = wet::renderer::EarlyVblanks();
+        Log("Performance: %.0f fps average (target %d), slowest frame %.1f ms, %u of %u frames late, %u sent early",
+            (frames - 1) / span, fps, worst, over, frames - 1, early - earlyBefore);
+        earlyBefore = early;
+        start = now;
+        frames = 1;
+        over = 0;
+        worst = 0;
+    }
+}
+
 GUEST_IMPORT(VdSwap)
 {
     uint32_t buffer = Arg(ctx, 0), fetch = Arg(ctx, 1);
@@ -818,6 +860,7 @@ GUEST_IMPORT(VdSwap)
     }
     uint64_t n = ++s_swaps;
     TraceEvent('S', uint32_t(n));
+    NotePerformance();
     renderer::DisplayAspect();
     if (n <= 3 || (n & (n - 1)) == 0)
     {
