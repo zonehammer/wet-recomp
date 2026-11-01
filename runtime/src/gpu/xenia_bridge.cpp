@@ -77,6 +77,9 @@ DECLARE_int32(draw_resolution_scale_y);
 DECLARE_bool(d3d12_allow_variable_refresh_rate_and_tearing);
 #endif
 DECLARE_bool(vulkan_allow_present_mode_immediate);
+DECLARE_uint32(texture_cache_memory_limit_soft);
+DECLARE_uint32(texture_cache_memory_limit_hard);
+DECLARE_uint32(texture_cache_memory_limit_render_to_texture);
 DECLARE_path(dump_shaders);
 DECLARE_path(log_file);
 
@@ -1029,6 +1032,13 @@ namespace wet::renderer
         // Rendering resolution: the game's 1280x720 times the option's scale.
         cvars::draw_resolution_scale_x = int32_t(s_resolutionScale);
         cvars::draw_resolution_scale_y = int32_t(s_resolutionScale);
+        // Texture memory: Xenia's defaults (384 MB soft, 768 MB hard) are for 720p;
+        // at 1440p / 4K the render-to-texture targets grow with the scale squared
+        // and textures got destroyed while still being drawn (surfaces flashing
+        // black). Modern GPUs have plenty: 2 GB soft, 4 GB hard.
+        cvars::texture_cache_memory_limit_soft = 2048;
+        cvars::texture_cache_memory_limit_hard = 4096;
+        cvars::texture_cache_memory_limit_render_to_texture = 64;
         // V-Sync option: no tearing (otherwise frames are shown at once, for VRR).
 #if WET_HAVE_D3D12
         cvars::d3d12_allow_variable_refresh_rate_and_tearing = !wet::options::Vsync();
