@@ -26,6 +26,7 @@
 #include <cctype>
 #include <chrono>
 #include <cstring>
+#include <atomic>
 #include <functional>
 #include <mutex>
 #include <set>
@@ -166,6 +167,31 @@ PPC_FUNC(sub_8314D3D8)
     Inflate(ctx, base, __imp__sub_8314D3D8);
 }
 
+// ---- Scaleform's GZLibFile::Read (vtable slot 10, sub_82D7F5C8) ----
+// The menus' compressed movies (CFX) are read through Scaleform's GZLibFile,
+// which inflates as it reads; it's called through the vtable, so this hook
+// sees every buffer the movie loader gets - before any of it runs.
+namespace
+{
+    std::atomic<bool> s_readHookSeen{ false };
+}
+
+extern "C" void __imp__sub_82D7F5C8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82D7F5C8)
+{
+    uint32_t buf = ctx.r4.u32, size = ctx.r5.u32;
+    __imp__sub_82D7F5C8(ctx, base);
+    int32_t got = ctx.r3.s32;
+    if (got <= 0 || !buf || uint32_t(got) > size || wet::options::ButtonPrompts() == 1)
+        return;
+    static uint32_t calls = 0;
+    if (++calls <= 3)
+        wet::Log("Prompts: Scaleform compressed read %u (%d bytes)", calls, got);
+    s_readHookSeen = true;
+    std::lock_guard lock(s_lock);
+    ScanOutput(base, buf, buf, buf + uint32_t(got));
+}
+
 // ---- Memory scan after a menu file is opened ----
 // The menus may reach memory already decompressed; their code only runs when
 // the menu is first shown (the pause menu: when the game is first paused), so
@@ -222,8 +248,8 @@ namespace wet::prompts
 {
     void FileOpened(const std::string& name)
     {
-        if (options::ButtonPrompts() == 1)
-            return;
+        if (options::ButtonPrompts() == 1 || s_readHookSeen.load())
+            return;   // the read hook handles it (the scan is only a fallback)
         std::string lower = name;
         for (auto& c : lower)
             c = char(std::tolower((unsigned char)c));
