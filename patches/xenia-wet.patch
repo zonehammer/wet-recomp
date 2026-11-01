@@ -107,7 +107,7 @@ index 8f6087b05..47c87eec0 100644
  
  static void set_name(HANDLE thread, const std::string_view name) {
 diff --git a/src/xenia/gpu/command_processor.cc b/src/xenia/gpu/command_processor.cc
-index ce08d19bd..f64a309b4 100644
+index ce08d19bd..957b4a9f4 100644
 --- a/src/xenia/gpu/command_processor.cc
 +++ b/src/xenia/gpu/command_processor.cc
 @@ -9,6 +9,10 @@
@@ -205,11 +205,11 @@ index ce08d19bd..f64a309b4 100644
 +  wet_wait_total++;
 +  wet_wait_total_us += us;
 +  if (wet_wait_total >= 1024 && !(wet_wait_total & (wet_wait_total - 1))) {
-+    XELOGI("WET WAIT_REG_MEM: {} waits that didn't match at once, {} ms in total",
++    XELOGW("WET WAIT_REG_MEM: {} waits that didn't match at once, {} ms in total",
 +           wet_wait_total, wet_wait_total_us / 1000);
 +    for (auto& s : wet_wait_stats) {
 +      if (!s.count) continue;
-+      XELOGI("  {} {:08X} func {} ref {:08X} mask {:08X}: {} waits, {} ms, max {} us",
++      XELOGW("  {} {:08X} func {} ref {:08X} mask {:08X}: {} waits, {} ms, max {} us",
 +             (s.key >> 63) ? "mem" : "reg", uint32_t(s.key & 0xFFFFFFFF),
 +             uint32_t((s.key >> 40) & 7), s.ref, s.mask, s.count,
 +             s.total_us / 1000, s.max_us);
