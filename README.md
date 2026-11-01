@@ -26,7 +26,9 @@ nothing derived from the game is ever committed.
 
 ## Building (Windows 10/11, 64-bit)
 
-You need your WET disc image. Visual Studio is **not** required.
+You need your WET disc image. Visual Studio is **not** required. Tested with the US/EU disc
+(Redump: *WET (USA, Europe) (En,Fr,De,Es,It)*, SHA-1 `56f459e11ee9a7b3b7ce786d0d36cc1c331b5749`);
+other dumps of the same disc (title ID `425307DB`) should work too.
 
 **The easy way: WetSetup.exe.** Download it from the
 [latest release](https://github.com/zonehammer/wet-recomp/releases/latest), pick your ISO
