@@ -101,35 +101,44 @@ namespace
     }
 }
 
-// zlib inflate(strm, flush): z_stream { next_in, avail_in, total_in, next_out (+12), ... }.
+extern "C" void __imp__sub_831B6120(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8314D3D8(PPCContext& ctx, uint8_t* base);
+
+// zlib inflate(strm, flush), two copies in the game (sub_831B6120 for the
+// engine's own data, sub_8314D3D8 inside Scaleform for the menus):
+// z_stream { next_in, avail_in, total_in, next_out (+12), avail_out, total_out (+20), ... }.
+namespace
+{
+    void Inflate(PPCContext& ctx, uint8_t* base, void (*impl)(PPCContext&, uint8_t*))
+    {
+        uint32_t strm = ctx.r3.u32;
+        uint32_t out0 = strm ? PPC_LOAD_U32(strm + 12) : 0;
+        uint32_t total0 = strm ? PPC_LOAD_U32(strm + 20) : 0;   // total_out: the output so far is contiguous
+        impl(ctx, base);
+        if (!strm || wet::options::ButtonPrompts() == 1)
+            return;
+        uint32_t out1 = PPC_LOAD_U32(strm + 12);
+        static uint32_t calls[2];
+        uint32_t& n = calls[impl == __imp__sub_8314D3D8 ? 1 : 0];
+        if (++n <= 3)
+            wet::Log("Prompts: %s inflate call %u (%u bytes out)", impl == __imp__sub_8314D3D8 ? "Scaleform" : "engine", n,
+                     out1 - out0);
+        if (out1 <= out0 || out1 - out0 > (64u << 20) || total0 > out0)
+            return;
+        uint32_t start = out0 - total0;
+        // A little before the new data too, for a pattern split between calls.
+        ScanOutput(base, start, out0 - start >= 16 ? out0 - 16 : start, out1);
+    }
+}
+
 extern "C" void __imp__sub_831B6120(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_831B6120)
 {
-    uint32_t strm = ctx.r3.u32;
-    uint32_t out0 = strm ? PPC_LOAD_U32(strm + 12) : 0;
-    uint32_t total0 = strm ? PPC_LOAD_U32(strm + 20) : 0;   // total_out: the output so far is contiguous
-    __imp__sub_831B6120(ctx, base);
-    if (!strm || wet::options::ButtonPrompts() == 1)
-        return;
-    uint32_t out1 = PPC_LOAD_U32(strm + 12);
-    // Diagnostics: the first calls, and any output naming the menu classes.
-    static uint32_t calls = 0;
-    if (++calls <= 12)
-        wet::Log("Prompts: inflate #%u: out %08X -> %08X (total %u), in %08X", calls, out0, out1, total0,
-                 PPC_LOAD_U32(strm));
-    if (out1 > out0 && out1 - out0 < (64u << 20))
-        for (uint32_t a = out0; a + 12 <= out1; a++)
-            if (base[a] == 'C' && !std::memcmp(base + a, "CApplication", 12))
-            {
-                static int logged = 0;
-                if (++logged <= 10)
-                    wet::Log("Prompts: inflate #%u output has CApplication at %08X (out %08X-%08X, total %u)", calls, a,
-                             out0, out1, total0);
-                break;
-            }
-    if (out1 <= out0 || out1 - out0 > (64u << 20) || total0 > out0)
-        return;
-    uint32_t start = out0 - total0;
-    // A little before the new data too, for a pattern split between calls.
-    ScanOutput(base, start, out0 - start >= 16 ? out0 - 16 : start, out1);
+    Inflate(ctx, base, __imp__sub_831B6120);
+}
+
+extern "C" void __imp__sub_8314D3D8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8314D3D8)
+{
+    Inflate(ctx, base, __imp__sub_8314D3D8);
 }
