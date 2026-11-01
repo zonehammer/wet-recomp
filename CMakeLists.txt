@@ -158,6 +158,7 @@ if(WIN32)
     add_executable(WetSetup WIN32 launcher/setup.cpp launcher/launcher.rc)
     set_target_properties(WetSetup PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/runtime)
     target_compile_definitions(WetSetup PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
+    target_include_directories(WetSetup PRIVATE ${WET_VERSION_INCLUDE})
     target_link_libraries(WetSetup PRIVATE comctl32 comdlg32 shell32 ole32 uuid winhttp)
     if(MINGW)
         # One file that runs anywhere (no libc++ / unwind DLLs next to it).

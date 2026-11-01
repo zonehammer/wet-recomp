@@ -15,6 +15,7 @@
 #define UNICODE
 #endif
 #define NOMINMAX
+#include "wet_version.h"
 #include <windows.h>
 #include <commctrl.h>
 #include <commdlg.h>
@@ -429,15 +430,12 @@ namespace
             for (auto& t : list)
                 EnsureTool(t, tools);
 
-            // 2. Source
+            // 2. Source: the release this Setup belongs to (tag v<version>), or
+            // the latest code if there's no such tag (a development build).
             Progress(-1);
-            if (fs::exists(repo / L".git", ec))
-            {
-                Status(L"Updating the source code");
-                if (Run(L"git -C " + Quote(repo) + L" pull --ff-only", root) != 0)
-                    Log(L"(couldn't update - building the code as it is)");
-            }
-            else
+            std::string version = WET_VERSION;   // "0.2.0 (abc1234)"
+            const std::wstring tag = L"v" + Widen(version.substr(0, version.find(' ')));
+            if (!fs::exists(repo / L".git", ec))
             {
                 Status(L"Downloading the source code");
                 if (fs::exists(repo, ec) && !fs::is_empty(repo, ec))
@@ -445,6 +443,14 @@ namespace
                 if (Run(L"git clone " + Widen(kRepoUrl) + L" " + Quote(repo), root) != 0)
                     Fail(L"Couldn't download the source code from GitHub.");
             }
+            else
+                Status(L"Updating the source code");
+            Run(L"git -C " + Quote(repo) + L" fetch --tags origin", root);
+            if (Run(L"git -C " + Quote(repo) + L" checkout --force " + tag, root) == 0)
+                Log(L"Building release " + tag + L".");
+            else if (Run(L"git -C " + Quote(repo) + L" checkout --force main", root) != 0 ||
+                     Run(L"git -C " + Quote(repo) + L" pull --ff-only", root) != 0)
+                Log(L"(couldn't update - building the code as it is)");
 
             // 3. Build
             Status(L"Building (the first build takes 10-30 minutes)");
