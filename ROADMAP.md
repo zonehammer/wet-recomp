@@ -11,7 +11,7 @@ Make a full playthrough reliable before adding more features.
 | Item | Why | Effort |
 |---|---|---|
 | **Full playthrough check**, chapter by chapter (boss fights, Rage mode, car hopping, slow-motion, Challenges, every cutscene) | Later levels use console features nothing has exercised yet; every run's `wet.log` shows crashes, stalls and missing functions | M, ongoing |
-| **Clear the remaining stubs** the log reports (system version, `MmMapIoSpace`, network and XMsg calls) | Unimplemented functions are where hidden bugs live | M |
+| ~~Clear the remaining stubs~~ the log reports (done for the menus and first level: system version, random, DNS, XMP / XGI messages; later chapters may reach others) | Unimplemented functions are where hidden bugs live | M |
 | **Fix the video race at its cause** (decoder vs. GPU emulation), so videos can run at any frame rate | Video mode hides it; the real fix removes the 30 FPS cap during videos | M |
 | **Audit host writes into guest memory** (audio, content, anything besides file reads) for the write-watch race fixed in file loading | The same race could cause rarer crashes elsewhere | S |
 | **Import earned achievements** from the game's own save (`ACHIEVE.DAT`) | Achievements earned before 0.1.0 show as locked | M |
