@@ -20,6 +20,8 @@ namespace wet
     bool HostPadSetVibration(uint32_t user, uint16_t left, uint16_t right);
     // Names of the controllers in guest slots 0-3 (empty = none), for the overlay.
     std::vector<std::string> ConnectedControllers();
+    // The first connected controller is a PlayStation one (DualShock / DualSense).
+    bool PlayStationControllerConnected();
     // Diagnostics (camscan.cpp): forces player 1's right stick while on.
     void SetRightStickOverride(bool on, int16_t rx = 0, int16_t ry = 0);
     // Direct mouse aim: the mouse movement (pixels) since the last call; false while

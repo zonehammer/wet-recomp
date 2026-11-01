@@ -106,7 +106,7 @@ namespace
         kMouseAim, kSensitivity, kSensitivityValue, kInvertY, kVibration,
         kShaderCache, kVideoMode, kPopups, kAsyncShaders,
         kStatus, kPlay, kSaves, kClearShaders, kKeyboard,
-        kVsync, kHideBorders, kWideHud, kCheckUpdates, kReportBug, kUpdateText,
+        kVsync, kHideBorders, kWideHud, kCheckUpdates, kReportBug, kUpdateText, kPrompts,
         kKeyFirst = 300,                       // one combo per keybinds action
         kKeysOk = kKeyFirst + wet::keybinds::kActionCount, kKeysReset, kKeysCancel,
     };
@@ -330,6 +330,7 @@ namespace
         s_ini.Set("fov", Pos(kFov));
         s_ini.Set("widescreen", Checked(kWidescreen));
         s_ini.Set("vsync", Checked(kVsync));
+        s_ini.Set("button_prompts", Selected(kPrompts));
         s_ini.Set("hide_borders", Checked(kHideBorders));
         s_ini.Set("widescreen_hud", Checked(kWideHud));
         s_ini.Set("mouse_aim", Checked(kMouseAim));
@@ -597,7 +598,10 @@ namespace
         Check(kInvertY, L"Invert Y", 230, 200, ini.Get("mouse_invert_y", 0) != 0, 100);
         Label(L"Mouse sensitivity", 22, 230);
         Slider(kSensitivity, kSensitivityValue, 136, 228, 150, 1, 100, ini.Get("mouse_sensitivity", 50), L"");
-        Check(kVibration, L"Controller vibration", 22, 262, ini.Get("vibration", 1) != 0, 180);
+        Check(kVibration, L"Controller vibration", 22, 256, ini.Get("vibration", 1) != 0, 180);
+        Label(L"Prompts", 22, 284, 56);
+        Combo(kPrompts, 80, 282, 128, { L"Automatic", L"Xbox", L"PlayStation" },
+              std::min(std::max(ini.Get("button_prompts", 0), 0), 2));
         Make(L"BUTTON", L"Keyboard...", BS_PUSHBUTTON | WS_TABSTOP, 216, 278, 110, 26, kKeyboard);
 
         // Other

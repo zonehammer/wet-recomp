@@ -82,6 +82,9 @@ namespace wet::options
     bool HideBorders();
     // No tearing: presentation never splits a frame (off = immediate, for VRR). Restart.
     bool Vsync();
+    // Button prompts: 0 = automatic (PlayStation with a PlayStation pad), 1 = Xbox, 2 = PlayStation.
+    int ButtonPrompts();
+    void SetButtonPrompts(int v);
     void SetVsync(bool v);
     void SetHideBorders(bool v);
     int Sharpness();

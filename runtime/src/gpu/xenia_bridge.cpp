@@ -702,6 +702,15 @@ namespace
                 bool vibration = wet::options::Vibration();
                 if (ImGui::Checkbox("Vibration", &vibration))
                     wet::options::SetVibration(vibration);
+                int prompts = wet::options::ButtonPrompts(), promptsPick = prompts;
+                ImGui::TextUnformatted("Button prompts:");
+                ImGui::SameLine();
+                Radio("Automatic", &promptsPick, 0); ImGui::SameLine();
+                Radio("Xbox", &promptsPick, 1); ImGui::SameLine();
+                Radio("PlayStation", &promptsPick, 2);
+                if (promptsPick != prompts)
+                    wet::options::SetButtonPrompts(promptsPick);
+                ImGui::TextDisabled("Automatic: PlayStation symbols with a PlayStation controller. Menus pick it up when they load.");
             }
 
             Section("Mouse");

@@ -386,6 +386,7 @@ namespace wet
             SDL_GameController* pad = nullptr;
             SDL_JoystickID id = -1;
             std::string name;
+            bool playstation = false;
             HostPadState state;
             uint16_t wantLow = 0, wantHigh = 0;     // rumble the game asked for
             uint16_t sentLow = 0, sentHigh = 0;
@@ -441,6 +442,9 @@ namespace wet
                 slot.id = id;
                 const char* name = SDL_GameControllerName(c);
                 slot.name = name ? name : "Controller";
+                SDL_GameControllerType type = SDL_GameControllerGetType(c);
+                slot.playstation = type == SDL_CONTROLLER_TYPE_PS3 || type == SDL_CONTROLLER_TYPE_PS4 ||
+                                   type == SDL_CONTROLLER_TYPE_PS5;
                 SDL_GameControllerSetPlayerIndex(c, i);
                 if (SDL_GameControllerHasLED(c))
                     SDL_GameControllerSetLED(c, 0xE0, 0x30, 0x10);   // light bar: WET orange-red
@@ -562,6 +566,20 @@ namespace wet
             return false;
         }
 #endif
+    }
+
+    bool PlayStationControllerConnected()
+    {
+#if WET_HAVE_SDL
+        if (SdlReady())
+        {
+            std::lock_guard lock(s_sdlLock);
+            for (auto& slot : s_sdl)
+                if (slot.pad)
+                    return slot.playstation;   // the first connected pad decides
+        }
+#endif
+        return false;
     }
 
     std::vector<std::string> ConnectedControllers()
