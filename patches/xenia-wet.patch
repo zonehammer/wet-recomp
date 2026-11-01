@@ -17517,6 +17517,68 @@ index a02a7e5b6..1e2efdf02 100644
        default:
          assert_unhandled_case(effect);
          return kGuestOutputPaintRootSignatureCount;
+diff --git a/src/xenia/ui/d3d12/d3d12_provider.cc b/src/xenia/ui/d3d12/d3d12_provider.cc
+index 287b64cb8..a7c1e4d48 100644
+--- a/src/xenia/ui/d3d12/d3d12_provider.cc
++++ b/src/xenia/ui/d3d12/d3d12_provider.cc
+@@ -18,6 +18,10 @@
+ #include "xenia/ui/d3d12/d3d12_immediate_drawer.h"
+ #include "xenia/ui/d3d12/d3d12_presenter.h"
+ 
++#if XE_WET_RUNTIME
++#include <dxgi1_6.h>
++#endif
++
+ DEFINE_bool(d3d12_debug, false, "Enable Direct3D 12 and DXGI debug layer.",
+             "D3D12");
+ DEFINE_bool(d3d12_break_on_error, false,
+@@ -251,7 +255,35 @@ bool D3D12Provider::Initialize() {
+   // Choose the adapter.
+   uint32_t adapter_index = 0;
+   IDXGIAdapter1* adapter = nullptr;
++#if XE_WET_RUNTIME
++  // WET: on laptops (Intel / AMD integrated graphics + a discrete GPU) the
++  // first adapter is usually the integrated one, which drives the panel. Take
++  // the most powerful hardware adapter instead (Windows 10 1803+).
++  if (cvars::d3d12_adapter == -1) {
++    IDXGIFactory6* factory6 = nullptr;
++    if (SUCCEEDED(dxgi_factory->QueryInterface(IID_PPV_ARGS(&factory6)))) {
++      for (UINT i = 0;
++           factory6->EnumAdapterByGpuPreference(
++               i, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
++               IID_PPV_ARGS(&adapter)) == S_OK;
++           ++i) {
++        DXGI_ADAPTER_DESC1 desc;
++        if (SUCCEEDED(adapter->GetDesc1(&desc)) &&
++            !(desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) &&
++            SUCCEEDED(pfn_d3d12_create_device_(adapter, D3D_FEATURE_LEVEL_11_0,
++                                               _uuidof(ID3D12Device), nullptr))) {
++          break;
++        }
++        adapter->Release();
++        adapter = nullptr;
++      }
++      factory6->Release();
++    }
++  }
++  while (!adapter && dxgi_factory->EnumAdapters1(adapter_index, &adapter) == S_OK) {
++#else
+   while (dxgi_factory->EnumAdapters1(adapter_index, &adapter) == S_OK) {
++#endif
+     DXGI_ADAPTER_DESC1 adapter_desc;
+     if (SUCCEEDED(adapter->GetDesc1(&adapter_desc))) {
+       if (SUCCEEDED(pfn_d3d12_create_device_(adapter, D3D_FEATURE_LEVEL_11_0,
+@@ -300,6 +332,10 @@ bool D3D12Provider::Initialize() {
+                             nullptr) != 0) {
+       XELOGD3D("DXGI adapter: {} (vendor 0x{:04X}, device 0x{:04X})",
+                adapter_name_mb, adapter_desc.VendorId, adapter_desc.DeviceId);
++#if XE_WET_RUNTIME
++      XELOGW("WET: rendering on {} ({} MB video memory)", adapter_name_mb,
++             uint64_t(adapter_desc.DedicatedVideoMemory) >> 20);
++#endif
+     }
+   }
+ 
 diff --git a/src/xenia/ui/d3d12/wet_nis.h b/src/xenia/ui/d3d12/wet_nis.h
 new file mode 100644
 index 000000000..93a516335
