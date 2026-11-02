@@ -65,6 +65,12 @@ else()
 endif()
 
 add_executable(WetRecomp ${WET_RUNTIME_SOURCES} ${WET_STUBS_CPP})
+if(WIN32)
+    # The game's icon (launcher/wet.ico): the exe and its window (Xenia loads MAINICON).
+    target_sources(WetRecomp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/wetrecomp.rc)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/wetrecomp.rc PROPERTIES
+                                OBJECT_DEPENDS ${CMAKE_SOURCE_DIR}/launcher/wet.ico)
+endif()
 # XenonUtils headers come via the XenonUtils link (after WetPPC, so the generated
 # ppc_context.h wins over the template of the same name).
 target_include_directories(WetRecomp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${XR_DIR}/thirdparty/TinySHA1 ${WET_VERSION_INCLUDE})

@@ -2,8 +2,10 @@
 #include <winuser.h>
 CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "launcher.manifest"
 
-// The launcher's icon: put an .ico file at launcher/launcher.ico (CMake defines
-// WET_LAUNCHER_ICON when it exists). Resource 1 is also the window icon.
+// The icon (also the window icon): launcher/wet.ico, or your own
+// launcher/launcher.ico if it exists (CMake defines WET_LAUNCHER_ICON).
 #ifdef WET_LAUNCHER_ICON
 1 ICON "launcher.ico"
+#else
+1 ICON "wet.ico"
 #endif

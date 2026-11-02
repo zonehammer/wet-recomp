@@ -1,0 +1,2 @@
+// WetRecomp.exe's icon; Xenia's window class loads MAINICON.
+MAINICON ICON "../launcher/wet.ico"
