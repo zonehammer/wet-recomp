@@ -13,6 +13,7 @@
 #include <winhttp.h>
 #include <xinput.h>
 #include <mmsystem.h>
+#include <wincodec.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -127,8 +128,12 @@ namespace
 
     HWND s_parent = nullptr;   // where Make() puts controls (the main window or the keyboard window)
 
+    int s_bannerHeight = 0;    // logical pixels above the main window's controls (0 = no banner)
+
     HWND Make(const wchar_t* cls, const wchar_t* text, DWORD style, int x, int y, int w, int h, int id)
     {
+        if (s_parent == s_window)
+            y += s_bannerHeight;
         HWND h_ = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style, S(x), S(y), S(w), S(h), s_parent,
                                   reinterpret_cast<HMENU>(intptr_t(id)), GetModuleHandleW(nullptr), nullptr);
         SendMessageW(h_, WM_SETFONT, WPARAM(s_font), TRUE);
@@ -300,6 +305,137 @@ namespace
                 break;
         }
         return {};
+    }
+
+    // ---- Banner ----
+    // The picture across the top: launcher_banner.png / .jpg next to the
+    // launcher if you put one there, otherwise the game's own dashboard
+    // background, read from your disc (game\extracted\nxeart) when the
+    // launcher starts. Nothing of the game is stored with the launcher.
+    constexpr int kBannerWidth = 690, kBannerHeight = 150;
+    HBITMAP s_banner = nullptr;
+
+    std::vector<uint8_t> ReadAll(const fs::path& path)
+    {
+        std::ifstream f(path, std::ios::binary);
+        return std::vector<uint8_t>(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+    }
+
+    // nxebg.jpg from the disc's NXE art package (an STFS package whose file
+    // table and files are in consecutive 4 KB blocks).
+    std::vector<uint8_t> DashboardBackground()
+    {
+        if (s_gameDir.empty())
+            return {};
+        std::vector<uint8_t> d = ReadAll(s_gameDir / "nxeart");
+        if (d.size() < 0x10000 || (std::memcmp(d.data(), "PIRS", 4) && std::memcmp(d.data(), "LIVE", 4) &&
+                                   std::memcmp(d.data(), "CON ", 4)))
+            return {};
+        static const char kName[] = "nxebg.jpg";
+        for (size_t entry = 0x1000; entry + 0x40 <= d.size(); entry += 0x40)
+        {
+            if (std::memcmp(&d[entry], kName, sizeof(kName)))
+                continue;
+            size_t table = entry & ~size_t(0xFFF);   // the file table is block 0
+            size_t block = d[entry + 0x2F] | (d[entry + 0x30] << 8) | (d[entry + 0x31] << 16);
+            size_t size = (size_t(d[entry + 0x34]) << 24) | (d[entry + 0x35] << 16) | (d[entry + 0x36] << 8) |
+                          d[entry + 0x37];
+            size_t start = table + block * 0x1000;
+            if (size < 4 || start + size > d.size() || d[start] != 0xFF || d[start + 1] != 0xD8 ||
+                d[start + size - 2] != 0xFF || d[start + size - 1] != 0xD9)
+                return {};   // not stored in one piece: no banner rather than a broken one
+            return std::vector<uint8_t>(d.begin() + start, d.begin() + start + size);
+        }
+        return {};
+    }
+
+    // Decodes an image, crops it to the banner's shape (from the top, or the
+    // middle for your own picture) and scales it to width x height pixels.
+    HBITMAP DecodeBanner(const std::vector<uint8_t>& data, bool fromTop, int width, int height)
+    {
+        IWICImagingFactory* wic = nullptr;
+        if (data.empty() || FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+                                                    IID_PPV_ARGS(&wic))))
+            return nullptr;
+        HBITMAP result = nullptr;
+        IWICStream* stream = nullptr;
+        IWICBitmapDecoder* decoder = nullptr;
+        IWICBitmapFrameDecode* frame = nullptr;
+        IWICFormatConverter* converter = nullptr;
+        IWICBitmapClipper* clipper = nullptr;
+        IWICBitmapScaler* scaler = nullptr;
+        UINT w = 0, h = 0;
+        if (SUCCEEDED(wic->CreateStream(&stream)) &&
+            SUCCEEDED(stream->InitializeFromMemory(const_cast<BYTE*>(data.data()), DWORD(data.size()))) &&
+            SUCCEEDED(wic->CreateDecoderFromStream(stream, nullptr, WICDecodeMetadataCacheOnDemand, &decoder)) &&
+            SUCCEEDED(decoder->GetFrame(0, &frame)) && SUCCEEDED(frame->GetSize(&w, &h)) && w && h &&
+            SUCCEEDED(wic->CreateFormatConverter(&converter)) &&
+            SUCCEEDED(converter->Initialize(frame, GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, nullptr,
+                                            0.0, WICBitmapPaletteTypeCustom)))
+        {
+            // Largest part of the image with the banner's shape.
+            WICRect crop{ 0, 0, INT(w), INT(h) };
+            if (uint64_t(w) * height > uint64_t(h) * width)
+            {
+                crop.Width = INT(uint64_t(h) * width / height);
+                crop.X = (INT(w) - crop.Width) / 2;
+            }
+            else
+            {
+                crop.Height = INT(uint64_t(w) * height / width);
+                crop.Y = fromTop ? 0 : (INT(h) - crop.Height) / 2;
+            }
+            std::vector<uint8_t> pixels(size_t(width) * height * 4);
+            if (SUCCEEDED(wic->CreateBitmapClipper(&clipper)) && SUCCEEDED(clipper->Initialize(converter, &crop)) &&
+                SUCCEEDED(wic->CreateBitmapScaler(&scaler)) &&
+                // 4 = high-quality cubic (Windows 10; not in every SDK's headers).
+                (SUCCEEDED(scaler->Initialize(clipper, width, height, WICBitmapInterpolationMode(4))) ||
+                 SUCCEEDED(scaler->Initialize(clipper, width, height, WICBitmapInterpolationModeFant))) &&
+                SUCCEEDED(scaler->CopyPixels(nullptr, width * 4, UINT(pixels.size()), pixels.data())))
+            {
+                BITMAPINFO bi{};
+                bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
+                bi.bmiHeader.biWidth = width;
+                bi.bmiHeader.biHeight = -height;   // top-down
+                bi.bmiHeader.biPlanes = 1;
+                bi.bmiHeader.biBitCount = 32;
+                bi.bmiHeader.biCompression = BI_RGB;
+                void* bits = nullptr;
+                result = CreateDIBSection(nullptr, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+                if (result && bits)
+                    std::memcpy(bits, pixels.data(), pixels.size());
+            }
+        }
+        for (IUnknown* u : std::initializer_list<IUnknown*>{ scaler, clipper, converter, frame, decoder, stream, wic })
+            if (u)
+                u->Release();
+        return result;
+    }
+
+    void LoadBanner()
+    {
+        for (const char* name : { "launcher_banner.png", "launcher_banner.jpg", "launcher_banner.jpeg" })
+            if (fs::exists(s_dir / name))
+                if ((s_banner = DecodeBanner(ReadAll(s_dir / name), false, S(kBannerWidth), S(kBannerHeight))))
+                    break;
+        if (!s_banner)
+            s_banner = DecodeBanner(DashboardBackground(), true, S(kBannerWidth), S(kBannerHeight));
+        s_bannerHeight = s_banner ? kBannerHeight : 0;
+    }
+
+    void PaintBanner(HWND hwnd)
+    {
+        PAINTSTRUCT ps;
+        HDC dc = BeginPaint(hwnd, &ps);
+        if (s_banner)
+        {
+            HDC mem = CreateCompatibleDC(dc);
+            HGDIOBJ old = SelectObject(mem, s_banner);
+            BitBlt(dc, 0, 0, S(kBannerWidth), S(kBannerHeight), mem, 0, 0, SRCCOPY);
+            SelectObject(mem, old);
+            DeleteDC(mem);
+        }
+        EndPaint(hwnd, &ps);
     }
 
     void UpdateStatus()
@@ -934,6 +1070,9 @@ namespace
         case WM_CTLCOLORSTATIC:
             SetBkMode(HDC(wp), TRANSPARENT);
             return LRESULT(GetSysColorBrush(COLOR_WINDOW));
+        case WM_PAINT:
+            PaintBanner(hwnd);
+            return 0;
         case kUpdateResult:
         {
             std::unique_ptr<std::wstring> text(reinterpret_cast<std::wstring*>(lp));
@@ -991,7 +1130,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show)
     tc.lpszClassName = L"WetLauncherTool";
     RegisterClassExW(&tc);
 
-    RECT rc{ 0, 0, S(690), S(494) };
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    LoadBanner();
+    RECT rc{ 0, 0, S(690), S(494 + s_bannerHeight) };
     DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
     AdjustWindowRect(&rc, style, FALSE);
     int w = rc.right - rc.left, h = rc.bottom - rc.top;

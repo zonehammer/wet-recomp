@@ -65,6 +65,9 @@ This extracts the disc into `game\extracted`, recompiles `default.xex` into
 
 **3. Play**: `build\runtime\WetLauncher.exe` (settings, then Play) or
 `build\runtime\WetRecomp.exe` (straight in).
+The launcher's banner is the game's dashboard art, read from your disc
+(`game\extracted\nxeart`) each time it starts; to use your own picture instead, put
+`launcher_banner.png` or `.jpg` next to the launcher (it's cropped to 690x150).
 
 **Ready-to-run folder**: `python tools\package.py --with-game --with-saves --zip` makes
 `dist\WET-Recomp-<version>` with the launcher, the game exe, a player README and the
