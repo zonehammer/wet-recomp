@@ -57,6 +57,10 @@ namespace wet::renderer
     // Pause menu "hold Back to quit" hint: < 0 hidden (not paused), else how far
     // the hold has got (0..1). Any thread.
     void SetQuitHold(float progress);
+    // Saves the game's next frame (without the overlay) to screenshots\WET_<date>_<time>.png (F12).
+    void SaveScreenshot();
+    // Makes sure the overlay exists to draw something new (photo mode, a message); any thread.
+    void RefreshOverlay();
 }
 
 // Provided by the kernel for the renderer's threads.

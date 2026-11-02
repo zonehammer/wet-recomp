@@ -14,6 +14,7 @@
 // and the sides open up.
 #include "gpu/renderer.h"
 #include "options.h"
+#include "photo.h"
 #include "ppc_context.h"
 
 #include <cmath>
@@ -51,16 +52,21 @@ namespace
 extern "C" void __imp__sub_82C7E590(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_82C7E590)
 {
-    int fov = wet::options::Fov();
+    bool photo = wet::photo::Active();
+    double fov = photo ? wet::photo::Fov() : wet::options::Fov();
     float wide = wet::renderer::DisplayAspect() / (16.0f / 9.0f);
     uint32_t proj = ctx.r5.u32;
-    if ((fov == 90 && wide < 1.001f) || !proj || !WidePerspective(base, proj))
+    if ((fov == 90 && wide < 1.001f && !photo) || !proj || !WidePerspective(base, proj))
     {
         __imp__sub_82C7E590(ctx, base);
         return;
     }
-    // The projection is only read by the copy at the start, so a scratch copy well
-    // below the stack pointer is safe.
+    // Photo mode: the free camera's view instead of the game's (photo.cpp).
+    uint32_t viewCopy = (ctx.r1.u32 - 1536) & ~15u;
+    if (photo && ctx.r4.u32 && wet::photo::OverrideView(base, ctx.r4.u32, proj, viewCopy))
+        ctx.r4.u64 = viewCopy;
+    // The matrices are only read by the copy at the start, so scratch copies well
+    // below the stack pointer are safe.
     uint32_t copy = (ctx.r1.u32 - 1024) & ~15u;
     for (uint32_t i = 0; i < 64; i += 4)
         PPC_STORE_U32(copy + i, PPC_LOAD_U32(proj + i));

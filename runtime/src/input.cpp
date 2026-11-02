@@ -5,6 +5,7 @@
 #include "options.h"
 #include "camscan.h"
 #include "keybinds.h"
+#include "photo.h"
 
 #include <atomic>
 #include <cmath>
@@ -38,7 +39,7 @@
 // WET_AUTOPRESS: a script of steps, run in turn from WET_AUTOPRESS_DELAY seconds
 // after launch (default 50, i.e. after the intro videos), repeated forever
 // unless it ends with EXIT. Steps, separated by commas:
-//   A, START, ...       tap the button (held 0.2 s; the step takes 2 s)
+//   A, START, ...       tap the button (held 0.2 s; the step takes 2 s); A+B taps both
 //   WAIT:5              nothing for 5 s
 //   HOLD:RT:3           hold a button (or LT / RT) for 3 s
 //   MOVE:UP:3           left stick UP / DOWN / LEFT / RIGHT for 3 s
@@ -75,13 +76,27 @@ namespace wet
             double delay = 50.0, total = 0;
             bool once = false;
 
+            // A button, LT / RT, or several at once: "LTHUMB+RTHUMB".
             static bool Button(const std::string& name, uint16_t& bits, int& trigger)
             {
                 bits = 0;
-                trigger = name == "LT" ? 1 : name == "RT" ? 2 : 0;
-                for (auto& n : kNames)
-                    if (name == n.name)
-                        bits = n.bit;
+                trigger = 0;
+                size_t p = 0;
+                while (p <= name.size())
+                {
+                    size_t e = name.find('+', p);
+                    if (e == std::string::npos) e = name.size();
+                    std::string one = name.substr(p, e - p);
+                    p = e + 1;
+                    bool found = false;
+                    if (one == "LT") trigger |= 1, found = true;
+                    if (one == "RT") trigger |= 2, found = true;
+                    for (auto& n : kNames)
+                        if (one == n.name)
+                            bits |= n.bit, found = true;
+                    if (!found)
+                        return false;
+                }
                 return bits || trigger;
             }
 
@@ -187,8 +202,8 @@ namespace wet
                     if (down)
                     {
                         bits |= st.bits;
-                        if (st.trigger == 1) lt = 255;
-                        if (st.trigger == 2) rt = 255;
+                        if (st.trigger & 1) lt = 255;
+                        if (st.trigger & 2) rt = 255;
                     }
                     if (st.kind == Kind::Move)
                         lx = int16_t(st.dx * 32767), ly = int16_t(st.dy * 32767);
@@ -395,7 +410,8 @@ namespace wet
         {
             std::lock_guard lock(s_mouseLock);
             HWND fg = GetForegroundWindow();
-            bool game = fg && fg != GetConsoleWindow() && options::MouseAim() && !renderer::OverlayOpen();
+            bool game = fg && fg != GetConsoleWindow() && (options::MouseAim() || photo::Active()) &&
+                        !renderer::OverlayOpen();
             if (game)
             {
                 DWORD pid = 0;
@@ -434,6 +450,16 @@ namespace wet
             }
             SetCursorPos(center.x, center.y);
             s_mouse.center = center;
+            if (photo::Active())
+            {
+                // Photo mode flies its own camera with the mouse.
+                photo::AddMouse(s_mouse.directX, s_mouse.directY);
+                s_mouse.directX = s_mouse.directY = s_mouse.lookX = s_mouse.lookY = 0;
+                s_mouse.accX = s_mouse.accY = 0;
+                s_mouse.stickX = s_mouse.stickY = 0;
+                AddMouseButtons(buttons, lt, rt);
+                return true;
+            }
             if (NativeLookActive())
             {
                 s_mouse.lookX += s_mouse.directX;
@@ -500,6 +526,16 @@ namespace wet
                 return 0;
             }
             // F1: settings overlay.
+            // F5: photo mode; F12: screenshot.
+            static bool f5 = false, f12 = false;
+            bool f5Now = (GetAsyncKeyState(VK_F5) & 0x8000) != 0;
+            if (f5Now && !f5)
+                photo::RequestToggle();
+            f5 = f5Now;
+            bool f12Now = (GetAsyncKeyState(VK_F12) & 0x8000) != 0;
+            if (f12Now && !f12)
+                renderer::SaveScreenshot();
+            f12 = f12Now;
             static bool f1 = false;
             bool f1Now = (GetAsyncKeyState(VK_F1) & 0x8000) != 0;
             if (f1Now && !f1)
@@ -959,6 +995,20 @@ namespace wet
             s_extraPackets++;
         out.packet += s_extraPackets.load() << 20;
         out.buttons |= extra;
+        // L3 + R3 together: photo mode.
+        static bool thumbs = false;
+        bool thumbsNow = (out.buttons & (kLThumb | kRThumb)) == (kLThumb | kRThumb);
+        if (thumbsNow && !thumbs)
+            photo::RequestToggle();
+        thumbs = thumbsNow;
+        if (photo::Active())
+        {
+            // The camera gets the controls; the game sees a controller at rest.
+            photo::NotePad(out);
+            out.buttons = 0;
+            out.leftTrigger = out.rightTrigger = 0;
+            out.lx = out.ly = out.rx = out.ry = 0;
+        }
         LogButtons(out.buttons);
         Recording().Note(out);
         return true;

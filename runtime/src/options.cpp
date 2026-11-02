@@ -1,4 +1,5 @@
 #include "options.h"
+#include "photo.h"
 #include "keybinds.h"
 #include "gpu_info.h"
 #include "log.h"
@@ -488,6 +489,13 @@ PPC_FUNC(sub_82C32BF8)
     }
     static uint64_t calls = 0;
     static int lastHalved = -1;
+    // Photo mode (F5): starts / stops here on the game thread and freezes time.
+    if (double step = wet::photo::GameTick(ctx, base, ctx.f1.f64); wet::photo::Active())
+    {
+        ctx.f1.f64 = step;
+        __imp__sub_82C32BF8(ctx, base);
+        return;
+    }
     double dt = ctx.f1.f64;
     int fps = wet::options::Fps();
     bool scale = fps > 30 && dt > 1.0 / 30.0 - 1e-4 && dt < 1.0 / 30.0 + 1e-4;

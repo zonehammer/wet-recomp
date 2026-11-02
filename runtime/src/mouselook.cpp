@@ -23,6 +23,7 @@
 #include "log.h"
 #include "memory.h"
 #include "options.h"
+#include "photo.h"
 #include "ppc_context.h"
 
 #include <algorithm>
@@ -115,6 +116,7 @@ namespace
 void WetMouseLookGather(PPCRegister& r29)
 {
     t_turn = {};
+    wet::photo::NoteThirdPersonCamera();
     if (Disabled() || !wet::options::MouseAim() || !HasInput(r29.u32))
         return;
     double dx, dy;

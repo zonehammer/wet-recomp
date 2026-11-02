@@ -16,6 +16,7 @@
 #include "achievements.h"
 #include "keybinds.h"
 #include "gpu_info.h"
+#include "photo.h"
 #include <map>
 #include <ctime>
 #define STB_IMAGE_STATIC
@@ -448,9 +449,13 @@ namespace
             if (s_overlayOpen)
                 DrawSettings(io, scale);
             else
+            {
                 DrawQuitHint(io, scale);
+                DrawPhoto(io, scale);
+            }
 
-            if (!s_overlayOpen && !wet::options::ShowFps() && !PopupPending() && s_quitHold < 0)
+            if (!s_overlayOpen && !wet::options::ShowFps() && !PopupPending() && s_quitHold < 0 &&
+                !wet::photo::Active() && wet::photo::Toast().empty())
                 Close();
         }
 
@@ -634,6 +639,55 @@ namespace
             }
             ImGui::SameLine();
             ImGui::TextDisabled("Click, then press a key; right click clears. Two keys: wet.ini key_* = Q, F");
+        }
+
+        // Photo mode's controls (bottom left) and messages such as "Screenshot saved"
+        // (top middle). Screenshots are taken from the game's output, without these.
+        static void DrawPhoto(ImGuiIO& io, float scale)
+        {
+            std::string toast = wet::photo::Toast();
+            auto st = wet::photo::GetStatus();
+            if (!st.active && toast.empty())
+                return;
+            ApplyStyle(scale);
+            float em = ImGui::GetFontSize();
+            const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                                           ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoFocusOnAppearing |
+                                           ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoSavedSettings;
+            if (!toast.empty())
+            {
+                ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, em * 1.5f), ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+                ImGui::SetNextWindowBgAlpha(0.85f);
+                ImGui::Begin("##toast", nullptr, flags);
+                ImGui::TextUnformatted(toast.c_str());
+                ImGui::End();
+            }
+            if (!st.active)
+                return;
+            ImGui::SetNextWindowPos(ImVec2(em, io.DisplaySize.y - em), ImGuiCond_Always, ImVec2(0.0f, 1.0f));
+            ImGui::SetNextWindowBgAlpha(0.55f);
+            ImGui::Begin("##photo", nullptr, flags);
+            ImGui::TextColored(ImVec4(0.95f, 0.35f, 0.35f, 1.0f), "PHOTO MODE");
+            ImGui::SameLine();
+            ImGui::TextDisabled("  FOV %.0f%s", st.fov, st.fast ? "  - fast" : "");
+            ImGui::Spacing();
+            auto row = [](const char* what, const char* keys, const char* pad) {
+                ImGui::TextUnformatted(what);
+                ImGui::SameLine(ImGui::GetFontSize() * 7);
+                ImGui::TextDisabled("%s", keys);
+                ImGui::SameLine(ImGui::GetFontSize() * 17);
+                ImGui::TextDisabled("%s", pad);
+            };
+            row("Move", "WASD", "Left stick");
+            row("Look", "Mouse", "Right stick");
+            row("Up / down", "E / Q", "RB / LB");
+            row("Faster", "Hold Shift", "Hold L3");
+            row("Zoom in / out", "Left / right click", "RT / LT");
+            row(st.hudHidden ? "Show HUD" : "Hide HUD", "Y", "Y");
+            row("Screenshot", "Space or F12", "A");
+            row("Reset camera", "X", "X");
+            row("Exit", "Esc or F5", "B or L3 + R3");
+            ImGui::End();
         }
 
         // Pause menu: "Hold Back to quit to desktop", with the hold's progress.
@@ -1099,7 +1153,8 @@ namespace
     {
         if (!s_imgui)
             return;
-        if (!s_overlay && (s_overlayOpen || wet::options::ShowFps() || PopupPending() || s_quitHold >= 0))
+        if (!s_overlay && (s_overlayOpen || wet::options::ShowFps() || PopupPending() || s_quitHold >= 0 ||
+                           wet::photo::Active() || !wet::photo::Toast().empty()))
             s_overlay = new OverlayDialog(s_imgui.get());
     }
 
@@ -1609,6 +1664,73 @@ namespace wet::renderer
             return;
         wet::renderer_host::Log("Renderer: F8 - capturing the next 48 frames");
         wet::renderer_host::StartThread(BurstThread, nullptr, "Burst capture");
+    }
+
+    void RefreshOverlay()
+    {
+#if XE_PLATFORM_WIN32
+        if (s_window && s_window->app && s_imgui)
+            s_window->app->CallInUIThread([] { UpdateOverlay(); });
+#endif
+    }
+
+    // F12 / photo mode: the next presented frame as a PNG in screenshots\.
+    std::atomic<bool> s_screenshotRunning{ false };
+
+    void ScreenshotThread(void*)
+    {
+        auto* cp = s_graphics ? s_graphics->command_processor() : nullptr;
+        xe::ui::Presenter* presenter = s_graphics ? s_graphics->presenter() : nullptr;
+        xe::ui::RawImage img;
+        bool ok = false;
+        if (cp && presenter)
+        {
+            // A frame presented after the key press (the overlay isn't in it).
+            uint32_t swap = cp->wet_swap_count();
+            auto start = std::chrono::steady_clock::now();
+            while (cp->wet_swap_count() == swap && std::chrono::steady_clock::now() - start < std::chrono::seconds(1))
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            ok = presenter->CaptureGuestOutput(img) && img.width;
+        }
+        if (ok)
+        {
+            std::error_code ec;
+            std::filesystem::create_directories("screenshots", ec);
+            std::time_t t = std::time(nullptr);
+            std::tm tm{};
+#ifdef _WIN32
+            localtime_s(&tm, &t);
+#else
+            localtime_r(&t, &tm);
+#endif
+            char name[96];
+            std::strftime(name, sizeof(name), "screenshots/WET_%Y-%m-%d_%H-%M-%S", &tm);
+            std::string path = name;
+            for (int n = 2; std::filesystem::exists(path + ".png", ec); n++)
+                path = std::string(name) + "_" + std::to_string(n);
+            path += ".png";
+            std::vector<uint8_t> rgb(size_t(img.width) * img.height * 3);
+            for (uint32_t y = 0; y < img.height; y++)
+                for (uint32_t x = 0; x < img.width; x++)
+                    std::memcpy(&rgb[(size_t(y) * img.width + x) * 3], img.data.data() + y * img.stride + x * 4, 3);
+            ok = stbi_write_png(path.c_str(), int(img.width), int(img.height), 3, rgb.data(), int(img.width) * 3) != 0;
+            std::string shown = path;
+            std::replace(shown.begin(), shown.end(), '/', '\\');
+            wet::renderer_host::Log(((ok ? "Screenshot saved: " : "Screenshot failed: ") + shown).c_str());
+            wet::photo::SetToast(ok ? "Screenshot saved: " + shown + " (" + std::to_string(img.width) + "x" +
+                                          std::to_string(img.height) + ")"
+                                    : "Couldn't save the screenshot");
+        }
+        else
+            wet::photo::SetToast("Couldn't capture the screenshot");
+        s_screenshotRunning = false;
+    }
+
+    void SaveScreenshot()
+    {
+        if (!s_graphics || s_screenshotRunning.exchange(true))
+            return;
+        wet::renderer_host::StartThread(ScreenshotThread, nullptr, "Screenshot");
     }
 
     void SetQuitHold(float progress)

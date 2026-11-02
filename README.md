@@ -30,6 +30,7 @@ nothing derived from the game is ever committed.
   compilation stutter only happens once.
 - **Settings picked for your graphics card** on the first start.
 - An in-game settings overlay (**F1**) and a **launcher** with settings and a Play button.
+- **Photo mode** (F5): freeze the game, hide the HUD and fly a free camera; **F12** screenshots.
 - **Quit to desktop** from the pause menu (hold Back / Backspace) or the F1 overlay.
 
 ## Building (Windows 10/11, 64-bit)
@@ -122,8 +123,10 @@ action, press a key), with the launcher's **Keyboard...** button, or in `wet.ini
 | Key | |
 |---|---|
 | F1 | Settings overlay (General, Display, Graphics, Performance, Controls and Achievements tabs; Quit to desktop); frees the mouse |
+| F5 | **Photo mode** (also L3 + R3): the game freezes, the HUD hides, a free camera flies anywhere (WASD / left stick, mouse / right stick, E / Q up and down, Shift faster, clicks or triggers zoom, Y HUD, Space / A screenshot, X reset, Esc / B leave) |
 | F6 | Cycle the frame rate |
 | F11 | Fullscreen |
+| F12 | Screenshot to `screenshots\` (the game's picture at its full rendering resolution, without overlays) |
 | F8 | Save the next 48 frames to `frames\` (bug reports) |
 | F10 | Profiler on/off (`profile.txt`, bug reports) |
 

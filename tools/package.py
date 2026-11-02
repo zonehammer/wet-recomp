@@ -96,6 +96,9 @@ Keys
 ----
 F1   settings overlay (language, display, graphics, performance, controls,
      achievements; Quit to desktop)
+F5   photo mode (also L3 + R3 together): freezes the game, hides the HUD, free
+     camera; the controls are shown on screen. Screenshots go to screenshots\
+F12  screenshot
 F6   cycle the frame rate (30 / 60 / 120 / 144 / 165 / 240 / monitor)
 F11  fullscreen
 F8   save the next 48 frames to frames\\ (for bug reports)

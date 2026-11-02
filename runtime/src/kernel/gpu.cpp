@@ -25,6 +25,7 @@
 #include "os.h"
 #include "threads.h"
 #include "options.h"
+#include "photo.h"
 
 #include <atomic>
 #include <chrono>
@@ -873,6 +874,7 @@ static void UpdatePauseQuit(PPCContext& ctx)
         paused = ctx.r3.u32 != 0;
         ctx = saved;
     }
+    photo::SetPauseMenu(paused);
     bool back = paused && (g_guestPadButtons.load() & 0x0020) && !renderer::OverlayOpen();
     auto now = std::chrono::steady_clock::now();
     if (back && !holding)
