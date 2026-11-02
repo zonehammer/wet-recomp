@@ -1036,7 +1036,7 @@ namespace
         Check(kMouseAim, L"Mouse aim (WASD + mouse)", 22, 200, ini.Get("mouse_aim", 1) != 0, 200);
         Check(kInvertY, L"Invert Y", 230, 200, ini.Get("mouse_invert_y", 0) != 0, 100);
         Label(L"Mouse sensitivity", 22, 230);
-        Slider(kSensitivity, kSensitivityValue, 136, 228, 150, 1, 100, ini.Get("mouse_sensitivity", 50), L"");
+        Slider(kSensitivity, kSensitivityValue, 136, 228, 150, 1, 200, ini.Get("mouse_sensitivity", 50), L"");
         Check(kVibration, L"Controller vibration", 22, 256, ini.Get("vibration", 1) != 0, 180);
         Label(L"Prompts", 22, 284, 56);
         Combo(kPrompts, 80, 282, 128, { L"Automatic", L"Xbox", L"PlayStation", L"Keyboard / mouse" },

@@ -128,7 +128,7 @@ namespace wet::options
             std::fprintf(f, "button_prompts = %d\n", s_buttonPrompts.load());
             std::fprintf(f, "# mouse_aim: 1 = the mouse turns the camera / aims (right stick) while the game window is active\n");
             std::fprintf(f, "mouse_aim = %d\n", s_mouseAim.load());
-            std::fprintf(f, "# mouse_sensitivity: 1-100; mouse_invert_y: 1 = up/down inverted\n");
+            std::fprintf(f, "# mouse_sensitivity: 1-200; mouse_invert_y: 1 = up/down inverted\n");
             std::fprintf(f, "mouse_sensitivity = %d\n", s_mouseSens.load());
             std::fprintf(f, "mouse_invert_y = %d\n", s_mouseInvert.load());
             std::fprintf(f, "# mouse_direct: 1 = the mouse turns the camera by how far it moves (no stick speed limit); 0 = the mouse acts as a stick\n");
@@ -235,7 +235,7 @@ namespace wet::options
                 else if (!std::strcmp(key, "camera_shake")) s_cameraShake = value != 0;
                 else if (!std::strcmp(key, "shader_cache")) s_shaderCache = value != 0;
                 else if (!std::strcmp(key, "mouse_aim")) s_mouseAim = value != 0;
-                else if (!std::strcmp(key, "mouse_sensitivity")) s_mouseSens = Clamp(value, 1, 100);
+                else if (!std::strcmp(key, "mouse_sensitivity")) s_mouseSens = Clamp(value, 1, 200);
                 else if (!std::strcmp(key, "mouse_invert_y")) s_mouseInvert = value != 0;
                 else if (!std::strcmp(key, "mouse_direct")) s_mouseDirect = value != 0;
                 else if (!std::strcmp(key, "film_grain")) s_filmGrain = Clamp(value, 0, 100);
@@ -342,7 +342,7 @@ namespace wet::options
     bool MouseAim() { return s_mouseAim.load(std::memory_order_relaxed) != 0; }
     void SetMouseAim(bool v) { s_mouseAim = v; Save(); }
     int MouseSensitivity() { return s_mouseSens.load(std::memory_order_relaxed); }
-    void SetMouseSensitivity(int v) { s_mouseSens = Clamp(v, 1, 100); Save(); }
+    void SetMouseSensitivity(int v) { s_mouseSens = Clamp(v, 1, 200); Save(); }
     bool MouseInvertY() { return s_mouseInvert.load(std::memory_order_relaxed) != 0; }
     void SetMouseInvertY(bool v) { s_mouseInvert = v; Save(); }
     bool MouseDirect() { return s_mouseDirect.load(std::memory_order_relaxed) != 0; }

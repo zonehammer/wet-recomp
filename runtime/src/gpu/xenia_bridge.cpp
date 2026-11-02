@@ -1017,14 +1017,14 @@ namespace
                     wet::options::SetMouseAim(aim);
                 int sens = wet::options::MouseSensitivity(), pick = sens;
                 Row("Mouse sensitivity");
-                ImGui::SliderInt("##sens", &pick, 1, 100);
+                ImGui::SliderInt("##sens", &pick, 1, 200);
                 if (pick != sens)
                     wet::options::SetMouseSensitivity(pick);
                 bool invert = wet::options::MouseInvertY();
                 if (RowCheck("Invert mouse Y", &invert))
                     wet::options::SetMouseInvertY(invert);
                 bool direct = wet::options::MouseDirect();
-                if (RowCheck("Direct mouse aim", &direct, "Turns by how far the mouse moves, with no stick speed limit."))
+                if (RowCheck("Direct mouse aim", &direct, "Outside the normal third-person camera (turrets, vehicles, menus): turns by how far the mouse moves, with no stick speed limit. Off: the mouse acts as a stick there."))
                     wet::options::SetMouseDirect(direct);
                 ImGui::EndTable();
             }

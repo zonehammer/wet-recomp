@@ -378,7 +378,7 @@ namespace wet
         // hook keeps asking; elsewhere the mouse goes to the right stick.
         bool NativeLookActive()
         {
-            return options::MouseDirect() &&
+            return options::MouseAim() &&
                    std::chrono::steady_clock::now() - s_mouse.lastLook < std::chrono::milliseconds(300);
         }
 
@@ -863,7 +863,7 @@ namespace wet
 #ifdef _WIN32
         std::lock_guard lock(s_mouseLock);
         s_mouse.lastLook = std::chrono::steady_clock::now();
-        if (!s_mouse.captured || !options::MouseDirect())
+        if (!s_mouse.captured || !options::MouseAim())
             return false;
         dx = s_mouse.lookX;
         dy = s_mouse.lookY;

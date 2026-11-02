@@ -1,4 +1,4 @@
-// Native mouse look: with direct mouse aim on, the mouse turns the third-person
+// Native mouse look: with mouse aim on, the mouse turns the third-person
 // camera (wetcamera::Cam3rd) by an angle, instead of being turned into a
 // right-stick value. No stick dead zone, response curve, turn speed or slow
 // motion scaling: one mouse count is always the same angle. Where the camera
@@ -115,14 +115,19 @@ namespace
 void WetMouseLookGather(PPCRegister& r29)
 {
     t_turn = {};
-    if (Disabled() || !wet::options::MouseDirect() || !HasInput(r29.u32))
+    if (Disabled() || !wet::options::MouseAim() || !HasInput(r29.u32))
         return;
     double dx, dy;
     if (!wet::TakeLookDelta(dx, dy) || (dx == 0 && dy == 0))
         return;
     s_lastMotion = Now();
-    // Sensitivity 50 (the default) = 0.044 degrees per count, 2x Source's 0.022.
-    double radiansPerCount = 0.044 * wet::options::MouseSensitivity() / 50.0 * 3.14159265358979 / 180.0;
+    static std::atomic<bool> s_logged{ false };
+    if (!s_logged.exchange(true))
+        wet::Log("Mouse: native camera look in use (camera %08X, sensitivity %d)", r29.u32,
+                 wet::options::MouseSensitivity());
+    // Sensitivity 50 (the default) = 0.066 degrees per pixel (3x Source's 0.022),
+    // 100 = 0.132, 200 = 0.264.
+    double radiansPerCount = 0.066 * wet::options::MouseSensitivity() / 50.0 * 3.14159265358979 / 180.0;
     double yaw = dx * radiansPerCount;
     double pitch = -dy * radiansPerCount;   // the cursor's y grows downwards, the stick's upwards
     if (wet::options::MouseInvertY())
@@ -137,7 +142,7 @@ void WetMouseLookGather(PPCRegister& r29)
 // mouse turns, the "right stick touched" bits make Update run the manual orbit step.
 void WetMouseLookTouched(PPCRegister& r10, PPCRegister& r29)
 {
-    if (Disabled() || !wet::options::MouseDirect() || !HasInput(r29.u32))
+    if (Disabled() || !wet::options::MouseAim() || !HasInput(r29.u32))
         return;
     bool turning = t_turn.camera == r29.u32 && t_turn.yawPending;
     if (!turning && Now() - s_lastMotion.load() > kTouchedSeconds)
