@@ -1,0 +1,42 @@
+name: Audio problem
+description: Missing, crackling, out-of-sync or wrong-language sound or speech.
+labels: [audio]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Shown in the launcher title and at the top of wet.log (e.g. 0.2.6).
+      placeholder: "0.2.6"
+    validations:
+      required: true
+  - type: textarea
+    id: system
+    attributes:
+      label: PC
+      description: Graphics card, CPU, Windows version (or Steam Deck / Linux and Proton version).
+      placeholder: "RTX 3070 Ti laptop, i7-12700H, Windows 11"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What sounds wrong
+      description: What you hear (or don't), where in the game, and whether it's music, effects, speech or a video.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Audio output
+      description: Speakers, headphones, a headset on the controller, HDMI, Bluetooth...; and the frame rate (F1).
+      placeholder: "USB headset, 120 FPS"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Drag in the zip from **Report a bug...** in the launcher (WET-bug-report-*.zip: wet.log, wet.ini and system info).
+        Or attach `wet.log` from next to WetRecomp.exe. Please run the game once more after the problem before attaching, if it reset the log.
+    validations:
+      required: true

@@ -53,6 +53,6 @@ Make a full playthrough reliable before adding more features.
 
 ## Ongoing
 
-- Issue templates (crash / graphics / audio) asking for `wet.log` and an F8 capture.
+- ~~Issue templates~~ (done: crash / graphics / audio forms asking for the bug report zip and an F8 capture).
 - Keep the README, player README and this roadmap current with each release.
 - Every push is built by GitHub Actions on Windows with both toolchains.

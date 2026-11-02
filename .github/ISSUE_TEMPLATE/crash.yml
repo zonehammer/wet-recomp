@@ -1,0 +1,51 @@
+name: Crash, freeze or won't start
+description: The game closes, hangs, shows an error, or the build / launcher fails.
+labels: [crash]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Never attach the game itself, the packaged exe or the zip from tools/package.py**: they contain code from the game.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Shown in the launcher title and at the top of wet.log (e.g. 0.2.6).
+      placeholder: "0.2.6"
+    validations:
+      required: true
+  - type: textarea
+    id: system
+    attributes:
+      label: PC
+      description: Graphics card, CPU, Windows version (or Steam Deck / Linux and Proton version).
+      placeholder: "RTX 3070 Ti laptop, i7-12700H, Windows 11"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Where in the game (chapter, level, menu, cutscene) and what you were doing.
+      placeholder: "Chapter 2, after the car chase cutscene, the game froze on a black screen."
+    validations:
+      required: true
+  - type: dropdown
+    id: repeat
+    attributes:
+      label: Does it happen again?
+      options:
+        - Every time at the same place
+        - Sometimes
+        - Only once so far
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Drag in the zip from **Report a bug...** in the launcher (WET-bug-report-*.zip: wet.log, wet.ini and system info).
+        Or attach `wet.log` from next to WetRecomp.exe. Please run the game once more after the problem before attaching, if it reset the log.
+    validations:
+      required: true

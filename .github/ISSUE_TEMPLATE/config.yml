@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Building or install help (WetSetup, build.py)
+    url: https://github.com/zonehammer/wet-recomp#building-windows-1011-64-bit
+    about: Check the build steps in the README first; if it still fails, open a Crash / startup issue with the build output.

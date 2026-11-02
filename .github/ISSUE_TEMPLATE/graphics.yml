@@ -1,0 +1,51 @@
+name: Graphics problem
+description: Something looks wrong - missing or flickering effects, wrong colours, stretched HUD, stutter, low FPS.
+labels: [graphics]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Screenshots help a lot. For a glitch that moves or flickers, press **F8** while it's on screen: the next 48 frames are saved to `frames\` - zip that folder and attach it.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Shown in the launcher title and at the top of wet.log (e.g. 0.2.6).
+      placeholder: "0.2.6"
+    validations:
+      required: true
+  - type: textarea
+    id: system
+    attributes:
+      label: PC
+      description: Graphics card, CPU, Windows version (or Steam Deck / Linux and Proton version).
+      placeholder: "RTX 3070 Ti laptop, i7-12700H, Windows 11"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What looks wrong
+      description: What you see, where in the game, and what it should look like.
+    validations:
+      required: true
+  - type: textarea
+    id: settings
+    attributes:
+      label: Settings
+      description: Resolution, frame rate, anti-aliasing and scaling (F1). Does it change if you turn one of them off or back to the original?
+      placeholder: "4K, 144 FPS, SMAA, FSR. Goes away at 720p."
+  - type: textarea
+    id: media
+    attributes:
+      label: Screenshots or F8 capture
+      description: Drag images or a zipped frames folder here.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Drag in the zip from **Report a bug...** in the launcher (WET-bug-report-*.zip: wet.log, wet.ini and system info).
+        Or attach `wet.log` from next to WetRecomp.exe. Please run the game once more after the problem before attaching, if it reset the log.
+    validations:
+      required: true
