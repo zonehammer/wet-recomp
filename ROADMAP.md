@@ -15,7 +15,7 @@ Make a full playthrough reliable before adding more features.
 | **Fix the video race at its cause** (decoder vs. GPU emulation), so videos can run at any frame rate | Video mode hides it; the real fix removes the 30 FPS cap during videos | M |
 | ~~Audit host writes into guest memory~~ (done: file reads were the only place the OS wrote into guest memory directly, and they go through a bounce buffer; every other host write - audio, content, saves, strings, random bytes - is an ordinary CPU store that takes the write-watch fault like a guest write) | The same race could cause rarer crashes elsewhere | S |
 | **Import earned achievements** from the game's own save (`ACHIEVE.DAT`) | Achievements earned before 0.1.0 show as locked | M |
-| **Automated soak test**: scripted input (`WET_AUTOPRESS`) through menus and the first level, run before each release | Catches regressions without a manual playthrough | S |
+| ~~Automated soak test~~ (done: `python tools/soak_test.py` plays New Game into the first level with scripted input and checks for crashes, hangs and unimplemented functions) | Catches regressions without a manual playthrough | S |
 
 ## 0.3 — Controls and feel
 

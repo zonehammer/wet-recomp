@@ -35,9 +35,16 @@
 // (Windows, keybinds.h and wet.ini key_*) and WET_AUTOPRESS (any platform), so the game can be
 // driven with no controller attached and in automated test runs.
 //
-// WET_AUTOPRESS="START,A,A" taps each button in turn, one every 2 seconds
-// (held for 0.2 s), starting WET_AUTOPRESS_DELAY seconds after launch (default 50,
-// i.e. after the intro videos), repeating the list forever.
+// WET_AUTOPRESS: a script of steps, run in turn from WET_AUTOPRESS_DELAY seconds
+// after launch (default 50, i.e. after the intro videos), repeated forever
+// unless it ends with EXIT. Steps, separated by commas:
+//   A, START, ...       tap the button (held 0.2 s; the step takes 2 s)
+//   WAIT:5              nothing for 5 s
+//   HOLD:RT:3           hold a button (or LT / RT) for 3 s
+//   MOVE:UP:3           left stick UP / DOWN / LEFT / RIGHT for 3 s
+//   LOOK:LEFT:1         right stick likewise
+//   EXIT                quit cleanly (logs "Autopress: script finished")
+// tools/soak_test.py uses this to play through the menus and the first level.
 
 namespace wet
 {
@@ -58,8 +65,28 @@ namespace wet
 
         struct AutoPress
         {
-            std::vector<uint16_t> sequence;
-            double delay = 50.0;
+            enum class Kind { Tap, Wait, Hold, Move, Look, Exit };
+            struct Step { Kind kind; uint16_t bits; int trigger; int dx, dy; double seconds; };
+            std::vector<Step> steps;
+            double delay = 50.0, total = 0;
+            bool once = false;
+
+            static bool Button(const std::string& name, uint16_t& bits, int& trigger)
+            {
+                bits = 0;
+                trigger = name == "LT" ? 1 : name == "RT" ? 2 : 0;
+                for (auto& n : kNames)
+                    if (name == n.name)
+                        bits = n.bit;
+                return bits || trigger;
+            }
+
+            static bool Direction(const std::string& name, int& dx, int& dy)
+            {
+                dx = name == "LEFT" ? -1 : name == "RIGHT" ? 1 : 0;
+                dy = name == "DOWN" ? -1 : name == "UP" ? 1 : 0;
+                return dx || dy;
+            }
 
             AutoPress()
             {
@@ -69,31 +96,103 @@ namespace wet
                 if (const char* d = std::getenv("WET_AUTOPRESS_DELAY"))
                     delay = std::atof(d);
                 std::string s(env);
+                for (auto& c : s) c = char(std::toupper((unsigned char)c));
                 size_t p = 0;
                 while (p <= s.size())
                 {
                     size_t e = s.find(',', p);
                     if (e == std::string::npos) e = s.size();
                     std::string tok = s.substr(p, e - p);
-                    for (auto& c : tok) c = char(std::toupper((unsigned char)c));
-                    for (auto& n : kNames)
-                        if (tok == n.name)
-                            sequence.push_back(n.bit);
                     p = e + 1;
+                    tok.erase(std::remove(tok.begin(), tok.end(), ' '), tok.end());
+                    if (tok.empty())
+                        continue;
+                    std::vector<std::string> part;
+                    for (size_t q = 0;;)
+                    {
+                        size_t c = tok.find(':', q);
+                        part.push_back(tok.substr(q, c == std::string::npos ? std::string::npos : c - q));
+                        if (c == std::string::npos) break;
+                        q = c + 1;
+                    }
+                    Step step{ Kind::Tap, 0, 0, 0, 0, 2.0 };
+                    bool ok = false;
+                    if (part[0] == "EXIT")
+                        step.kind = Kind::Exit, step.seconds = 0, ok = true;
+                    else if (part[0] == "WAIT" && part.size() == 2)
+                        step.kind = Kind::Wait, step.seconds = std::atof(part[1].c_str()), ok = true;
+                    else if (part[0] == "HOLD" && part.size() == 3)
+                    {
+                        step.kind = Kind::Hold;
+                        step.seconds = std::atof(part[2].c_str());
+                        ok = Button(part[1], step.bits, step.trigger);
+                    }
+                    else if ((part[0] == "MOVE" || part[0] == "LOOK") && part.size() == 3)
+                    {
+                        step.kind = part[0] == "MOVE" ? Kind::Move : Kind::Look;
+                        step.seconds = std::atof(part[2].c_str());
+                        ok = Direction(part[1], step.dx, step.dy);
+                    }
+                    else if (part.size() == 1)
+                        ok = Button(part[0], step.bits, step.trigger);
+                    if (!ok)
+                    {
+                        Log("Input: WET_AUTOPRESS step \"%s\" not understood; skipped", tok.c_str());
+                        continue;
+                    }
+                    if (step.kind == Kind::Exit)
+                        once = true;
+                    total += step.seconds;
+                    steps.push_back(step);
                 }
-                Log("Input: WET_AUTOPRESS with %zu buttons, starting after %.0f s", sequence.size(), delay);
+                Log("Input: WET_AUTOPRESS with %zu steps (%.0f s), starting after %.0f s%s", steps.size(), total, delay,
+                    once ? ", then exiting" : "");
             }
 
-            uint16_t Buttons() const
+            // What the script holds now; false when it isn't running.
+            bool Now(uint16_t& bits, uint8_t& lt, uint8_t& rt, int16_t& lx, int16_t& ly, int16_t& rx, int16_t& ry) const
             {
-                if (sequence.empty())
-                    return 0;
+                if (steps.empty())
+                    return false;
                 double t = std::chrono::duration<double>(std::chrono::steady_clock::now() - s_start).count() - delay;
-                if (t < 0)
-                    return 0;
-                double slot = t / 2.0;
-                size_t i = size_t(slot);
-                return (slot - double(i)) < 0.1 ? sequence[i % sequence.size()] : 0;
+                if (t < 0 || total <= 0)
+                    return false;
+                if (!once)
+                    t = std::fmod(t, total);
+                static size_t s_logged = SIZE_MAX;
+                for (size_t i = 0; i < steps.size(); i++)
+                {
+                    const Step& st = steps[i];
+                    if (st.kind == Kind::Exit && t >= 0)
+                    {
+                        Log("Autopress: script finished");
+                        LogFlush();
+                        renderer_host::ExitProcess();
+                    }
+                    if (t >= st.seconds)
+                    {
+                        t -= st.seconds;
+                        continue;
+                    }
+                    if (s_logged != i)
+                    {
+                        s_logged = i;
+                        Log("Autopress: step %zu of %zu", i + 1, steps.size());
+                    }
+                    bool down = st.kind == Kind::Hold || (st.kind == Kind::Tap && t < 0.2);
+                    if (down)
+                    {
+                        bits |= st.bits;
+                        if (st.trigger == 1) lt = 255;
+                        if (st.trigger == 2) rt = 255;
+                    }
+                    if (st.kind == Kind::Move)
+                        lx = int16_t(st.dx * 32767), ly = int16_t(st.dy * 32767);
+                    if (st.kind == Kind::Look)
+                        rx = int16_t(st.dx * 20000), ry = int16_t(st.dy * 20000);
+                    return true;
+                }
+                return false;
             }
         };
         const AutoPress& Auto() { static AutoPress a; return a; }
@@ -687,8 +786,9 @@ namespace wet
         if (user != 0)
             return connected;
 
-        uint16_t extra = Auto().Buttons();
+        uint16_t extra = 0;
         int16_t klx = 0, kly = 0, krx = 0, kry = 0;
+        Auto().Now(extra, out.leftTrigger, out.rightTrigger, klx, kly, krx, kry);
 #ifdef _WIN32
         extra |= KeyboardButtons(out.leftTrigger, out.rightTrigger, klx, kly, krx, kry);
 #endif

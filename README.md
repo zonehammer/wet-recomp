@@ -139,6 +139,14 @@ and `button_prompts` the prompt symbols (0 automatic, 1 Xbox, 2 PlayStation, 3 k
 mouse). Saves, `achievements.ini` and the shader cache are in
 `game\hdd`. `WetRecomp.exe --console` shows the log live; `wet.log` always has it.
 
+## Testing a build
+
+`python tools/soak_test.py` starts the game with an empty save folder and plays it with
+scripted input: New Game, into the first level, a couple of minutes of moving and shooting,
+the pause menu, then a clean exit. It fails on a crash, a hang (the log stops) or an early
+exit, and lists any unimplemented system functions the game called. Logs go to `soak\`.
+`--runs 3` repeats it; `--script` takes your own steps (see `runtime/src/input.cpp`).
+
 ## How it works
 
 1. `tools/prepare_game.py` extracts the disc into `game/extracted/`.
