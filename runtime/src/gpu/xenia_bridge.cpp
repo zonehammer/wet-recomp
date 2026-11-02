@@ -1250,6 +1250,14 @@ namespace wet::renderer
 
     uint32_t EarlyVblanks() { return xe::gpu::wet_early_vblanks.load(std::memory_order_relaxed); }
 
+    bool GpuTimes(uint64_t us[7], uint64_t& frames)
+    {
+        frames = xe::gpu::wet_gpu_frames.load(std::memory_order_relaxed);
+        for (int i = 0; i < 7; i++)
+            us[i] = xe::gpu::wet_gpu_time_us[i].load(std::memory_order_relaxed);
+        return frames != 0;
+    }
+
     void SetResolutionScale(uint32_t scale) { s_resolutionScale = std::clamp<uint32_t>(scale, 1, 3); }
 
     float DisplayAspect()
