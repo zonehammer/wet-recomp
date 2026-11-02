@@ -563,7 +563,7 @@ index ffc8eeffa..37bd99fd2 100644
    uint32_t primary_buffer_ptr_ = 0;
    uint32_t primary_buffer_size_ = 0;
 diff --git a/src/xenia/gpu/d3d12/d3d12_command_processor.cc b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
-index 0ec70a7d1..910830ccb 100644
+index 0ec70a7d1..62bd3f565 100644
 --- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
 +++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
 @@ -8,6 +8,7 @@
@@ -704,7 +704,129 @@ index 0ec70a7d1..910830ccb 100644
              deferred_command_list_.D3DSetComputeRootSignature(
                  fxaa_root_signature_.Get());
              FxaaConstants fxaa_constants;
-@@ -2052,6 +2126,10 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+@@ -1996,6 +2070,121 @@ Shader* D3D12CommandProcessor::LoadShader(xenos::ShaderType shader_type,
+   return pipeline_cache_->LoadShader(shader_type, host_address, dword_count);
+ }
+ 
++#if XE_WET_RUNTIME
++// WET: the game (like other titles using the console Direct3D) fills its 1x
++// depth / colour buffers - clears, stencil clears - with a quad drawn at 4x
++// MSAA over the same EDRAM, where each sample is one 1x pixel. Emulated
++// as-is, every such fill copies the whole buffer to a 4x render target and
++// back (at the rendering resolution: ~2 ms a frame at 4K). When the pixel
++// shader's output is the same for every pixel (no textures, interpolators or
++// position), drawing it at 1x with the viewport and scissor doubled writes
++// exactly the same values to the same samples, with no copies.
++// WET_NO_4X_FILL_REDIRECT=1 turns it off.
++const bool wet_redirect_4x_fill = !std::getenv("WET_NO_4X_FILL_REDIRECT");
++
++bool D3D12CommandProcessor::WetCanRedirect4xFill(
++    const D3D12Shader& vertex_shader, const D3D12Shader* pixel_shader,
++    uint32_t index_count) const {
++  const RegisterFile& regs = *register_file_;
++  auto surface_info = regs.Get<reg::RB_SURFACE_INFO>();
++  if (surface_info.msaa_samples != xenos::MsaaSamples::k4X ||
++      index_count > 6 || surface_info.surface_pitch * 2 > 0x3FFF) {
++    return false;
++  }
++  if (vertex_shader.memexport_eM_written()) {
++    return false;
++  }
++  // Screen-space positions (no viewport transform) can't be doubled here.
++  auto vte = regs.Get<reg::PA_CL_VTE_CNTL>();
++  if (!vte.vport_x_scale_ena || !vte.vport_x_offset_ena ||
++      !vte.vport_y_scale_ena || !vte.vport_y_offset_ena) {
++    return false;
++  }
++  if (regs.Get<reg::RB_COLORCONTROL>().alpha_to_mask_enable) {
++    return false;
++  }
++  if (pixel_shader) {
++    if (!pixel_shader->texture_bindings().empty() ||
++        pixel_shader->writes_depth() || pixel_shader->memexport_eM_written()) {
++      return false;
++    }
++    uint32_t param_gen_pos = UINT32_MAX;
++    uint32_t interpolators =
++        vertex_shader.writes_interpolators() &
++        pixel_shader->GetInterpolatorInputMask(
++            regs.Get<reg::SQ_PROGRAM_CNTL>(), regs.Get<reg::SQ_CONTEXT_MISC>(),
++            param_gen_pos);
++    if (interpolators || param_gen_pos != UINT32_MAX) {
++      return false;
++    }
++  }
++  auto window_offset = regs.Get<reg::PA_SC_WINDOW_OFFSET>();
++  if (std::abs(int32_t(window_offset.window_x_offset)) > 0x1FFF ||
++      std::abs(int32_t(window_offset.window_y_offset)) > 0x1FFF) {
++    return false;
++  }
++  return true;
++}
++
++void D3D12CommandProcessor::WetRedirect4xFill(uint32_t* index_out,
++                                              uint32_t* value_out,
++                                              uint32_t& count_out) {
++  RegisterFile& regs = *register_file_;
++  count_out = 0;
++  auto set = [&](uint32_t index, uint32_t value) {
++    index_out[count_out] = index;
++    value_out[count_out++] = regs.values[index];
++    regs.values[index] = value;
++  };
++  auto set_float = [&](uint32_t index, float value) {
++    uint32_t bits;
++    std::memcpy(&bits, &value, sizeof(bits));
++    set(index, bits);
++  };
++  auto surface_info = regs.Get<reg::RB_SURFACE_INFO>();
++  surface_info.msaa_samples = xenos::MsaaSamples::k1X;
++  surface_info.surface_pitch = surface_info.surface_pitch * 2;
++  set(XE_GPU_REG_RB_SURFACE_INFO, surface_info.value);
++  // Screen position = viewport scale * ndc + offset (+ window offset) + 0.5
++  // with the Direct3D 9 pixel centre; at 1x it must be twice the 4x one.
++  float half_pixel =
++      cvars::half_pixel_offset &&
++              regs.Get<reg::PA_SU_VTX_CNTL>().pix_center ==
++                  xenos::PixelCenter::kD3DZero
++          ? 0.5f
++          : 0.0f;
++  set_float(XE_GPU_REG_PA_CL_VPORT_XSCALE,
++            regs.Get<float>(XE_GPU_REG_PA_CL_VPORT_XSCALE) * 2.0f);
++  set_float(XE_GPU_REG_PA_CL_VPORT_YSCALE,
++            regs.Get<float>(XE_GPU_REG_PA_CL_VPORT_YSCALE) * 2.0f);
++  set_float(XE_GPU_REG_PA_CL_VPORT_XOFFSET,
++            regs.Get<float>(XE_GPU_REG_PA_CL_VPORT_XOFFSET) * 2.0f + half_pixel);
++  set_float(XE_GPU_REG_PA_CL_VPORT_YOFFSET,
++            regs.Get<float>(XE_GPU_REG_PA_CL_VPORT_YOFFSET) * 2.0f + half_pixel);
++  auto window_offset = regs.Get<reg::PA_SC_WINDOW_OFFSET>();
++  window_offset.window_x_offset = window_offset.window_x_offset * 2;
++  window_offset.window_y_offset = window_offset.window_y_offset * 2;
++  set(XE_GPU_REG_PA_SC_WINDOW_OFFSET, window_offset.value);
++  auto window_tl = regs.Get<reg::PA_SC_WINDOW_SCISSOR_TL>();
++  window_tl.tl_x = std::min(uint32_t(window_tl.tl_x) * 2, uint32_t(0x3FFF));
++  window_tl.tl_y = std::min(uint32_t(window_tl.tl_y) * 2, uint32_t(0x3FFF));
++  set(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_TL, window_tl.value);
++  auto window_br = regs.Get<reg::PA_SC_WINDOW_SCISSOR_BR>();
++  window_br.br_x = std::min(uint32_t(window_br.br_x) * 2, uint32_t(0x3FFF));
++  window_br.br_y = std::min(uint32_t(window_br.br_y) * 2, uint32_t(0x3FFF));
++  set(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR, window_br.value);
++  auto screen_tl = regs.Get<reg::PA_SC_SCREEN_SCISSOR_TL>();
++  screen_tl.tl_x = std::clamp(int32_t(screen_tl.tl_x) * 2, -0x4000, 0x3FFF);
++  screen_tl.tl_y = std::clamp(int32_t(screen_tl.tl_y) * 2, -0x4000, 0x3FFF);
++  set(XE_GPU_REG_PA_SC_SCREEN_SCISSOR_TL, screen_tl.value);
++  auto screen_br = regs.Get<reg::PA_SC_SCREEN_SCISSOR_BR>();
++  screen_br.br_x = std::clamp(int32_t(screen_br.br_x) * 2, -0x4000, 0x3FFF);
++  screen_br.br_y = std::clamp(int32_t(screen_br.br_y) * 2, -0x4000, 0x3FFF);
++  set(XE_GPU_REG_PA_SC_SCREEN_SCISSOR_BR, screen_br.value);
++  wet_4x_fills_redirected_.fetch_add(1, std::memory_order_relaxed);
++}
++#endif
++
+ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+                                       uint32_t index_count,
+                                       IndexBufferInfo* index_buffer_info,
+@@ -2052,6 +2241,10 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
      // cache.
      if (!memexport_used_vertex) {
        // This draw has no effect.
@@ -715,7 +837,7 @@ index 0ec70a7d1..910830ccb 100644
        return true;
      }
    }
-@@ -2070,8 +2148,50 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+@@ -2070,8 +2263,68 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
    }
    if (!primitive_processing_result.host_draw_vertex_count) {
      // Nothing to draw.
@@ -723,8 +845,8 @@ index 0ec70a7d1..910830ccb 100644
 +    if (wet_draw_trace_frames > 0)
 +      WetTraceSkip(*vertex_shader, "no host vertices", index_count);
 +#endif
-     return true;
-   }
++    return true;
++  }
 +#if XE_WET_RUNTIME
 +  if (wet_draw_trace_frames > 0)
 +    WetTraceDraw(regs, *memory_, *vertex_shader, pixel_shader,
@@ -733,8 +855,8 @@ index 0ec70a7d1..910830ccb 100644
 +  // Screen-edge frame (vignette / cinematic borders) switched off.
 +  if (WetIsBorderDraw(pixel_shader, wet_swap_count()) &&
 +      wet_hide_borders.load(std::memory_order_relaxed)) {
-+    return true;
-+  }
+     return true;
+   }
 +  // Film grain: scale the grain constant for this draw only (restored after,
 +  // through WriteRegister so the constant buffers see both changes).
 +  struct WetConstantRestore {
@@ -762,11 +884,29 @@ index 0ec70a7d1..910830ccb 100644
 +      WriteRegister(reg, scaled);
 +    }
 +  }
++  // 4x MSAA fill redirected to 1x (see WetRedirect4xFill): the registers are
++  // put back when the draw is done.
++  struct WetRegistersRestore {
++    RegisterFile* regs = nullptr;
++    uint32_t count = 0;
++    uint32_t index[12], value[12];
++    ~WetRegistersRestore() {
++      for (uint32_t i = 0; i < count; ++i) {
++        regs->values[index[i]] = value[i];
++      }
++    }
++  } wet_redirect_restore;
++  if (wet_redirect_4x_fill &&
++      WetCanRedirect4xFill(*vertex_shader, pixel_shader, index_count)) {
++    wet_redirect_restore.regs = register_file_;
++    WetRedirect4xFill(wet_redirect_restore.index, wet_redirect_restore.value,
++                      wet_redirect_restore.count);
++  }
 +#endif
  
    reg::RB_DEPTHCONTROL normalized_depth_control =
        draw_util::GetNormalizedDepthControl(regs);
-@@ -2104,6 +2224,41 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+@@ -2104,6 +2357,41 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
                                      normalized_color_mask, *vertex_shader)) {
      return false;
    }
@@ -808,7 +948,7 @@ index 0ec70a7d1..910830ccb 100644
  
    // Create the pipeline (for this, need the actually used render target formats
    // from the render target cache), translating the shaders - doing this now to
-@@ -2169,6 +2324,13 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+@@ -2169,6 +2457,13 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
            render_target_cache_->depth_float24_convert_in_pixel_shader(),
        host_render_targets_used, pixel_shader && pixel_shader->writes_depth(),
        viewport_info);
@@ -822,7 +962,7 @@ index 0ec70a7d1..910830ccb 100644
    draw_util::Scissor scissor;
    draw_util::GetScissor(regs, scissor);
    scissor.offset[0] *= draw_resolution_scale_x;
-@@ -2467,6 +2629,11 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+@@ -2467,6 +2762,11 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
      }
    }
  
@@ -834,7 +974,7 @@ index 0ec70a7d1..910830ccb 100644
    return true;
  }
  
-@@ -2663,6 +2830,21 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
+@@ -2663,6 +2963,21 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
        }
        frame_completed_ = frame;
      }
@@ -856,7 +996,7 @@ index 0ec70a7d1..910830ccb 100644
    }
  
    if (!submission_open_) {
-@@ -2672,6 +2854,12 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
+@@ -2672,6 +2987,12 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
      // end of the submission (when async pipeline creation requests are
      // fulfilled).
      deferred_command_list_.Reset();
@@ -869,7 +1009,7 @@ index 0ec70a7d1..910830ccb 100644
  
      // Reset cached state of the command list.
      ff_viewport_update_needed_ = true;
-@@ -2790,6 +2978,23 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
+@@ -2790,6 +3111,23 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
      // destroyed between frames.
      SubmitBarriers();
  
@@ -893,7 +1033,7 @@ index 0ec70a7d1..910830ccb 100644
      // TODO(Triang3l): Error checking.
  
      ID3D12CommandQueue* direct_queue = provider.GetDirectQueue();
-@@ -2840,6 +3045,22 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
+@@ -2840,6 +3178,22 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
        pix_capturing_ = false;
      }
      frame_open_ = false;
@@ -916,7 +1056,7 @@ index 0ec70a7d1..910830ccb 100644
      // Submission already closed now, so minus 1.
      closed_frame_submissions_[(frame_current_++) % kQueueFrames] =
          GetCurrentSubmission() - 1;
-@@ -2882,6 +3103,139 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
+@@ -2882,6 +3236,144 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
    return true;
  }
  
@@ -988,6 +1128,11 @@ index 0ec70a7d1..910830ccb 100644
 +    }
 +    wet_work_[kind].clear();
 +  }
++  static uint64_t redirected_before = 0;
++  uint64_t redirected = wet_4x_fills_redirected_.load(std::memory_order_relaxed);
++  XELOGW("WET GPU work per frame: {:.1f} 4x MSAA fills drawn at 1x instead",
++         (redirected - redirected_before) / frames);
++  redirected_before = redirected;
 +  static uint64_t skipped_before = 0, skipped_tiles_before = 0;
 +  uint64_t skipped = wet_rt_copies_skipped.load(std::memory_order_relaxed);
 +  uint64_t skipped_tiles = wet_rt_tiles_skipped.load(std::memory_order_relaxed);
@@ -1056,7 +1201,7 @@ index 0ec70a7d1..910830ccb 100644
  bool D3D12CommandProcessor::CanEndSubmissionImmediately() const {
    return !submission_open_ || !pipeline_cache_->IsCreatingPipelines();
  }
-@@ -4359,6 +4713,304 @@ void D3D12CommandProcessor::WriteGammaRampSRV(
+@@ -4359,6 +4851,304 @@ void D3D12CommandProcessor::WriteGammaRampSRV(
    device->CreateShaderResourceView(gamma_ramp_buffer_.Get(), &desc, handle);
  }
  
@@ -1362,7 +1507,7 @@ index 0ec70a7d1..910830ccb 100644
  }  // namespace gpu
  }  // namespace xe
 diff --git a/src/xenia/gpu/d3d12/d3d12_command_processor.h b/src/xenia/gpu/d3d12/d3d12_command_processor.h
-index 88bdcb438..d88a5c7cb 100644
+index 88bdcb438..6020dd367 100644
 --- a/src/xenia/gpu/d3d12/d3d12_command_processor.h
 +++ b/src/xenia/gpu/d3d12/d3d12_command_processor.h
 @@ -74,6 +74,42 @@ class D3D12CommandProcessor : public CommandProcessor {
@@ -1408,7 +1553,7 @@ index 88bdcb438..d88a5c7cb 100644
    uint64_t GetCurrentSubmission() const {
      return completion_timeline_->GetUpcomingSubmission();
    }
-@@ -400,6 +436,35 @@ class D3D12CommandProcessor : public CommandProcessor {
+@@ -400,6 +436,41 @@ class D3D12CommandProcessor : public CommandProcessor {
    // Submission indices of frames that have already been submitted.
    uint64_t closed_frame_submissions_[kQueueFrames] = {};
  
@@ -1437,6 +1582,12 @@ index 88bdcb438..d88a5c7cb 100644
 +  uint32_t wet_trace_draw_run_ = 0;
 +  void WetTraceFlushDraws();
 +  void WetLogWork();
++  std::atomic<uint64_t> wet_4x_fills_redirected_{0};
++  bool WetCanRedirect4xFill(const D3D12Shader& vertex_shader,
++                            const D3D12Shader* pixel_shader,
++                            uint32_t index_count) const;
++  void WetRedirect4xFill(uint32_t* index_out, uint32_t* value_out,
++                         uint32_t& count_out);
 +  void WetTsMark(uint8_t label);
 +  void WetTsReadSlot(uint32_t slot);
 +#endif
@@ -1444,7 +1595,7 @@ index 88bdcb438..d88a5c7cb 100644
    struct CommandAllocator {
      ID3D12CommandAllocator* command_allocator;
      uint64_t last_usage_submission;
-@@ -554,6 +619,31 @@ class D3D12CommandProcessor : public CommandProcessor {
+@@ -554,6 +625,31 @@ class D3D12CommandProcessor : public CommandProcessor {
    Microsoft::WRL::ComPtr<ID3D12Resource> fxaa_source_texture_;
    uint64_t fxaa_source_texture_submission_ = 0;
  
