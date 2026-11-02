@@ -19,6 +19,7 @@ namespace wet::renderer
     void SetVsyncRate(uint32_t) {}
     uint32_t EarlyVblanks() { return 0; }
     bool GpuTimes(uint64_t*, uint64_t& frames) { frames = 0; return false; }
+    bool VideoMemory(uint64_t&, uint64_t&) { return false; }
     void SetResolutionScale(uint32_t) {}
     void ToggleFullscreen() {}
     void ToggleOverlay() {}

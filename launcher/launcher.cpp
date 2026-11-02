@@ -7,6 +7,7 @@
 #define NOMINMAX
 #include "wet_version.h"
 #include "keybinds.h"
+#include "gpu_info.h"
 #include <windows.h>
 #include <commctrl.h>
 #include <shellapi.h>
@@ -1106,6 +1107,20 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show)
     s_iniPath = s_dir / "wet.ini";
     s_gameDir = FindGame();
     s_hddDir = s_gameDir.empty() ? s_dir / "game" / "hdd" : s_gameDir.parent_path() / "hdd";
+    // First start (no wet.ini yet): resolution and anti-aliasing to suit the
+    // graphics card, rather than the same for every PC.
+    std::wstring firstStartNote;
+    if (!fs::exists(s_iniPath))
+    {
+        wet::gpu_info::Info gpu = wet::gpu_info::Query();
+        wet::gpu_info::Recommended r = wet::gpu_info::Recommend(gpu);
+        s_ini.Set("resolution_scale", r.scale);
+        s_ini.Set("antialiasing", r.aa);
+        s_ini.Set("filter", r.filter);
+        if (gpu.found)
+            firstStartNote = L"Settings picked for " + Wide(gpu.name) + L" (" + Wide(r.tier) +
+                             L"); change them here any time.";
+    }
     s_ini.Load(s_iniPath);
 
     HDC screen = GetDC(nullptr);
@@ -1144,6 +1159,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show)
                                nullptr, nullptr, instance, nullptr);
     s_parent = s_window;
     BuildControls();
+    if (!firstStartNote.empty())
+        SetWindowTextW(Item(kUpdateText), firstStartNote.c_str());
     ShowWindow(s_window, show);
     SetFocus(Item(kPlay));
 

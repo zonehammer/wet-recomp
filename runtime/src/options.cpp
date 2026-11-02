@@ -1,5 +1,6 @@
 #include "options.h"
 #include "keybinds.h"
+#include "gpu_info.h"
 #include "log.h"
 #include "gpu/renderer.h"
 #include "memory.h"
@@ -162,7 +163,21 @@ namespace wet::options
 
     void Load()
     {
-        if (FILE* f = std::fopen(kFile, "r"))
+        FILE* f = std::fopen(kFile, "r");
+        if (!f)
+        {
+            // First start (no wet.ini): resolution and anti-aliasing to suit the
+            // graphics card instead of 720p for everyone.
+            gpu_info::Info gpu = gpu_info::Query();
+            gpu_info::Recommended r = gpu_info::Recommend(gpu);
+            s_scale = r.scale;
+            s_aa = r.aa;
+            s_filter = r.filter;
+            if (gpu.found)
+                Log("Options: first start - %s with %llu MB is %s: resolution scale %d, antialiasing %d, filter %d",
+                    gpu.name.c_str(), (unsigned long long)gpu.dedicatedMB, r.tier, r.scale, r.aa, r.filter);
+        }
+        if (f)
         {
             char line[256];
             while (std::fgets(line, sizeof(line), f))

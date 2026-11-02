@@ -840,6 +840,10 @@ static void NotePerformance()
                 "targets %.2f + writing %.2f], texture loads %.2f, uploads %.2f, output %.2f), idle between "
                 "submissions %.2f",
                 busy, ms[0], ms[1], ms[2] + ms[7], ms[7], ms[2], ms[3], ms[4], ms[5], ms[6]);
+            uint64_t vramUsed, vramBudget;
+            if (wet::renderer::VideoMemory(vramUsed, vramBudget))
+                Log("   Video memory: %llu MB used of %llu MB available%s", (unsigned long long)vramUsed,
+                    (unsigned long long)vramBudget, vramUsed > vramBudget ? " - OVER BUDGET (expect stutter)" : "");
         }
         start = now;
         frames = 1;

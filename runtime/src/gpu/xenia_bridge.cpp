@@ -15,6 +15,7 @@
 #include "input.h"
 #include "achievements.h"
 #include "keybinds.h"
+#include "gpu_info.h"
 #include <map>
 #include <ctime>
 #define STB_IMAGE_STATIC
@@ -1060,12 +1061,6 @@ namespace wet::renderer
         // Rendering resolution: the game's 1280x720 times the option's scale.
         cvars::draw_resolution_scale_x = int32_t(s_resolutionScale);
         cvars::draw_resolution_scale_y = int32_t(s_resolutionScale);
-        // Texture memory: Xenia's defaults (384 MB soft, 768 MB hard) are for 720p;
-        // at 1440p / 4K the render-to-texture targets grow with the scale squared
-        // and textures got destroyed while still being drawn (surfaces flashing
-        // black). Modern GPUs have plenty: 2 GB soft, 4 GB hard.
-        cvars::texture_cache_memory_limit_soft = 2048;
-        cvars::texture_cache_memory_limit_hard = 4096;
         cvars::texture_cache_memory_limit_render_to_texture = 64;
         // V-Sync option: no tearing (otherwise frames are shown at once, for VRR).
 #if WET_HAVE_D3D12
@@ -1082,6 +1077,26 @@ namespace wet::renderer
             char text[128];
             std::snprintf(text, sizeof(text), "Renderer: widescreen %.2f:1 - rendering at %dx%d", ScreenAspect(),
                           1280 * cvars::draw_resolution_scale_x, 720 * cvars::draw_resolution_scale_y);
+            wet::renderer_host::Log(text);
+        }
+        // Texture memory: Xenia's defaults (384 MB soft, 768 MB hard) are for 720p;
+        // at 1440p / 4K the render-to-texture targets grow with the scale squared
+        // and textures got destroyed while still being drawn (surfaces flashing
+        // black). Up to 2 GB soft / 4 GB hard, but within about half of the
+        // card's video memory, so a 4 GB card doesn't spill into system memory
+        // (which shows up as stutter).
+        {
+            gpu_info::Info gpu = gpu_info::Query();
+            uint32_t soft, hard;
+            gpu_info::TextureCacheLimits(gpu, cvars::draw_resolution_scale_x, cvars::draw_resolution_scale_y,
+                                         uint32_t(cvars::texture_cache_memory_limit_render_to_texture), soft, hard);
+            cvars::texture_cache_memory_limit_soft = soft;
+            cvars::texture_cache_memory_limit_hard = hard;
+            char text[256];
+            std::snprintf(text, sizeof(text),
+                          "Renderer: %s, %llu MB video memory (%llu MB available to the game); texture cache %u / %u MB",
+                          gpu.found ? gpu.name.c_str() : "graphics card unknown", (unsigned long long)gpu.dedicatedMB,
+                          (unsigned long long)gpu.budgetMB, soft, hard);
             wet::renderer_host::Log(text);
         }
         if (const char* level = std::getenv("WET_GPU_LOG_LEVEL"))
@@ -1255,6 +1270,29 @@ namespace wet::renderer
     }
 
     uint32_t EarlyVblanks() { return xe::gpu::wet_early_vblanks.load(std::memory_order_relaxed); }
+
+    bool VideoMemory(uint64_t& usedMB, uint64_t& budgetMB)
+    {
+#ifdef _WIN32
+        static IDXGIAdapter3* adapter = [] {
+            IDXGIAdapter3* a3 = nullptr;
+            if (IDXGIAdapter1* a = gpu_info::HighPerformanceAdapter())
+            {
+                a->QueryInterface(IID_PPV_ARGS(&a3));
+                a->Release();
+            }
+            return a3;
+        }();
+        DXGI_QUERY_VIDEO_MEMORY_INFO memory;
+        if (adapter && SUCCEEDED(adapter->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &memory)))
+        {
+            usedMB = memory.CurrentUsage >> 20;
+            budgetMB = memory.Budget >> 20;
+            return true;
+        }
+#endif
+        return false;
+    }
 
     bool GpuTimes(uint64_t us[8], uint64_t& frames)
     {

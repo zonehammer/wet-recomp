@@ -159,7 +159,7 @@ if(WIN32)
     set_target_properties(WetLauncher PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/runtime)
     target_compile_definitions(WetLauncher PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
     target_include_directories(WetLauncher PRIVATE ${WET_VERSION_INCLUDE} ${CMAKE_SOURCE_DIR}/runtime/src)
-    target_link_libraries(WetLauncher PRIVATE comctl32 shell32 winhttp advapi32 winmm ole32 windowscodecs uuid)
+    target_link_libraries(WetLauncher PRIVATE comctl32 shell32 winhttp advapi32 winmm ole32 windowscodecs uuid dxgi)
     # Optional icon (launcher/launcher.ico, not in git: use your own image).
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/launcher/launcher.ico)
         set_source_files_properties(launcher/launcher.rc PROPERTIES COMPILE_DEFINITIONS WET_LAUNCHER_ICON

@@ -43,6 +43,8 @@ namespace wet::renderer
     // copies, resolves, texture loads, uploads, output, idle between
     // submissions, resolves' render target reads) and the number of frames measured; false if not measured.
     bool GpuTimes(uint64_t us[8], uint64_t& frames);
+    // Video memory this process uses on the card and the system's budget for it.
+    bool VideoMemory(uint64_t& usedMB, uint64_t& budgetMB);
     // Rendering resolution scale (1 = 720p, 2 = 1440p, 3 = 2160p); before Start.
     void SetResolutionScale(uint32_t scale);
     void ToggleFullscreen();
