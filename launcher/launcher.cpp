@@ -8,7 +8,11 @@
 #include "wet_version.h"
 #include "keybinds.h"
 #include "gpu_info.h"
+#include "maintenance.h"
 #include <windows.h>
+#include <commdlg.h>
+#include <shlobj.h>
+#include <shobjidl.h>
 #include <commctrl.h>
 #include <shellapi.h>
 #include <winhttp.h>
@@ -17,6 +21,7 @@
 #include <wincodec.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -112,6 +117,7 @@ namespace
         kStatus, kPlay, kSaves, kClearShaders, kKeyboard,
         kVsync, kHideBorders, kWideHud, kCheckUpdates, kReportBug, kUpdateText, kPrompts,
         kMonitor, kPadTest, kAchievements,
+        kMenuOpenSaves = 500, kMenuBackup, kMenuImportZip, kMenuImportFolder, kMenuClearShaders, kMenuFreeSpace,
         kKeyFirst = 300,                       // one combo per keybinds action
         kKeysOk = kKeyFirst + wet::keybinds::kActionCount, kKeysReset, kKeysCancel,
     };
@@ -521,6 +527,277 @@ namespace
         DestroyWindow(s_window);
     }
 
+    // ---- Saves: back up and import ----
+    // The saves are game\hdd\content\425307DB\00000001\WETSAVEGAME (the game's
+    // own files: CHKPTS.DAT, COLLECT.DAT, ACHIEVE.DAT...), the achievements
+    // game\hdd\achievements.ini.
+    fs::path SaveFolder() { return s_hddDir / L"content" / L"425307DB" / L"00000001" / L"WETSAVEGAME"; }
+
+    // PowerShell's Compress-Archive / Expand-Archive, hidden; true when it worked.
+    bool PowerShell(const std::wstring& script)
+    {
+        std::wstring cmd = L"powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"" + script + L"\"";
+        STARTUPINFOW si{ sizeof(si) };
+        si.dwFlags = STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_HIDE;
+        PROCESS_INFORMATION pi{};
+        if (!CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, s_dir.c_str(), &si,
+                            &pi))
+            return false;
+        WaitForSingleObject(pi.hProcess, 120000);
+        DWORD code = 1;
+        GetExitCodeProcess(pi.hProcess, &code);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return code == 0;
+    }
+
+    std::wstring Stamp()
+    {
+        SYSTEMTIME t;
+        GetLocalTime(&t);
+        wchar_t text[32];
+        std::swprintf(text, 32, L"%04d-%02d-%02d_%02d-%02d", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute);
+        return text;
+    }
+
+    // Zips the saves (content folder) and achievements.ini to `zip`.
+    bool BackupTo(const fs::path& zip)
+    {
+        std::error_code ec;
+        std::vector<std::wstring> parts;
+        if (fs::exists(s_hddDir / L"content", ec))
+            parts.push_back(L"'" + (s_hddDir / L"content").wstring() + L"'");
+        if (fs::exists(s_hddDir / L"achievements.ini", ec))
+            parts.push_back(L"'" + (s_hddDir / L"achievements.ini").wstring() + L"'");
+        if (parts.empty())
+            return false;
+        std::wstring list;
+        for (auto& p : parts)
+            list += (list.empty() ? L"" : L",") + p;
+        fs::create_directories(zip.parent_path(), ec);
+        return PowerShell(L"Compress-Archive -Force -Path " + list + L" -DestinationPath '" + zip.wstring() + L"'") &&
+               fs::exists(zip, ec);
+    }
+
+    bool HaveSaves()
+    {
+        std::error_code ec;
+        return fs::exists(SaveFolder(), ec) && !fs::is_empty(SaveFolder(), ec);
+    }
+
+    void BackupSaves()
+    {
+        if (!HaveSaves())
+        {
+            MessageBoxW(s_window, L"There are no saves yet.", L"WET Launcher", MB_ICONINFORMATION);
+            return;
+        }
+        wchar_t file[MAX_PATH] = {};
+        std::wstring name = L"WET-saves-" + Stamp() + L".zip";
+        wcsncpy(file, name.c_str(), MAX_PATH - 1);
+        wchar_t docs[MAX_PATH] = {};
+        SHGetFolderPathW(nullptr, CSIDL_PERSONAL, nullptr, 0, docs);
+        OPENFILENAMEW ofn{ sizeof(ofn) };
+        ofn.hwndOwner = s_window;
+        ofn.lpstrFilter = L"Zip files (*.zip)\0*.zip\0";
+        ofn.lpstrFile = file;
+        ofn.nMaxFile = MAX_PATH;
+        ofn.lpstrInitialDir = docs;
+        ofn.lpstrDefExt = L"zip";
+        ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+        if (!GetSaveFileNameW(&ofn))
+            return;
+        if (BackupTo(file))
+        {
+            std::wstring select = L"/select,\"" + std::wstring(file) + L"\"";
+            ShellExecuteW(s_window, L"open", L"explorer.exe", select.c_str(), nullptr, SW_SHOWNORMAL);
+            MessageBoxW(s_window, (L"Saves and achievements backed up to\n" + std::wstring(file)).c_str(), L"WET Launcher",
+                        MB_ICONINFORMATION);
+        }
+        else
+            MessageBoxW(s_window, L"Couldn't make the backup.", L"WET Launcher", MB_ICONWARNING);
+    }
+
+    // The folder of save files in `dir`: a WETSAVEGAME folder anywhere below it
+    // (our backups, Xenia's content folder), or `dir` itself if it holds the
+    // game's save files.
+    fs::path FindSaveFiles(const fs::path& dir)
+    {
+        std::error_code ec;
+        for (fs::recursive_directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec), end;
+             it != end; it.increment(ec))
+        {
+            if (it.depth() > 8)
+            {
+                it.disable_recursion_pending();
+                continue;
+            }
+            std::wstring n = it->path().filename().wstring();
+            for (auto& c : n)
+                c = wchar_t(towupper(c));
+            if (it->is_directory(ec) && n == L"WETSAVEGAME")
+                return it->path();
+        }
+        for (const wchar_t* f : { L"CHKPTS.DAT", L"COLLECT.DAT", L"ACHIEVE.DAT" })
+            if (fs::exists(dir / f, ec))
+                return dir;
+        return {};
+    }
+
+    void ImportSaves(bool fromZip)
+    {
+        fs::path source;
+        if (fromZip)
+        {
+            wchar_t file[MAX_PATH] = {};
+            OPENFILENAMEW ofn{ sizeof(ofn) };
+            ofn.hwndOwner = s_window;
+            ofn.lpstrFilter = L"Save backups (*.zip)\0*.zip\0";
+            ofn.lpstrFile = file;
+            ofn.nMaxFile = MAX_PATH;
+            ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+            if (!GetOpenFileNameW(&ofn))
+                return;
+            source = file;
+        }
+        else
+        {
+            IFileOpenDialog* dlg = nullptr;
+            if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_IFileOpenDialog,
+                                        reinterpret_cast<void**>(&dlg))))
+                return;
+            DWORD opts = 0;
+            dlg->GetOptions(&opts);
+            dlg->SetOptions(opts | FOS_PICKFOLDERS);
+            dlg->SetTitle(L"The folder with your WET saves (a WETSAVEGAME folder, or one above it, e.g. Xenia's content folder)");
+            IShellItem* item = nullptr;
+            if (SUCCEEDED(dlg->Show(s_window)) && SUCCEEDED(dlg->GetResult(&item)))
+            {
+                PWSTR path = nullptr;
+                if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)))
+                {
+                    source = path;
+                    CoTaskMemFree(path);
+                }
+                item->Release();
+            }
+            dlg->Release();
+            if (source.empty())
+                return;
+        }
+
+        std::error_code ec;
+        fs::path temp;
+        fs::path from = source;
+        if (fromZip)
+        {
+            wchar_t tmp[MAX_PATH];
+            GetTempPathW(MAX_PATH, tmp);
+            temp = fs::path(tmp) / (L"wet-save-import-" + Stamp());
+            fs::remove_all(temp, ec);
+            if (!PowerShell(L"Expand-Archive -Force -Path '" + source.wstring() + L"' -DestinationPath '" + temp.wstring() + L"'"))
+            {
+                MessageBoxW(s_window, L"Couldn't open that zip.", L"WET Launcher", MB_ICONWARNING);
+                return;
+            }
+            from = temp;
+        }
+        fs::path saves = FindSaveFiles(from);
+        if (saves.empty())
+        {
+            fs::remove_all(temp, ec);
+            MessageBoxW(s_window,
+                        L"No WET saves found there (a WETSAVEGAME folder, or CHKPTS.DAT / COLLECT.DAT files).",
+                        L"WET Launcher", MB_ICONWARNING);
+            return;
+        }
+        // Our own backup also has achievements.ini at its top.
+        fs::path achievements = from / L"achievements.ini";
+        bool withAchievements = fromZip && fs::exists(achievements, ec);
+        if (MessageBoxW(s_window,
+                        (L"Import the saves from\n" + saves.wstring() + L"?\n\nYour current saves" +
+                         std::wstring(withAchievements ? L" and achievements" : L"") +
+                         L" are replaced. They're backed up first to game\\hdd\\save-backups. Close the game before "
+                         L"importing.")
+                            .c_str(),
+                        L"WET Launcher", MB_YESNO | MB_ICONQUESTION) != IDYES)
+        {
+            fs::remove_all(temp, ec);
+            return;
+        }
+        if (HaveSaves() && !BackupTo(s_hddDir / L"save-backups" / (L"before-import-" + Stamp() + L".zip")))
+        {
+            fs::remove_all(temp, ec);
+            MessageBoxW(s_window, L"Couldn't back up the current saves, so nothing was imported.", L"WET Launcher",
+                        MB_ICONWARNING);
+            return;
+        }
+        fs::path target = SaveFolder();
+        fs::remove_all(target, ec);
+        fs::create_directories(target, ec);
+        fs::copy(saves, target, fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
+        bool ok = !ec;
+        if (ok && withAchievements)
+            fs::copy_file(achievements, s_hddDir / L"achievements.ini", fs::copy_options::overwrite_existing, ec);
+        fs::remove_all(temp, ec);
+        MessageBoxW(s_window, ok ? L"Saves imported." : L"Some files couldn't be copied (is the game running?).",
+                    L"WET Launcher", ok ? MB_ICONINFORMATION : MB_ICONWARNING);
+    }
+
+    // ---- Free up space: what only building needed (launcher/maintenance.h) ----
+    void FreeSpace()
+    {
+        fs::path repo = s_dir.parent_path().parent_path();   // <repo>\build\runtime
+        std::error_code ec;
+        std::vector<wet::maintenance::Part> parts;
+        if (fs::exists(repo / L".git", ec) || fs::exists(repo / L"CMakeLists.txt", ec))
+        {
+            parts.push_back(wet::maintenance::Leftovers(repo));
+            parts.push_back(wet::maintenance::Tools(repo));
+        }
+        parts.push_back(wet::maintenance::Captures(s_dir));
+        uint64_t total = 0;
+        std::wstring list;
+        for (auto& p : parts)
+            if (p.bytes)
+            {
+                total += p.bytes;
+                list += L"  \u2022 " + p.what + L": " + wet::maintenance::Size(p.bytes) + L"\n";
+            }
+        if (!total)
+        {
+            MessageBoxW(s_window, L"Nothing to clean up.", L"WET Launcher", MB_ICONINFORMATION);
+            return;
+        }
+        if (MessageBoxW(s_window,
+                        (L"Delete these?\n\n" + list + L"\nThat frees " + wet::maintenance::Size(total) +
+                         L". The game keeps working, and your saves and settings stay. The next update downloads the "
+                         L"tools again and rebuilds from scratch, so it takes as long as the first install.")
+                            .c_str(),
+                        L"WET Launcher - free up space", MB_YESNO | MB_ICONQUESTION) != IDYES)
+            return;
+        bool ok = true;
+        for (auto& p : parts)
+            ok &= wet::maintenance::Delete(p);
+        MessageBoxW(s_window, ok ? (L"Freed " + wet::maintenance::Size(total) + L".").c_str()
+                                 : L"Some files couldn't be deleted (is something using them?).",
+                    L"WET Launcher", ok ? MB_ICONINFORMATION : MB_ICONWARNING);
+    }
+
+    // A small menu under a button.
+    int ButtonMenu(int buttonId, std::initializer_list<std::pair<int, const wchar_t*>> items)
+    {
+        HMENU menu = CreatePopupMenu();
+        for (auto& [id, text] : items)
+            AppendMenuW(menu, id ? MF_STRING : MF_SEPARATOR, id, text);
+        RECT r;
+        GetWindowRect(Item(buttonId), &r);
+        int pick = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN, r.left, r.bottom, 0, s_window, nullptr);
+        DestroyMenu(menu);
+        return pick;
+    }
+
     void OpenSaves()
     {
         std::error_code ec;
@@ -606,8 +883,57 @@ namespace
         return out;
     }
 
+    std::atomic<bool> s_updateAvailable{ false };
+
+    // Update now: Setup (built with the launcher) updates the source to the
+    // latest release and rebuilds. It runs from a copy, since the build replaces
+    // the programs in this folder, and the launcher closes so its exe can be replaced.
+    void UpdateNow()
+    {
+        fs::path repo = s_dir.parent_path().parent_path();   // <repo>\build\runtime
+        fs::path setup = s_dir / L"WetSetup.exe";
+        std::error_code ec;
+        if (!fs::exists(repo / L".git", ec) || !fs::exists(setup, ec))
+        {
+            MessageBoxW(s_window,
+                        L"This copy can't update itself (it isn't a built source folder with WetSetup.exe). Download "
+                        L"WetSetup.exe from the GitHub releases page and run it.",
+                        L"WET Launcher", MB_ICONINFORMATION);
+            ShellExecuteW(s_window, L"open", L"https://github.com/zonehammer/wet-recomp/releases/latest", nullptr,
+                          nullptr, SW_SHOWNORMAL);
+            return;
+        }
+        if (MessageBoxW(s_window,
+                        L"Update to the latest version?\n\nThe launcher closes, Setup downloads the new code and "
+                        L"rebuilds (a few minutes, longer if the tools have to be downloaded again), then the launcher "
+                        L"opens again. Your saves and settings stay. Close the game first.",
+                        L"WET Launcher", MB_YESNO | MB_ICONQUESTION) != IDYES)
+            return;
+        SaveSettings();
+        wchar_t tmp[MAX_PATH];
+        GetTempPathW(MAX_PATH, tmp);
+        fs::path copy = fs::path(tmp) / L"WetSetup-update.exe";
+        fs::copy_file(setup, copy, fs::copy_options::overwrite_existing, ec);
+        std::wstring cmd = L"\"" + copy.wstring() + L"\" --update \"" + repo.parent_path().wstring() + L"\"";
+        STARTUPINFOW si{ sizeof(si) };
+        PROCESS_INFORMATION pi{};
+        if (ec || !CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, tmp, &si, &pi))
+        {
+            MessageBoxW(s_window, L"Couldn't start Setup for the update.", L"WET Launcher", MB_ICONWARNING);
+            return;
+        }
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        DestroyWindow(s_window);
+    }
+
     void CheckForUpdates()
     {
+        if (s_updateAvailable)
+        {
+            UpdateNow();
+            return;
+        }
         SetWindowTextW(Item(kUpdateText), L"Checking...");
         EnableWindow(Item(kCheckUpdates), FALSE);
         std::thread([] {
@@ -624,7 +950,10 @@ namespace
                 std::vector<int> latest = VersionNumbers(tag), mine = VersionNumbers(WET_VERSION);
                 std::wstring wtag(tag.begin(), tag.end());
                 if (latest > mine)
-                    *text = L"New version " + wtag + L" available - pull and rebuild (see the GitHub page).";
+                {
+                    *text = L"Version " + wtag + L" is out: press Update now to get it (it rebuilds; 2-30 minutes).";
+                    s_updateAvailable = true;
+                }
                 else
                     *text = L"Up to date (latest release " + wtag + L").";
             }
@@ -1049,8 +1378,8 @@ namespace
         Check(kAsyncShaders, L"Don't wait for new shaders (objects may pop in)", 362, 216, ini.Get("async_shaders", 1) != 0, 310);
         Check(kShaderPreload, L"Build all cached shaders before starting (slower start)", 362, 236, ini.Get("shader_preload", 0) != 0, 310);
         Check(kPopups, L"Achievement pop-ups", 362, 256, ini.Get("achievement_popups", 1) != 0, 200);
-        Make(L"BUTTON", L"Open saves folder", BS_PUSHBUTTON | WS_TABSTOP, 362, 278, 145, 26, kSaves);
-        Make(L"BUTTON", L"Clear shader cache", BS_PUSHBUTTON | WS_TABSTOP, 517, 278, 150, 26, kClearShaders);
+        Make(L"BUTTON", L"Saves \u25BE", BS_PUSHBUTTON | WS_TABSTOP, 362, 278, 145, 26, kSaves);
+        Make(L"BUTTON", L"Clean up \u25BE", BS_PUSHBUTTON | WS_TABSTOP, 517, 278, 150, 26, kClearShaders);
 
         // Screen
         Group(L"Screen", 10, 322, 330, 122);
@@ -1088,8 +1417,27 @@ namespace
             switch (LOWORD(wp))
             {
             case kPlay: Play(); return 0;
-            case kSaves: OpenSaves(); return 0;
-            case kClearShaders: ClearShaders(); return 0;
+            case kSaves:
+                switch (ButtonMenu(kSaves, { { kMenuOpenSaves, L"Open the saves folder" },
+                                             { 0, nullptr },
+                                             { kMenuBackup, L"Back up saves and achievements..." },
+                                             { kMenuImportZip, L"Import saves from a backup (.zip)..." },
+                                             { kMenuImportFolder, L"Import saves from a folder (Xenia, another PC)..." } }))
+                {
+                case kMenuOpenSaves: OpenSaves(); break;
+                case kMenuBackup: BackupSaves(); break;
+                case kMenuImportZip: ImportSaves(true); break;
+                case kMenuImportFolder: ImportSaves(false); break;
+                }
+                return 0;
+            case kClearShaders:
+                switch (ButtonMenu(kClearShaders, { { kMenuFreeSpace, L"Free up disk space..." },
+                                                    { kMenuClearShaders, L"Clear the shader cache..." } }))
+                {
+                case kMenuFreeSpace: FreeSpace(); break;
+                case kMenuClearShaders: ClearShaders(); break;
+                }
+                return 0;
             case kKeyboard: OpenKeys(); return 0;
             case kCheckUpdates: CheckForUpdates(); return 0;
             case kReportBug: ReportBug(); return 0;
@@ -1109,6 +1457,8 @@ namespace
             std::unique_ptr<std::wstring> text(reinterpret_cast<std::wstring*>(lp));
             SetWindowTextW(Item(kUpdateText), text->c_str());
             EnableWindow(Item(kCheckUpdates), TRUE);
+            if (s_updateAvailable)
+                SetWindowTextW(Item(kCheckUpdates), L"Update now");
             return 0;
         }
         case WM_CLOSE:

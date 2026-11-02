@@ -43,10 +43,16 @@ other dumps of the same disc (title ID `425307DB`) should work too.
 
 **The easy way: WetSetup.exe.** Download it from the
 [latest release](https://github.com/zonehammer/wet-recomp/releases/latest), pick your ISO
-and a folder, press Install. It downloads whatever tools are missing (Git, CMake, Ninja,
+(or a folder with an already extracted disc, from extract-xiso, Xenia and so on) and a
+folder, press Install. It downloads whatever tools are missing (Git, CMake, Ninja,
 Clang, Python - into the install folder, nothing system-wide), the source code, extracts
 your disc and builds; then the desktop shortcut starts the launcher. Run it again to
-update and rebuild. The first build takes 10-30 minutes and about 14 GB of disk.
+update and rebuild, or use **Update now** in the launcher (Help > Check for updates) when a
+new release is out. The first build takes 10-30 minutes and about 14 GB of disk; tick
+**Free up space** to delete the build tools and leftovers afterwards (2-4 GB; the next
+update gets them again), and **Delete the disc image** if you don't need the ISO any more.
+The launcher's **Saves** button backs up and imports saves (from a backup zip, Xenia or
+another PC), and **Clean up** frees disk space or clears the shader cache.
 
 **By hand:**
 

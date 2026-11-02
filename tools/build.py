@@ -80,7 +80,8 @@ def config_fingerprint():
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--iso", help="your WET disc image (only needed the first time)")
+    ap.add_argument("--iso", help="your WET disc image, or the folder of an already extracted disc "
+                                  "(only needed the first time)")
     ap.add_argument("--toolchain", choices=["auto", "mingw", "clang-cl"], default="auto",
                     help="auto: clang/clang++ (llvm-mingw on Windows); clang-cl: Visual Studio's Clang")
     ap.add_argument("--jobs", type=int, default=0, help="parallel compile jobs (default: all cores)")

@@ -1,13 +1,17 @@
 // WET Setup: one window that turns a WET disc image into a playable build.
 //
-// Pick the ISO and a folder, press Install. Setup then
+// Pick the ISO (or an already extracted disc folder) and a folder, press
+// Install. Setup then
 //   1. gets the tools: Git, CMake, Ninja, Clang (llvm-mingw) and Python - the
 //      ones already installed are used, the rest are downloaded (latest
 //      releases, from GitHub and nuget.org) into <folder>\tools,
-//   2. clones (or updates) github.com/zonehammer/wet-recomp into <folder>\wet-recomp,
-//   3. runs tools\build.py --iso <ISO> there (extract, recompile, build),
-//   4. adds a desktop shortcut to the launcher.
-// Running it again updates and rebuilds (the ISO is only needed the first time).
+//   2. clones (or updates) github.com/zonehammer/wet-recomp into <folder>\wet-recomp
+//      and checks out the latest release,
+//   3. runs tools\build.py --iso <ISO or folder> there (extract or copy, recompile, build),
+//   4. adds a desktop shortcut to the launcher, and if asked, deletes what only
+//      the build needed (launcher/maintenance.h) and the disc image.
+// Running it again updates and rebuilds (the disc is only needed the first time).
+// The launcher's Update button runs it as: WetSetup.exe --update <folder>.
 //
 // Setup itself contains nothing from the game, so it can be shared; the build
 // it makes can't (it contains code translated from the player's disc).
@@ -19,6 +23,7 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <commdlg.h>
+#include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
 #include <winhttp.h>
@@ -35,6 +40,8 @@
 #include <thread>
 #include <vector>
 
+#include "maintenance.h"
+
 namespace fs = std::filesystem;
 
 namespace
@@ -42,10 +49,16 @@ namespace
     constexpr wchar_t kTitle[] = L"WET Recompiled Setup";
     constexpr char kRepoUrl[] = "https://github.com/zonehammer/wet-recomp.git";
 
-    enum { kIso = 100, kIsoBrowse, kDir, kDirBrowse, kInstall, kStatus, kProgress, kLog, kShortcut, kPlay };
+    enum
+    {
+        kIso = 100, kIsoBrowse, kDir, kDirBrowse, kInstall, kStatus, kProgress, kLog, kShortcut, kPlay,
+        kFromIso, kFromFolder, kCleanup, kDeleteIso, kDetails, kSourceGroup, kSourceNote, kFree
+    };
 
     HWND s_window;
-    HFONT s_font;
+    HFONT s_font, s_titleFont;
+    bool s_updateMode = false;          // --update: started by the launcher's Update button
+    bool s_showLog = false;
     std::thread s_worker;
     std::atomic<bool> s_busy{ false }, s_cancel{ false };
     HANDLE s_job;                       // the running tool (kill on cancel)
@@ -299,6 +312,27 @@ namespace
         Fail(L"No download of " + Widen(repo) + L" matched what Setup expects.");
     }
 
+    // The latest release's tag (v0.2.75), or empty if GitHub can't be reached.
+    std::wstring LatestReleaseTag()
+    {
+        std::string json;
+        if (!Get(L"https://api.github.com/repos/zonehammer/wet-recomp/releases/latest", &json, nullptr))
+            return {};
+        std::smatch m;
+        std::regex tag("\"tag_name\"\\s*:\\s*\"([^\"]+)\"");
+        return std::regex_search(json, m, tag) ? Widen(m[1]) : std::wstring();
+    }
+
+    // A git command's output (first line), and whether it succeeded.
+    bool GitOutput(const fs::path& repo, const std::wstring& args, std::string& out)
+    {
+        out.clear();
+        DWORD code = Run(L"git -C " + Quote(repo) + L" " + args, repo, [&](const std::string& line) {
+            if (out.empty()) out = line;
+        });
+        return code == 0;
+    }
+
     // Python from nuget.org (a full, portable Python; the newest 3.12).
     std::wstring PythonPackage()
     {
@@ -387,8 +421,17 @@ namespace
 
     // ---- The install ----
 
-    void Install(fs::path iso, fs::path root, bool shortcut)
+    struct Choices
     {
+        fs::path source;        // ISO or extracted folder (only the first time)
+        fs::path root;
+        bool shortcut = true, cleanup = false, deleteIso = false;
+    };
+
+    void Install(Choices c)
+    {
+        const fs::path& iso = c.source;
+        const fs::path& root = c.root;
         CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
         bool ok = false;
         std::wstring message;
@@ -405,7 +448,7 @@ namespace
             fs::path repo = root / L"wet-recomp";
             bool haveGame = fs::exists(repo / L"game" / L"extracted" / L"default.xex", ec);
             if (!haveGame && (iso.empty() || !fs::exists(iso, ec)))
-                Fail(L"Choose your WET disc image (.iso) first.");
+                Fail(L"Choose your WET disc image (.iso) or extracted disc folder first.");
             ULARGE_INTEGER freeBytes{};
             GetDiskFreeSpaceExW(root.c_str(), &freeBytes, nullptr, nullptr);
             uint64_t need = (haveGame ? 6ull : 14ull) << 30;
@@ -430,11 +473,15 @@ namespace
             for (auto& t : list)
                 EnsureTool(t, tools);
 
-            // 2. Source: the release this Setup belongs to (tag v<version>), or
-            // the latest code if there's no such tag (a development build).
+            // 2. Source: the latest release (or, if GitHub's release list can't
+            // be read, the release this Setup belongs to; failing that the
+            // latest code). A copy that's on a branch (someone working on the
+            // code) is only fast-forwarded, and one with changes is left as it is.
             Progress(-1);
             std::string version = WET_VERSION;   // "0.2.0 (abc1234)"
-            const std::wstring tag = L"v" + Widen(version.substr(0, version.find(' ')));
+            std::wstring tag = LatestReleaseTag();
+            if (tag.empty())
+                tag = L"v" + Widen(version.substr(0, version.find(' ')));
             if (!fs::exists(repo / L".git", ec))
             {
                 Status(L"Downloading the source code");
@@ -446,7 +493,18 @@ namespace
             else
                 Status(L"Updating the source code");
             Run(L"git -C " + Quote(repo) + L" fetch --tags --force origin", root);
-            if (Run(L"git -C " + Quote(repo) + L" checkout --force " + tag, root) == 0)
+            std::string branch, changes;
+            bool onBranch = GitOutput(repo, L"symbolic-ref -q --short HEAD", branch) && !branch.empty();
+            GitOutput(repo, L"status --porcelain --untracked-files=no --ignore-submodules=all", changes);
+            if (!changes.empty())
+                Log(L"The source folder has changes of its own: building it as it is (no update).");
+            else if (onBranch)
+            {
+                Log(L"The source folder is on branch " + Widen(branch) + L": updating that branch.");
+                if (Run(L"git -C " + Quote(repo) + L" pull --ff-only", root) != 0)
+                    Log(L"(couldn't update the branch - building the code as it is)");
+            }
+            else if (Run(L"git -C " + Quote(repo) + L" checkout --force " + tag, root) == 0)
                 Log(L"Building release " + tag + L".");
             else if (Run(L"git -C " + Quote(repo) + L" checkout --force main", root) != 0 ||
                      Run(L"git -C " + Quote(repo) + L" pull --ff-only", root) != 0)
@@ -477,10 +535,35 @@ namespace
             // 4. Done
             s_installed = repo / L"build" / L"runtime" / L"WetLauncher.exe";
             if (!fs::exists(s_installed, ec)) Fail(L"The build finished but WetLauncher.exe isn't there.");
-            if (shortcut) MakeShortcut(s_installed);
-            ok = true;
+            if (c.shortcut) MakeShortcut(s_installed);
             message = L"Done. Start the game with the launcher" +
-                      std::wstring(shortcut ? L" (\"WET Recompiled\" on the desktop)." : L".");
+                      std::wstring(c.shortcut ? L" (\"WET Recompiled\" on the desktop)." : L".");
+
+            // 5. Clean up, if asked.
+            if (c.cleanup)
+            {
+                Status(L"Freeing up space");
+                uint64_t freed = 0;
+                for (const auto& part : { wet::maintenance::Leftovers(repo), wet::maintenance::Tools(repo) })
+                {
+                    Log(L"Deleting " + part.what + L": " + wet::maintenance::Size(part.bytes));
+                    if (wet::maintenance::Delete(part))
+                        freed += part.bytes;
+                    else
+                        Log(L"(some of it couldn't be deleted)");
+                }
+                message += L"\n\nFreed " + wet::maintenance::Size(freed) +
+                           L" (the next update downloads the tools again and rebuilds from scratch).";
+            }
+            if (c.deleteIso && !haveGame && fs::is_regular_file(iso, ec) &&
+                fs::exists(repo / L"game" / L"extracted" / L"default.xex", ec))
+            {
+                fs::remove(iso, ec);
+                Log(ec ? L"Couldn't delete the disc image " + iso.wstring() : L"Deleted the disc image " + iso.wstring());
+                if (!ec)
+                    message += L"\n\nThe disc image was deleted (the game's files are in wet-recomp\\game\\extracted).";
+            }
+            ok = true;
         }
         catch (const Failed& f)
         {
@@ -516,8 +599,43 @@ namespace
         return s;
     }
 
-    void BrowseIso()
+    bool FromFolder() { return SendMessageW(Item(kFromFolder), BM_GETCHECK, 0, 0) == BST_CHECKED; }
+
+    // A folder picker; empty if cancelled.
+    fs::path PickFolder()
     {
+        fs::path result;
+        IFileOpenDialog* dlg = nullptr;
+        if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_IFileOpenDialog,
+                                    reinterpret_cast<void**>(&dlg))))
+            return result;
+        DWORD opts = 0;
+        dlg->GetOptions(&opts);
+        dlg->SetOptions(opts | FOS_PICKFOLDERS);
+        IShellItem* item = nullptr;
+        if (SUCCEEDED(dlg->Show(s_window)) && SUCCEEDED(dlg->GetResult(&item)))
+        {
+            PWSTR path = nullptr;
+            if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)))
+            {
+                result = path;
+                CoTaskMemFree(path);
+            }
+            item->Release();
+        }
+        dlg->Release();
+        return result;
+    }
+
+    void BrowseSource()
+    {
+        if (FromFolder())
+        {
+            fs::path dir = PickFolder();
+            if (!dir.empty())
+                SetWindowTextW(Item(kIso), dir.c_str());
+            return;
+        }
         wchar_t file[MAX_PATH] = {};
         OPENFILENAMEW ofn{ sizeof(ofn) };
         ofn.hwndOwner = s_window;
@@ -531,33 +649,56 @@ namespace
 
     void BrowseDir()
     {
-        IFileOpenDialog* dlg = nullptr;
-        if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_IFileOpenDialog,
-                                    reinterpret_cast<void**>(&dlg))))
-            return;
-        DWORD opts = 0;
-        dlg->GetOptions(&opts);
-        dlg->SetOptions(opts | FOS_PICKFOLDERS);
-        IShellItem* item = nullptr;
-        if (SUCCEEDED(dlg->Show(s_window)) && SUCCEEDED(dlg->GetResult(&item)))
-        {
-            PWSTR path = nullptr;
-            if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)))
-            {
-                SetWindowTextW(Item(kDir), (fs::path(path) / L"WET-Recomp").c_str());
-                CoTaskMemFree(path);
-            }
-            item->Release();
-        }
-        dlg->Release();
+        fs::path dir = PickFolder();
+        if (!dir.empty())
+            SetWindowTextW(Item(kDir), (dir.filename() == L"WET-Recomp" ? dir : dir / L"WET-Recomp").c_str());
+    }
+
+    // The source choice: ISO or folder (the "delete the disc image" option only
+    // makes sense for an ISO).
+    void UpdateSourceChoice()
+    {
+        bool folder = FromFolder();
+        SetWindowTextW(Item(kSourceNote), folder
+                           ? L"The folder with default.xex, lu0, media, streams0... (from extract-xiso, Xenia, etc.). It's copied."
+                           : L"A dump of your own disc (Redump's \"WET (USA, Europe)\" and others).");
+        EnableWindow(Item(kDeleteIso), !folder && !s_busy);
+        if (folder)
+            SendMessageW(Item(kDeleteIso), BM_SETCHECK, BST_UNCHECKED, 0);
+    }
+
+    // Free space on the install folder's drive.
+    void UpdateFreeSpace()
+    {
+        fs::path dir = Text(kDir);
+        std::error_code ec;
+        while (!dir.empty() && !fs::exists(dir, ec) && dir.has_parent_path() && dir.parent_path() != dir)
+            dir = dir.parent_path();
+        ULARGE_INTEGER freeBytes{};
+        std::wstring text;
+        if (!dir.empty() && GetDiskFreeSpaceExW(dir.c_str(), &freeBytes, nullptr, nullptr))
+            text = wet::maintenance::Size(freeBytes.QuadPart) + L" free on that drive; about 14 GB is needed (6 GB once "
+                                                                 L"the disc is extracted).";
+        SetWindowTextW(Item(kFree), text.c_str());
     }
 
     void SetBusy(bool busy)
     {
         s_busy = busy;
-        for (int id : { kIso, kIsoBrowse, kDir, kDirBrowse, kShortcut })
+        for (int id : { kIso, kIsoBrowse, kDir, kDirBrowse, kShortcut, kFromIso, kFromFolder, kCleanup })
             EnableWindow(Item(id), !busy);
+        EnableWindow(Item(kDeleteIso), !busy && !FromFolder());
         SetWindowTextW(Item(kInstall), busy ? L"Cancel" : L"Install");
+    }
+
+    // The window, with or without the detailed log.
+    void Layout()
+    {
+        RECT r{ 0, 0, 640, s_showLog ? 660 : 422 };
+        AdjustWindowRect(&r, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, FALSE);
+        SetWindowPos(s_window, nullptr, 0, 0, r.right - r.left, r.bottom - r.top, SWP_NOMOVE | SWP_NOZORDER);
+        ShowWindow(Item(kLog), s_showLog ? SW_SHOW : SW_HIDE);
+        SetWindowTextW(Item(kDetails), s_showLog ? L"Hide details" : L"Show details");
     }
 
     void SetProgress(int percent)
@@ -593,7 +734,10 @@ namespace
             return;
         }
         if (s_worker.joinable()) s_worker.join();
-        fs::path iso = Text(kIso), dir = Text(kDir);
+        Choices c;
+        c.source = Text(kIso);
+        c.root = Text(kDir);
+        const fs::path& dir = c.root;
         if (dir.empty())
         {
             MessageBoxW(s_window, L"Choose a folder to install to.", kTitle, MB_ICONINFORMATION);
@@ -607,11 +751,27 @@ namespace
                         L"A folder like C:\\WET-Recomp is safer. Continue anyway?",
                         kTitle, MB_YESNO | MB_ICONWARNING) != IDYES)
             return;
+        auto checked = [](int id) { return SendMessageW(Item(id), BM_GETCHECK, 0, 0) == BST_CHECKED; };
+        c.shortcut = checked(kShortcut);
+        c.cleanup = checked(kCleanup);
+        c.deleteIso = checked(kDeleteIso) && !FromFolder();
+        std::error_code ec;
+        if (FromFolder() && !c.source.empty() && !fs::is_directory(c.source, ec))
+        {
+            MessageBoxW(s_window, L"That isn't a folder. Choose the folder of your extracted disc.", kTitle, MB_ICONINFORMATION);
+            return;
+        }
+        if (c.deleteIso && !s_updateMode &&
+            MessageBoxW(s_window,
+                        (L"Delete the disc image when it's been extracted?\n\n" + c.source.wstring() +
+                         L"\n\nThe game only needs the extracted files; you'd need the disc image again only to "
+                         L"install somewhere else.").c_str(),
+                        kTitle, MB_YESNO | MB_ICONQUESTION) != IDYES)
+            return;
         s_cancel = false;
         ShowWindow(Item(kPlay), SW_HIDE);
         SetBusy(true);
-        bool shortcut = SendMessageW(Item(kShortcut), BM_GETCHECK, 0, 0) == BST_CHECKED;
-        s_worker = std::thread(Install, iso, dir, shortcut);
+        s_worker = std::thread(Install, c);
     }
 
     void Play()
@@ -649,8 +809,14 @@ namespace
         case WM_COMMAND:
             switch (LOWORD(wp))
             {
-            case kIsoBrowse: BrowseIso(); return 0;
-            case kDirBrowse: BrowseDir(); return 0;
+            case kIsoBrowse: BrowseSource(); return 0;
+            case kDirBrowse: BrowseDir(); UpdateFreeSpace(); return 0;
+            case kFromIso:
+            case kFromFolder: SetWindowTextW(Item(kIso), L""); UpdateSourceChoice(); return 0;
+            case kDetails: s_showLog = !s_showLog; Layout(); return 0;
+            case kDir:
+                if (HIWORD(wp) == EN_KILLFOCUS) UpdateFreeSpace();
+                return 0;
             case kInstall: StartOrCancel(); return 0;
             case kPlay: Play(); return 0;
             }
@@ -672,6 +838,17 @@ namespace
                 {
                     SetWindowTextW(Item(kInstall), L"Update");
                     ShowWindow(Item(kPlay), SW_SHOW);
+                    if (s_updateMode)
+                    {
+                        // Started by the launcher's Update button: back to the launcher.
+                        Play();
+                        return 0;
+                    }
+                }
+                else if (!s_showLog)
+                {
+                    s_showLog = true;   // show what went wrong
+                    Layout();
                 }
                 MessageBoxW(hwnd, text->c_str(), kTitle, wp ? MB_ICONINFORMATION : MB_ICONWARNING);
             }
@@ -680,6 +857,14 @@ namespace
         case WM_APP_PROGRESS:
             SetProgress(int(wp));
             return 0;
+        case WM_CTLCOLORSTATIC:
+            if (HWND(lp) == Item(kSourceNote) || HWND(lp) == Item(kFree))
+            {
+                SetTextColor(HDC(wp), GetSysColor(COLOR_GRAYTEXT));
+                SetBkMode(HDC(wp), TRANSPARENT);
+                return LRESULT(GetSysColorBrush(COLOR_BTNFACE));
+            }
+            break;
         case WM_CLOSE:
             if (s_busy && MessageBoxW(hwnd, L"Setup is still running. Stop it?", kTitle, MB_YESNO | MB_ICONQUESTION) != IDYES)
                 return 0;
@@ -732,42 +917,93 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show)
     wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(1));
     wc.lpszClassName = L"WetSetup";
     RegisterClassW(&wc);
-    RECT r{ 0, 0, 620, 470 };
-    AdjustWindowRect(&r, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, FALSE);
+    // --update <folder>: the launcher's Update button (update and rebuild, then
+    // back to the launcher).
+    int argc = 0;
+    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    fs::path updateRoot;
+    for (int i = 1; i + 1 < argc; i++)
+        if (std::wstring(argv[i]) == L"--update")
+            updateRoot = argv[i + 1];
+    LocalFree(argv);
+    s_updateMode = !updateRoot.empty();
+
     s_window = CreateWindowW(L"WetSetup", kTitle, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-                             CW_USEDEFAULT, CW_USEDEFAULT, r.right - r.left, r.bottom - r.top, nullptr, nullptr,
-                             instance, nullptr);
+                             CW_USEDEFAULT, CW_USEDEFAULT, 100, 100, nullptr, nullptr, instance, nullptr);
+    LOGFONTW title = ncm.lfMessageFont;
+    title.lfHeight = title.lfHeight * 3 / 2;
+    title.lfWeight = FW_BOLD;
+    s_titleFont = CreateFontIndirectW(&title);
 
+    // Header: the icon, the name and what Setup does.
+    HWND icon = Make(L"STATIC", L"", SS_ICON, 16, 12, 48, 48, 0);
+    SendMessageW(icon, STM_SETICON,
+                 WPARAM(LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON, 48, 48, LR_DEFAULTCOLOR)), 0);
+    HWND name = Make(L"STATIC", L"WET Recompiled Setup", 0, 76, 14, 540, 26, 0);
+    SendMessageW(name, WM_SETFONT, WPARAM(s_titleFont), TRUE);
     Make(L"STATIC",
-         L"Builds WET Recompiled from your own copy of WET. You need the game's disc image (.iso) and an internet "
-         L"connection; the tools it needs are downloaded if they aren't installed.",
-         0, 12, 10, 596, 34, 0);
-    Make(L"STATIC", L"Disc image", 0, 12, 56, 80, 20, 0);
-    Make(L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, 96, 53, 420, 22, kIso);
-    Make(L"BUTTON", L"Browse...", WS_TABSTOP, 524, 52, 84, 24, kIsoBrowse);
-    Make(L"STATIC", L"Install to", 0, 12, 88, 80, 20, 0);
-    Make(L"EDIT", DefaultFolder().c_str(), WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, 96, 85, 420, 22, kDir);
-    Make(L"BUTTON", L"Browse...", WS_TABSTOP, 524, 84, 84, 24, kDirBrowse);
-    HWND sc = Make(L"BUTTON", L"Desktop shortcut", BS_AUTOCHECKBOX | WS_TABSTOP, 96, 114, 200, 22, kShortcut);
-    SendMessageW(sc, BM_SETCHECK, BST_CHECKED, 0);
-    Make(L"BUTTON", L"Install", BS_DEFPUSHBUTTON | WS_TABSTOP, 432, 112, 84, 26, kInstall);
-    Make(L"BUTTON", L"Play", WS_TABSTOP, 524, 112, 84, 26, kPlay);
-    ShowWindow(Item(kPlay), SW_HIDE);
-    Make(L"STATIC", L"", SS_LEFTNOWORDWRAP, 12, 148, 596, 20, kStatus);
-    Make(PROGRESS_CLASSW, L"", 0, 12, 170, 596, 16, kProgress);
-    Make(L"EDIT", L"", WS_BORDER | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL, 12, 194, 596, 266, kLog);
-    SendMessageW(Item(kLog), EM_SETLIMITTEXT, 0, 0);
+         L"Builds the game from your own copy of WET. The build tools are downloaded if they aren't installed; "
+         L"nothing from the game is downloaded.",
+         0, 76, 40, 548, 32, 0);
 
-    // Already installed here: offer an update.
+    // 1. The game
+    Make(L"BUTTON", L"Your copy of WET", BS_GROUPBOX, 12, 78, 616, 96, kSourceGroup);
+    HWND fromIso = Make(L"BUTTON", L"Disc image (.iso)", BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP, 28, 98, 150, 20, kFromIso);
+    Make(L"BUTTON", L"Extracted disc folder", BS_AUTORADIOBUTTON, 190, 98, 190, 20, kFromFolder);
+    SendMessageW(fromIso, BM_SETCHECK, BST_CHECKED, 0);
+    Make(L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP | WS_GROUP, 28, 122, 488, 23, kIso);
+    Make(L"BUTTON", L"Browse...", WS_TABSTOP, 524, 121, 88, 25, kIsoBrowse);
+    Make(L"STATIC", L"", 0, 28, 150, 588, 18, kSourceNote);
+
+    // 2. Where
+    Make(L"BUTTON", L"Install folder", BS_GROUPBOX, 12, 182, 616, 74, 0);
+    Make(L"EDIT", (s_updateMode ? updateRoot : DefaultFolder()).c_str(), WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, 28,
+         204, 488, 23, kDir);
+    Make(L"BUTTON", L"Browse...", WS_TABSTOP, 524, 203, 88, 25, kDirBrowse);
+    Make(L"STATIC", L"", 0, 28, 232, 588, 18, kFree);
+
+    // 3. Options
+    Make(L"BUTTON", L"When it's done", BS_GROUPBOX, 12, 264, 616, 86, 0);
+    HWND sc = Make(L"BUTTON", L"Add a desktop shortcut to the launcher", BS_AUTOCHECKBOX | WS_TABSTOP, 28, 284, 580, 20, kShortcut);
+    SendMessageW(sc, BM_SETCHECK, BST_CHECKED, 0);
+    Make(L"BUTTON",
+         L"Free up space: delete the build tools and leftovers (2-4 GB; the next update gets them again and takes longer)",
+         BS_AUTOCHECKBOX | WS_TABSTOP, 28, 304, 590, 20, kCleanup);
+    Make(L"BUTTON", L"Delete the disc image once it's extracted (the game doesn't need it)",
+         BS_AUTOCHECKBOX | WS_TABSTOP, 28, 324, 580, 20, kDeleteIso);
+
+    // Progress and buttons
+    Make(L"STATIC", L"Ready.", SS_LEFTNOWORDWRAP | SS_ENDELLIPSIS, 12, 364, 410, 20, kStatus);
+    Make(L"BUTTON", L"Play", WS_TABSTOP, 434, 359, 90, 28, kPlay);
+    ShowWindow(Item(kPlay), SW_HIDE);
+    Make(L"BUTTON", L"Install", BS_DEFPUSHBUTTON | WS_TABSTOP, 530, 359, 98, 28, kInstall);
+    Make(PROGRESS_CLASSW, L"", 0, 12, 394, 504, 16, kProgress);
+    Make(L"BUTTON", L"Show details", WS_TABSTOP, 524, 390, 104, 24, kDetails);
+    Make(L"EDIT", L"", WS_BORDER | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL, 12, 422, 616, 228, kLog);
+    SendMessageW(Item(kLog), EM_SETLIMITTEXT, 0, 0);
+    UpdateSourceChoice();
+    UpdateFreeSpace();
+    Layout();
+    RECT wr;
+    GetWindowRect(s_window, &wr);
+    SetWindowPos(s_window, nullptr, (GetSystemMetrics(SM_CXSCREEN) - (wr.right - wr.left)) / 2,
+                 (GetSystemMetrics(SM_CYSCREEN) - (wr.bottom - wr.top)) / 3, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+
+    // Already installed there: offer an update (no disc needed).
     std::error_code ec;
-    fs::path existing = DefaultFolder() / L"wet-recomp";
+    fs::path existing = fs::path(Text(kDir)) / L"wet-recomp";
     if (fs::exists(existing / L"game" / L"extracted" / L"default.xex", ec))
     {
         SetWindowTextW(Item(kInstall), L"Update");
-        SetWindowTextW(Item(kStatus), L"Already installed here: Update gets the latest version and rebuilds (no disc needed).");
+        SetWindowTextW(Item(kStatus), L"Already installed here: Update gets the latest version and rebuilds.");
+        for (int id : { kFromIso, kFromFolder, kIso, kIsoBrowse, kDeleteIso })
+            EnableWindow(Item(id), FALSE);
+        SetWindowTextW(Item(kSourceNote), L"Not needed: the game's files are already in this install.");
     }
 
     ShowWindow(s_window, show);
+    if (s_updateMode)
+        PostMessageW(s_window, WM_COMMAND, kInstall, 0);
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0))
     {
