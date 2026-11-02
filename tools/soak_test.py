@@ -35,14 +35,14 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # moving, looking, shooting, jumping, aiming, pausing. The waits are generous
 # (loading and the opening cutscene); A also skips cutscenes.
 DEFAULT_SCRIPT = ",".join([
-    "WAIT:5", "START", "WAIT:4",                  # press start
-    "A", "WAIT:4",                                # first menu
-    "DOWN", "A", "WAIT:4",                        # no saves: "Continue without saving" (second option)
-    "A", "WAIT:4", "A", "WAIT:4",                 # main menu: New Game
-    "A", "WAIT:4", "A",                           # difficulty, confirm
-    "WAIT:45",                                    # loading and the opening cutscene
-    "A", "WAIT:5", "START", "WAIT:3", "A",        # skip whatever is still playing
-    "WAIT:30",                                    # loading into the level
+    "A", "A", "A", "WAIT:1",                      # skip the intro videos
+    "START", "WAIT:1", "A", "WAIT:1",             # title screen, then the first prompt
+    "DOWN", "DOWN", "A",                          # no saves: continue without saving
+    "UP", "A", "WAIT:1", "A",                     # main menu: New Game, difficulty
+    "WAIT:4", "A", "WAIT:4",                      # loading; A skips the opening cutscene
+    "A", "A", "A", "A", "WAIT:6", "A", "A", "B",  # (as recorded on a real run)
+    "WAIT:6", "A", "A", "WAIT:12", "A", "WAIT:6", "A", "WAIT:4", "A", "A",
+    "WAIT:5",
     # Play: about two minutes of moving, turning, shooting and jumping.
     *(["MOVE:UP:4", "LOOK:LEFT:1", "HOLD:RT:2", "A", "MOVE:LEFT:2", "HOLD:LT:1.5", "HOLD:RT:2",
        "MOVE:UP:3", "LOOK:RIGHT:1.5", "A", "MOVE:RIGHT:2", "X", "MOVE:DOWN:2"] * 4),
@@ -194,7 +194,7 @@ def main():
     ap.add_argument("--exe", help="WetRecomp.exe to test (default: the one in build/)")
     ap.add_argument("--runs", type=int, default=1)
     ap.add_argument("--script", default=DEFAULT_SCRIPT, help="WET_AUTOPRESS steps (see runtime/src/input.cpp)")
-    ap.add_argument("--delay", type=float, default=40, help="seconds before the script starts (intro videos)")
+    ap.add_argument("--delay", type=float, default=15, help="seconds before the script starts (intro videos)")
     ap.add_argument("--hang", type=float, default=90, help="seconds without log output that count as a hang")
     ap.add_argument("--keep-saves", action="store_true", help="use the normal save folder instead of an empty one")
     ap.add_argument("--record", action="store_true", help="record your own play-through for later runs to replay")
