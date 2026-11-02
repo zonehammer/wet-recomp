@@ -1250,10 +1250,10 @@ namespace wet::renderer
 
     uint32_t EarlyVblanks() { return xe::gpu::wet_early_vblanks.load(std::memory_order_relaxed); }
 
-    bool GpuTimes(uint64_t us[7], uint64_t& frames)
+    bool GpuTimes(uint64_t us[8], uint64_t& frames)
     {
         frames = xe::gpu::wet_gpu_frames.load(std::memory_order_relaxed);
-        for (int i = 0; i < 7; i++)
+        for (int i = 0; i < 8; i++)
             us[i] = xe::gpu::wet_gpu_time_us[i].load(std::memory_order_relaxed);
         return frames != 0;
     }

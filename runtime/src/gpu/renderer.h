@@ -41,8 +41,8 @@ namespace wet::renderer
     uint32_t EarlyVblanks();
     // GPU time so far in microseconds per kind of work (draws, render target
     // copies, resolves, texture loads, uploads, output, idle between
-    // submissions) and the number of frames measured; false if not measured.
-    bool GpuTimes(uint64_t us[7], uint64_t& frames);
+    // submissions, resolves' render target reads) and the number of frames measured; false if not measured.
+    bool GpuTimes(uint64_t us[8], uint64_t& frames);
     // Rendering resolution scale (1 = 720p, 2 = 1440p, 3 = 2160p); before Start.
     void SetResolutionScale(uint32_t scale);
     void ToggleFullscreen();

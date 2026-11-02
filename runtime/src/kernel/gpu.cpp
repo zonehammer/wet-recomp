@@ -823,22 +823,23 @@ static void NotePerformance()
             (frames - 1) / span, fps, worst, over, frames - 1, early - earlyBefore);
         earlyBefore = early;
         // Where the GPU's time went in those frames (Direct3D 12).
-        static uint64_t gpuBefore[7] = {}, gpuFramesBefore = 0;
-        uint64_t gpu[7], gpuFrames;
+        static uint64_t gpuBefore[8] = {}, gpuFramesBefore = 0;
+        uint64_t gpu[8], gpuFrames;
         if (wet::renderer::GpuTimes(gpu, gpuFrames) && gpuFrames > gpuFramesBefore)
         {
-            double n = double(gpuFrames - gpuFramesBefore), ms[7], busy = 0;
-            for (int i = 0; i < 7; i++)
+            double n = double(gpuFrames - gpuFramesBefore), ms[8], busy = 0;
+            for (int i = 0; i < 8; i++)
             {
                 ms[i] = (gpu[i] - gpuBefore[i]) / 1000.0 / n;
-                if (i < 6)
+                if (i != 6)
                     busy += ms[i];
                 gpuBefore[i] = gpu[i];
             }
             gpuFramesBefore = gpuFrames;
-            Log("   GPU: %.2f ms busy per frame (draws %.2f, render target copies %.2f, resolves %.2f, texture loads %.2f, "
-                "uploads %.2f, output %.2f), idle between submissions %.2f",
-                busy, ms[0], ms[1], ms[2], ms[3], ms[4], ms[5], ms[6]);
+            Log("   GPU: %.2f ms busy per frame (draws %.2f, render target copies %.2f, resolves %.2f [reading render "
+                "targets %.2f + writing %.2f], texture loads %.2f, uploads %.2f, output %.2f), idle between "
+                "submissions %.2f",
+                busy, ms[0], ms[1], ms[2] + ms[7], ms[7], ms[2], ms[3], ms[4], ms[5], ms[6]);
         }
         start = now;
         frames = 1;

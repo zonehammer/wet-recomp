@@ -1737,10 +1737,10 @@ index 0ec70a7d1..24a59a61a 100644
  }  // namespace gpu
  }  // namespace xe
 diff --git a/src/xenia/gpu/d3d12/d3d12_command_processor.h b/src/xenia/gpu/d3d12/d3d12_command_processor.h
-index 88bdcb438..1f67f7435 100644
+index 88bdcb438..1db8e3fa8 100644
 --- a/src/xenia/gpu/d3d12/d3d12_command_processor.h
 +++ b/src/xenia/gpu/d3d12/d3d12_command_processor.h
-@@ -74,6 +74,46 @@ class D3D12CommandProcessor : public CommandProcessor {
+@@ -74,6 +74,47 @@ class D3D12CommandProcessor : public CommandProcessor {
      return deferred_command_list_;
    }
  
@@ -1756,8 +1756,9 @@ index 88bdcb438..1f67f7435 100644
 +    kWetGpuUpload,
 +    kWetGpuSwap,
 +    kWetGpuGap,
++    kWetGpuResolveDump,  // a resolve reading the render targets into EDRAM
 +  };
-+  static constexpr uint32_t kWetGpuCatCount = 7;
++  static constexpr uint32_t kWetGpuCatCount = 8;
 +  uint8_t WetGpuBegin(uint8_t cat);
 +  // What the GPU-heavy emulation work is (logged every 600 frames):
 +  // 0 = render target copies (amount in EDRAM tiles), 1 = resolves (pixels),
@@ -1787,7 +1788,7 @@ index 88bdcb438..1f67f7435 100644
    uint64_t GetCurrentSubmission() const {
      return completion_timeline_->GetUpcomingSubmission();
    }
-@@ -207,6 +247,10 @@ class D3D12CommandProcessor : public CommandProcessor {
+@@ -207,6 +248,10 @@ class D3D12CommandProcessor : public CommandProcessor {
    void ShutdownContext() override;
  
    void WriteRegister(uint32_t index, uint32_t value) override;
@@ -1798,7 +1799,7 @@ index 88bdcb438..1f67f7435 100644
  
    void OnGammaRamp256EntryTableValueWritten() override;
    void OnGammaRampPWLValueWritten() override;
-@@ -400,6 +444,42 @@ class D3D12CommandProcessor : public CommandProcessor {
+@@ -400,6 +445,42 @@ class D3D12CommandProcessor : public CommandProcessor {
    // Submission indices of frames that have already been submitted.
    uint64_t closed_frame_submissions_[kQueueFrames] = {};
  
@@ -1841,7 +1842,7 @@ index 88bdcb438..1f67f7435 100644
    struct CommandAllocator {
      ID3D12CommandAllocator* command_allocator;
      uint64_t last_usage_submission;
-@@ -554,6 +634,31 @@ class D3D12CommandProcessor : public CommandProcessor {
+@@ -554,6 +635,31 @@ class D3D12CommandProcessor : public CommandProcessor {
    Microsoft::WRL::ComPtr<ID3D12Resource> fxaa_source_texture_;
    uint64_t fxaa_source_texture_submission_ = 0;
  
@@ -1874,7 +1875,7 @@ index 88bdcb438..1f67f7435 100644
    std::vector<D3D12_RESOURCE_BARRIER> barriers_;
  
 diff --git a/src/xenia/gpu/d3d12/d3d12_render_target_cache.cc b/src/xenia/gpu/d3d12/d3d12_render_target_cache.cc
-index 342d282cf..345af08f5 100644
+index 342d282cf..486792560 100644
 --- a/src/xenia/gpu/d3d12/d3d12_render_target_cache.cc
 +++ b/src/xenia/gpu/d3d12/d3d12_render_target_cache.cc
 @@ -1298,6 +1298,10 @@ bool D3D12RenderTargetCache::Resolve(const Memory& memory,
@@ -1888,7 +1889,7 @@ index 342d282cf..345af08f5 100644
    written_address_out = 0;
    written_length_out = 0;
  
-@@ -1316,6 +1320,22 @@ bool D3D12RenderTargetCache::Resolve(const Memory& memory,
+@@ -1316,6 +1320,24 @@ bool D3D12RenderTargetCache::Resolve(const Memory& memory,
    if (!resolve_info.coordinate_info.width_div_8 || !resolve_info.height_div_8) {
      return true;
    }
@@ -1898,20 +1899,22 @@ index 342d282cf..345af08f5 100644
 +             h = resolve_info.height_div_8 * 8;
 +    command_processor_.WetNoteWork(
 +        1,
-+        fmt::format("{} {}x{}{}{}",
++        fmt::format("{} {}x{}{}{} -> {:08X}+{:X}",
 +                    resolve_info.copy_dest_extent_length
 +                        ? (resolve_info.IsCopyingDepth() ? "copy depth"
 +                                                         : "copy color")
 +                        : "no copy",
 +                    w, h, resolve_info.IsClearingDepth() ? " +clear depth" : "",
-+                    resolve_info.IsClearingColor() ? " +clear color" : ""),
++                    resolve_info.IsClearingColor() ? " +clear color" : "",
++                    resolve_info.copy_dest_extent_start,
++                    resolve_info.copy_dest_extent_length),
 +        uint64_t(w) * h);
 +  }
 +#endif
  
    DeferredCommandList& command_list =
        command_processor_.GetDeferredCommandList();
-@@ -4400,6 +4420,52 @@ void D3D12RenderTargetCache::PerformTransfersAndResolveClears(
+@@ -4400,6 +4422,52 @@ void D3D12RenderTargetCache::PerformTransfersAndResolveClears(
      const std::vector<Transfer>* render_target_transfers,
      const uint64_t* render_target_resolve_clear_values,
      const Transfer::Rectangle* resolve_clear_rectangle) {
@@ -1964,6 +1967,17 @@ index 342d282cf..345af08f5 100644
    assert_true(GetPath() == Path::kHostRenderTargets);
  
    const ui::d3d12::D3D12Provider& provider =
+@@ -6332,6 +6400,10 @@ void D3D12RenderTargetCache::DumpRenderTargets(uint32_t dump_base,
+                                                uint32_t dump_rows,
+                                                uint32_t dump_pitch) {
+   assert_true(GetPath() == Path::kHostRenderTargets);
++#if XE_WET_RUNTIME
++  D3D12CommandProcessor::WetGpuScope wet_gpu_scope(
++      command_processor_, D3D12CommandProcessor::kWetGpuResolveDump);
++#endif
+ 
+   GetResolveCopyRectanglesToDump(dump_base, dump_row_length_used, dump_rows,
+                                  dump_pitch, dump_rectangles_);
 diff --git a/src/xenia/gpu/d3d12/d3d12_shared_memory.cc b/src/xenia/gpu/d3d12/d3d12_shared_memory.cc
 index 901d45925..0bc8c33c7 100644
 --- a/src/xenia/gpu/d3d12/d3d12_shared_memory.cc
@@ -18080,7 +18094,7 @@ index 000000000..381928d08
 +
 +#endif  // XENIA_GPU_D3D12_WET_SMAA_TEX_H_
 diff --git a/src/xenia/gpu/graphics_system.cc b/src/xenia/gpu/graphics_system.cc
-index aa96166ef..1aaf1ab0b 100644
+index aa96166ef..42b1950d7 100644
 --- a/src/xenia/gpu/graphics_system.cc
 +++ b/src/xenia/gpu/graphics_system.cc
 @@ -9,6 +9,12 @@
@@ -18114,7 +18128,7 @@ index aa96166ef..1aaf1ab0b 100644
 +std::atomic<uint32_t> wet_vsync_hz{60};
 +std::atomic<bool> wet_adaptive_vblank{false};
 +std::atomic<uint32_t> wet_early_vblanks{0};
-+std::atomic<uint64_t> wet_gpu_time_us[7] = {};
++std::atomic<uint64_t> wet_gpu_time_us[8] = {};
 +std::atomic<uint64_t> wet_gpu_frames{0};
 +namespace {
 +std::mutex wet_vblank_mutex;
@@ -18240,10 +18254,10 @@ index aa96166ef..1aaf1ab0b 100644
          uint64_t last_frame_time = Clock::QueryGuestTickCount();
          while (vsync_worker_running_) {
 diff --git a/src/xenia/gpu/graphics_system.h b/src/xenia/gpu/graphics_system.h
-index 8994b20bc..31c0ea546 100644
+index 8994b20bc..caf8a36c3 100644
 --- a/src/xenia/gpu/graphics_system.h
 +++ b/src/xenia/gpu/graphics_system.h
-@@ -34,6 +34,22 @@ class Emulator;
+@@ -34,6 +34,23 @@ class Emulator;
  namespace xe {
  namespace gpu {
  
@@ -18257,8 +18271,9 @@ index 8994b20bc..31c0ea546 100644
 +extern std::atomic<uint32_t> wet_early_vblanks;  // released early so far
 +// GPU time of measured frames, in microseconds per kind of work (draws, render
 +// target copies, resolves, texture loads, uploads, swap / post-processing, idle
-+// between submissions), and how many frames that covers (Direct3D 12 only).
-+extern std::atomic<uint64_t> wet_gpu_time_us[7];
++// between submissions, then resolves' render target reads), and how many
++// frames that covers (Direct3D 12 only).
++extern std::atomic<uint64_t> wet_gpu_time_us[8];
 +extern std::atomic<uint64_t> wet_gpu_frames;
 +void WetCpFlipWait(bool done);
 +#endif
