@@ -8,6 +8,10 @@
 #include <string>
 
 #ifdef _WIN32
+// windows.h's min / max macros break std::min and Xenia's headers (clang-cl).
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <dxgi1_6.h>
 #endif
 
