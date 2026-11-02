@@ -94,6 +94,14 @@ namespace wet::options
     void SetButtonPrompts(int v);
     void SetVsync(bool v);
     void SetHideBorders(bool v);
+    // The game's motion blur, depth of field and camera shake (with its film
+    // shake), on as designed (wet.ini motion_blur / depth_of_field / camera_shake).
+    bool MotionBlur();
+    void SetMotionBlur(bool v);
+    bool DepthOfField();
+    void SetDepthOfField(bool v);
+    bool CameraShake();
+    void SetCameraShake(bool v);
     int Sharpness();
     void SetSharpness(int v);
 

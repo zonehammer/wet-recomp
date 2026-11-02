@@ -65,3 +65,43 @@ functions = [
 name = "WetPresentIntervalHook"
 address = 0x83066E70
 registers = ["r11"]
+
+# Graphics effect switches (wet.ini motion_blur / depth_of_field / camera_shake).
+# The same changes as the community Xenia Canary game patch for WET (425307DB),
+# applied after the original instruction (recompiled code never reads its own
+# instruction bytes). Thanks to the xenia-canary/game-patches contributors and
+# to nikolaygorb/WetRecomp, which ported them the same way.
+# 0x82CB09B8 lfs f31,-8132(r9) -> lfs f31,10912(r9): motion blur strength.
+[[midasm_hook]]
+name = "WetMotionBlurHook"
+address = 0x82CB09B8
+registers = ["r9", "f31"]
+after_instruction = true
+
+# 0x82AE6A1C lbz r11,1688(r4) -> li r11,0: depth of field on/off.
+[[midasm_hook]]
+name = "WetDepthOfFieldHook"
+address = 0x82AE6A1C
+registers = ["r11"]
+after_instruction = true
+
+# 0x8274F58C stb r11,21(r3) -> stb r10,21(r3): camera shake.
+[[midasm_hook]]
+name = "WetCameraShakeHook"
+address = 0x8274F58C
+registers = ["r3", "r10"]
+after_instruction = true
+
+# 0x82751514 subfe r10,r10,r3 -> li r10,0 and 0x82751660 lbz r10,21(r11) ->
+# li r10,0: the shaky film effect that goes with it.
+[[midasm_hook]]
+name = "WetFilmShakeHook"
+address = 0x82751514
+registers = ["r10"]
+after_instruction = true
+
+[[midasm_hook]]
+name = "WetFilmShakeHook"
+address = 0x82751660
+registers = ["r10"]
+after_instruction = true

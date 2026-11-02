@@ -108,7 +108,7 @@ namespace
         kFps = 100, kResolution, kFullscreen, kShowFps,
         kFilter, kSharpness, kSharpnessValue, kAntialiasing, kGrain, kGrainValue, kFov, kFovValue, kWidescreen,
         kMouseAim, kSensitivity, kSensitivityValue, kInvertY, kVibration,
-        kShaderCache, kVideoMode, kPopups, kAsyncShaders, kShaderPreload,
+        kShaderCache, kVideoMode, kPopups, kAsyncShaders, kShaderPreload, kMotionBlur, kDepthOfField, kCameraShake,
         kStatus, kPlay, kSaves, kClearShaders, kKeyboard,
         kVsync, kHideBorders, kWideHud, kCheckUpdates, kReportBug, kUpdateText, kPrompts,
         kMonitor, kPadTest, kAchievements,
@@ -129,12 +129,19 @@ namespace
 
     HWND s_parent = nullptr;   // where Make() puts controls (the main window or the keyboard window)
 
-    int s_bannerHeight = 0;    // logical pixels above the main window's controls (0 = no banner)
+    int s_bannerHeight = 0;
+    constexpr int kEffectsRow = 26;    // logical pixels above the main window's controls (0 = no banner)
 
     HWND Make(const wchar_t* cls, const wchar_t* text, DWORD style, int x, int y, int w, int h, int id)
     {
         if (s_parent == s_window)
+        {
+            // Everything below the Display / Graphics boxes moves down for the
+            // effects row at the bottom of those boxes.
+            if (y >= 176)
+                y += kEffectsRow;
             y += s_bannerHeight;
+        }
         HWND h_ = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style, S(x), S(y), S(w), S(h), s_parent,
                                   reinterpret_cast<HMENU>(intptr_t(id)), GetModuleHandleW(nullptr), nullptr);
         SendMessageW(h_, WM_SETFONT, WPARAM(s_font), TRUE);
@@ -484,6 +491,9 @@ namespace
         s_ini.Set("achievement_popups", Checked(kPopups));
         s_ini.Set("async_shaders", Checked(kAsyncShaders));
         s_ini.Set("shader_preload", Checked(kShaderPreload));
+        s_ini.Set("motion_blur", Checked(kMotionBlur));
+        s_ini.Set("depth_of_field", Checked(kDepthOfField));
+        s_ini.Set("camera_shake", Checked(kCameraShake));
         s_ini.SetString("monitor", ChosenMonitor(Selected(kMonitor)));
         if (!s_ini.Save(s_iniPath))
             MessageBoxW(s_window, L"Could not save wet.ini.", L"WET Launcher", MB_ICONERROR);
@@ -963,7 +973,7 @@ namespace
     {
         const Ini& ini = s_ini;
         // Display
-        Group(L"Display", 10, 8, 330, 164);
+        Group(L"Display", 10, 8, 330, 164 + kEffectsRow);
         Label(L"Frame rate", 22, 30);
         int fps = ini.Get("fps", 30), fpsIndex = -1;
         for (size_t i = 0; i < s_fpsValues.size(); i++)
@@ -989,7 +999,7 @@ namespace
         Check(kWidescreen, L"Widescreen / ultrawide (fill 21:9 and 32:9 screens)", 22, 140, ini.Get("widescreen", 0) != 0, 310);
 
         // Graphics
-        Group(L"Graphics", 350, 8, 330, 164);
+        Group(L"Graphics", 350, 8, 330, 164 + kEffectsRow);
         Label(L"Scaling", 362, 30, 90);
         Combo(kFilter, 460, 28, 206, { L"Bilinear", L"AMD CAS (sharpen)", L"AMD FSR (upscale)", L"NVIDIA NIS (upscale)" },
               std::min(std::max(ini.Get("filter", 0), 0), 3));
@@ -1002,6 +1012,9 @@ namespace
         Slider(kGrain, kGrainValue, 456, 114, 160, 0, 100, ini.Get("film_grain", 100), L"%");
         Label(L"Field of view", 362, 144, 90);
         Slider(kFov, kFovValue, 456, 142, 160, 60, 130, std::min(std::max(ini.Get("fov", 90), 60), 130), L"\u00B0");
+        Check(kMotionBlur, L"Motion blur", 362, 170, ini.Get("motion_blur", 1) != 0, 96);
+        Check(kDepthOfField, L"Depth of field", 462, 170, ini.Get("depth_of_field", 1) != 0, 104);
+        Check(kCameraShake, L"Camera shake", 570, 170, ini.Get("camera_shake", 1) != 0, 104);
 
         // Controls
         Group(L"Controls", 10, 180, 330, 134);
@@ -1149,7 +1162,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show)
 
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     LoadBanner();
-    RECT rc{ 0, 0, S(690), S(494 + s_bannerHeight) };
+    RECT rc{ 0, 0, S(690), S(494 + kEffectsRow + s_bannerHeight) };
     DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
     AdjustWindowRect(&rc, style, FALSE);
     int w = rc.right - rc.left, h = rc.bottom - rc.top;

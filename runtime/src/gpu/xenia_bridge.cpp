@@ -799,6 +799,16 @@ namespace
             bool borders = wet::options::HideBorders();
             if (ImGui::Checkbox("Hide the dark frame at the screen edges (vignette / cinematic borders)", &borders))
                 wet::options::SetHideBorders(borders);
+            bool blur = wet::options::MotionBlur(), dof = wet::options::DepthOfField(),
+                 shake = wet::options::CameraShake();
+            if (ImGui::Checkbox("Motion blur", &blur))
+                wet::options::SetMotionBlur(blur);
+            ImGui::SameLine();
+            if (ImGui::Checkbox("Depth of field", &dof))
+                wet::options::SetDepthOfField(dof);
+            ImGui::SameLine();
+            if (ImGui::Checkbox("Camera shake", &shake))
+                wet::options::SetCameraShake(shake);
 
             int fov = wet::options::Fov(), fovPick = fov;
             ImGui::SliderInt("Field of view (90 = original)", &fovPick, 60, 130, "%d deg");

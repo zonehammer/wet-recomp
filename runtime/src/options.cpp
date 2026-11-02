@@ -29,7 +29,7 @@ namespace wet::options
         std::atomic<bool> s_inCutscene{ false };
         std::atomic<int> s_videoMode{ 1 };
         int s_scale = 1, s_scaleRunning = 1;
-        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_fov{ 90 }, s_widescreen{ 0 }, s_widescreenHud{ 1 }, s_hideBorders{ 0 }, s_vsync{ 0 }, s_buttonPrompts{ 0 }, s_mouseAim{ 1 }, s_mouseSens{ 50 }, s_mouseInvert{ 0 }, s_mouseDirect{ 1 }, s_shaderCache{ 1 }, s_asyncShaders{ 1 }, s_shaderPreload{ 0 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 };
+        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_fov{ 90 }, s_widescreen{ 0 }, s_widescreenHud{ 1 }, s_hideBorders{ 0 }, s_vsync{ 0 }, s_buttonPrompts{ 0 }, s_mouseAim{ 1 }, s_mouseSens{ 50 }, s_mouseInvert{ 0 }, s_mouseDirect{ 1 }, s_shaderCache{ 1 }, s_asyncShaders{ 1 }, s_shaderPreload{ 0 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 }, s_motionBlur{ 1 }, s_depthOfField{ 1 }, s_cameraShake{ 1 };
         constexpr const char* kFile = "wet.ini";
         // Mouse button bindings: left, right, middle, back (X1), forward (X2).
         constexpr const char* kMouseKeys[5] = { "mouse_left", "mouse_right", "mouse_middle", "mouse_back", "mouse_forward" };
@@ -148,6 +148,9 @@ namespace wet::options
             std::fprintf(f, "shader_cache = %d\n", s_shaderCache.load());
             std::fprintf(f, "# async_shaders: 1 = don't wait for new shaders (an object may appear a frame or two late instead of a stutter), 0 = wait\n");
             std::fprintf(f, "async_shaders = %d\n", s_asyncShaders.load());
+            std::fprintf(f, "# motion_blur, depth_of_field, camera_shake: the game's effects (1 = on, as designed; 0 = off, also a little faster)\n");
+            std::fprintf(f, "motion_blur = %d\ndepth_of_field = %d\ncamera_shake = %d\n", s_motionBlur.load(), s_depthOfField.load(),
+                         s_cameraShake.load());
             std::fprintf(f, "# shader_preload: 1 = build every cached shader before the first frame (slower start, no pop-in); 0 = build them in the background while the game starts\n");
             std::fprintf(f, "shader_preload = %d\n", s_shaderPreload.load());
             {
@@ -224,6 +227,9 @@ namespace wet::options
                 else if (!std::strcmp(key, "cutscene_30fps")) s_cutsceneFps = value != 0;
                 else if (!std::strcmp(key, "async_shaders")) s_asyncShaders = value != 0;
                 else if (!std::strcmp(key, "shader_preload")) s_shaderPreload = value != 0;
+                else if (!std::strcmp(key, "motion_blur")) s_motionBlur = value != 0;
+                else if (!std::strcmp(key, "depth_of_field")) s_depthOfField = value != 0;
+                else if (!std::strcmp(key, "camera_shake")) s_cameraShake = value != 0;
                 else if (!std::strcmp(key, "shader_cache")) s_shaderCache = value != 0;
                 else if (!std::strcmp(key, "mouse_aim")) s_mouseAim = value != 0;
                 else if (!std::strcmp(key, "mouse_sensitivity")) s_mouseSens = Clamp(value, 1, 100);
@@ -370,6 +376,12 @@ namespace wet::options
     void SetButtonPrompts(int v) { s_buttonPrompts = Clamp(v, 0, 2); Save(); }
     void SetVsync(bool v) { s_vsync = v; Save(); }
     void SetHideBorders(bool v) { s_hideBorders = v; Save(); }
+    bool MotionBlur() { return s_motionBlur.load(std::memory_order_relaxed) != 0; }
+    void SetMotionBlur(bool v) { s_motionBlur = v; Save(); }
+    bool DepthOfField() { return s_depthOfField.load(std::memory_order_relaxed) != 0; }
+    void SetDepthOfField(bool v) { s_depthOfField = v; Save(); }
+    bool CameraShake() { return s_cameraShake.load(std::memory_order_relaxed) != 0; }
+    void SetCameraShake(bool v) { s_cameraShake = v; Save(); }
     void SetFov(int v) { s_fov = Clamp(v, 60, 130); Save(); }
     int Sharpness() { return s_sharpness; }
     void SetSharpness(int v) { s_sharpness = Clamp(v, 0, 100); Save(); }
@@ -398,6 +410,41 @@ void WetPresentIntervalHook(PPCRegister& r11)
 {
     if (r11.u32 == 2 && wet::options::Fps() > 30)
         r11.u64 = 1;
+}
+
+// Effect switches (config/WET_config.toml, after the original instruction).
+// Motion blur: the patch loads the strength from a field that is zero instead.
+void WetMotionBlurHook(PPCRegister& r9, PPCRegister& f31)
+{
+    if (!wet::options::MotionBlur())
+    {
+        uint8_t* base = wet::g_mem.base;
+        uint32_t bits = PPC_LOAD_U32(r9.u32 + 10912);
+        float value;
+        std::memcpy(&value, &bits, sizeof(value));
+        f31.f64 = double(value);
+    }
+}
+
+void WetDepthOfFieldHook(PPCRegister& r11)
+{
+    if (!wet::options::DepthOfField())
+        r11.u64 = 0;
+}
+
+void WetCameraShakeHook(PPCRegister& r3, PPCRegister& r10)
+{
+    if (!wet::options::CameraShake())
+    {
+        uint8_t* base = wet::g_mem.base;
+        PPC_STORE_U8(r3.u32 + 21, r10.u8);
+    }
+}
+
+void WetFilmShakeHook(PPCRegister& r10)
+{
+    if (!wet::options::CameraShake())
+        r10.u64 = 0;
 }
 
 // The game world's per-frame update (A2M world, f1 = time step in seconds; it
