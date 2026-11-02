@@ -1995,10 +1995,18 @@ index 901d45925..0bc8c33c7 100644
      return true;
    }
 diff --git a/src/xenia/gpu/d3d12/d3d12_texture_cache.cc b/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
-index b96c200b9..0aa5439a7 100644
+index b96c200b9..c25d26ae2 100644
 --- a/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
 +++ b/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
-@@ -1416,6 +1416,68 @@ ID3D12Resource* D3D12TextureCache::RequestSwapTexture(
+@@ -10,6 +10,7 @@
+ #include "xenia/gpu/d3d12/d3d12_texture_cache.h"
+ 
+ #include <algorithm>
++#include <cstdlib>
+ #include <array>
+ #include <cfloat>
+ #include <cstddef>
+@@ -1416,6 +1417,68 @@ ID3D12Resource* D3D12TextureCache::RequestSwapTexture(
        key.dimension != xenos::DataDimension::k2DOrStacked) {
      return nullptr;
    }
@@ -2067,7 +2075,7 @@ index b96c200b9..0aa5439a7 100644
    D3D12Texture* texture = static_cast<D3D12Texture*>(FindOrCreateTexture(key));
    if (texture == nullptr || !LoadTextureData(*texture)) {
      return nullptr;
-@@ -1597,6 +1659,10 @@ std::unique_ptr<TextureCache::Texture> D3D12TextureCache::CreateTexture(
+@@ -1597,6 +1660,10 @@ std::unique_ptr<TextureCache::Texture> D3D12TextureCache::CreateTexture(
  bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
                                                                bool load_base,
                                                                bool load_mips) {
@@ -2078,25 +2086,123 @@ index b96c200b9..0aa5439a7 100644
    D3D12Texture& d3d12_texture = static_cast<D3D12Texture&>(texture);
    TextureKey texture_key = d3d12_texture.key();
  
-@@ -1610,6 +1676,18 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
-     return false;
-   }
-   bool texture_resolution_scaled = texture_key.scaled_resolve;
+@@ -1644,6 +1711,59 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+   uint32_t texture_resolution_scale_y =
+       texture_resolution_scaled ? draw_resolution_scale_y() : 1;
+ 
 +#if XE_WET_RUNTIME
-+  if (D3D12CommandProcessor::WetWorkLogging())
-+  command_processor_.WetNoteWork(
-+      2,
-+      fmt::format("{} {}x{}x{} at page {:X}{}{}",
-+                  FormatInfo::Get(texture_key.format)->name,
-+                  texture_key.GetWidth(), texture_key.GetHeight(),
-+                  texture_key.GetDepthOrArraySize(), uint32_t(texture_key.base_page),
-+                  texture_resolution_scaled ? " (resolved, scaled)" : "",
-+                  load_mips && uint32_t(texture_key.mip_max_level) ? " +mips" : ""),
-+      1);
++  // WET: if only part of a resolved 2D texture has been resolved over since it
++  // was last loaded, reload only the 32-row strips of tiles covering it (the
++  // rest of the host texture still holds the same data).
++  uint32_t wet_row_first = 0, wet_row_count = 0;  // in blocks; count 0 = all
++  {
++    static const bool partial_allowed =
++        !std::getenv("WET_NO_PARTIAL_TEXTURE_RELOAD");
++    uint32_t lo, hi;
++    if (partial_allowed && texture_resolution_scaled && load_base &&
++        !load_mips && texture_key.tiled && !is_3d && array_size == 1 &&
++        texture_key.mip_max_level == 0 && guest_layout.packed_level != 0 &&
++        d3d12_texture.wet_base_loaded_ &&
++        WetResolvedSince(d3d12_texture.wet_loaded_resolve_seq_,
++                         texture_key.base_page << 12,
++                         d3d12_texture.GetGuestBaseSize(), lo, hi)) {
++      uint32_t macro_row_bytes =
++          guest_layout.base.row_pitch_bytes * xenos::kTextureTileWidthHeight;
++      uint32_t height_blocks = (height + (block_height - 1)) / block_height;
++      if (macro_row_bytes) {
++        uint32_t row_first =
++            lo / macro_row_bytes * xenos::kTextureTileWidthHeight;
++        uint32_t row_end = std::min(
++            (hi + (macro_row_bytes - 1)) / macro_row_bytes *
++                xenos::kTextureTileWidthHeight,
++            height_blocks);
++        if (row_first < row_end && (row_end - row_first) * 4 <= height_blocks * 3) {
++          wet_row_first = row_first;
++          wet_row_count = row_end - row_first;
++        }
++      }
++    }
++  }
++  // Recorded once the load has been submitted (at the end).
++  const uint64_t wet_resolve_seq_at_load = WetResolveSequence();
++  if (D3D12CommandProcessor::WetWorkLogging()) {
++    command_processor_.WetNoteWork(
++        2,
++        fmt::format("{} {}x{}x{} at page {:X}{}{}{}",
++                    FormatInfo::Get(texture_key.format)->name,
++                    texture_key.GetWidth(), texture_key.GetHeight(),
++                    texture_key.GetDepthOrArraySize(),
++                    uint32_t(texture_key.base_page),
++                    texture_resolution_scaled ? " (resolved, scaled)" : "",
++                    load_mips && uint32_t(texture_key.mip_max_level) ? " +mips"
++                                                                     : "",
++                    wet_row_count ? fmt::format(" rows {}-{} only", wet_row_first,
++                                                wet_row_first + wet_row_count)
++                                  : std::string()),
++        1);
++  }
 +#endif
-   ID3D12PipelineState* pipeline =
-       texture_resolution_scaled ? load_pipelines_scaled_[load_shader].Get()
-                                 : load_pipelines_[load_shader].Get();
++
+   // The loop counter can mean two things depending on whether the packed mip
+   // tail is stored as mip 0, because in this case, it would be ambiguous since
+   // both the base and the mips would be on "level 0", but stored in separate
+@@ -1721,6 +1841,11 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+     level_host_slice_layout.Footprint.Width = xe::round_up(
+         level_host_slice_layout.Footprint.Width * texture_resolution_scale_x,
+         UINT(host_block_width));
++#if XE_WET_RUNTIME
++    if (wet_row_count && is_base) {
++      level_host_slice_layout.Footprint.Height = wet_row_count * block_height;
++    }
++#endif
+     level_host_slice_layout.Footprint.Height = xe::round_up(
+         level_host_slice_layout.Footprint.Height * texture_resolution_scale_y,
+         UINT(host_block_height));
+@@ -1849,6 +1974,15 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+                                     block_height * texture_resolution_scale_y;
+     load_constants.size_blocks[2] = level_depth;
+     load_constants.height_texels = level_height;
++#if XE_WET_RUNTIME
++    if (wet_row_count && is_base) {
++      load_constants.size_blocks[1] = wet_row_count * texture_resolution_scale_y;
++      load_constants.height_texels = wet_row_count * block_height;
++      load_constants.guest_offset +=
++          wet_row_first * level_guest_layout.row_pitch_bytes *
++          (texture_resolution_scale_x * texture_resolution_scale_y);
++    }
++#endif
+ 
+     uint32_t group_count_x =
+         (load_constants.size_blocks[0] +
+@@ -1946,8 +2080,14 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+     } else {
+       source_box_ptr = nullptr;
+     }
++    UINT dest_y = 0;
++#if XE_WET_RUNTIME
++    if (wet_row_count && level == 0) {
++      dest_y = wet_row_first * block_height * texture_resolution_scale_y;
++    }
++#endif
+     for (uint32_t slice = 0; slice < array_size; ++slice) {
+-      command_list.D3DCopyTextureRegion(&location_dest, 0, 0, 0,
++      command_list.D3DCopyTextureRegion(&location_dest, 0, dest_y, 0,
+                                         &location_source, source_box_ptr);
+       location_dest.SubresourceIndex += texture_level_count;
+       location_source.PlacedFootprint.Offset += host_slice_size;
+@@ -1956,6 +2096,12 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+ 
+   command_processor_.ReleaseScratchGPUBuffer(copy_buffer, copy_buffer_state);
+ 
++#if XE_WET_RUNTIME
++  if (load_base) {
++    d3d12_texture.wet_loaded_resolve_seq_ = wet_resolve_seq_at_load;
++    d3d12_texture.wet_base_loaded_ = true;
++  }
++#endif
+   return true;
+ }
+ 
 diff --git a/src/xenia/gpu/d3d12/deferred_command_list.cc b/src/xenia/gpu/d3d12/deferred_command_list.cc
 index adaefcd4c..1d48aa7f4 100644
 --- a/src/xenia/gpu/d3d12/deferred_command_list.cc
@@ -18572,7 +18678,7 @@ index e0fd8440d..15115f823 100644
                                    builder_->makeUintConstant(6)));
          {
 diff --git a/src/xenia/gpu/texture_cache.cc b/src/xenia/gpu/texture_cache.cc
-index 46820e2bb..d4020c968 100644
+index 46820e2bb..2f36c027d 100644
 --- a/src/xenia/gpu/texture_cache.cc
 +++ b/src/xenia/gpu/texture_cache.cc
 @@ -73,6 +73,11 @@ DEFINE_uint32(
@@ -18587,7 +18693,7 @@ index 46820e2bb..d4020c968 100644
  const TextureCache::LoadShaderInfo
      TextureCache::load_shader_info_[kLoadShaderCount] = {
          {1, 4},   // k8bpb
-@@ -236,6 +241,26 @@ void TextureCache::MarkRangeAsResolved(uint32_t start_unscaled,
+@@ -236,8 +241,33 @@ void TextureCache::MarkRangeAsResolved(uint32_t start_unscaled,
    }
    start_unscaled &= 0x1FFFFFFF;
    length_unscaled = std::min(length_unscaled, 0x20000000 - start_unscaled);
@@ -18613,8 +18719,44 @@ index 46820e2bb..d4020c968 100644
 +#endif
  
    if (IsDrawResolutionScaled()) {
++#if XE_WET_RUNTIME
++    ++wet_resolve_seq_;
++    wet_resolve_log_[wet_resolve_seq_ % kWetResolveLogSize] = {
++        wet_resolve_seq_, start_unscaled, start_unscaled + length_unscaled};
++#endif
      uint32_t page_first = start_unscaled >> 12;
-@@ -558,6 +583,28 @@ TextureCache::Texture* TextureCache::FindOrCreateTexture(TextureKey key) {
+     uint32_t page_last = (start_unscaled + length_unscaled - 1) >> 12;
+     uint32_t block_first = page_first >> 5;
+@@ -261,6 +291,28 @@ void TextureCache::MarkRangeAsResolved(uint32_t start_unscaled,
+   shared_memory().RangeWrittenByGpu(start_unscaled, length_unscaled);
+ }
+ 
++#if XE_WET_RUNTIME
++bool TextureCache::WetResolvedSince(uint64_t since_seq, uint32_t base,
++                                    uint32_t size, uint32_t& lo,
++                                    uint32_t& hi) const {
++  if (wet_resolve_seq_ - since_seq > kWetResolveLogSize) {
++    return false;
++  }
++  uint32_t end = base + size;
++  lo = UINT32_MAX;
++  hi = 0;
++  for (uint64_t seq = since_seq + 1; seq <= wet_resolve_seq_; ++seq) {
++    const WetResolveRange& range = wet_resolve_log_[seq % kWetResolveLogSize];
++    if (range.seq != seq || range.end <= base || range.start >= end) {
++      continue;
++    }
++    lo = std::min(lo, std::max(range.start, base) - base);
++    hi = std::max(hi, std::min(range.end, end) - base);
++  }
++  return lo < hi;
++}
++#endif
++
+ uint32_t TextureCache::GuestToHostSwizzle(uint32_t guest_swizzle,
+                                           uint32_t host_format_swizzle) {
+   uint32_t host_swizzle = 0;
+@@ -558,6 +610,28 @@ TextureCache::Texture* TextureCache::FindOrCreateTexture(TextureKey key) {
               scaled_resolve_guest_layout.mips_total_extent_bytes))) {
        key.scaled_resolve = 1;
      }
@@ -18643,7 +18785,7 @@ index 46820e2bb..d4020c968 100644
    }
  
    uint32_t host_width = key.GetWidth();
-@@ -867,6 +914,34 @@ void TextureCache::ScaledResolveGlobalWatchCallback(
+@@ -867,6 +941,34 @@ void TextureCache::ScaledResolveGlobalWatchCallback(
      // Resolves themselves do exactly the opposite of what this should do.
      return;
    }
@@ -18679,7 +18821,7 @@ index 46820e2bb..d4020c968 100644
    // invalidated by their shared memory watches.
    uint32_t resolve_page_first = address_first >> 12;
 diff --git a/src/xenia/gpu/texture_cache.h b/src/xenia/gpu/texture_cache.h
-index c892eee32..68a57f0e4 100644
+index c892eee32..7e5d9e0a8 100644
 --- a/src/xenia/gpu/texture_cache.h
 +++ b/src/xenia/gpu/texture_cache.h
 @@ -53,6 +53,13 @@ namespace gpu {
@@ -18696,7 +18838,26 @@ index c892eee32..68a57f0e4 100644
  class TextureCache {
   public:
    // Hard limit, originating from the half-pixel offset filling hack in the
-@@ -122,6 +129,13 @@ class TextureCache {
+@@ -81,6 +88,18 @@ class TextureCache {
+   virtual void BeginFrame();
+ 
+   void MarkRangeAsResolved(uint32_t start_unscaled, uint32_t length_unscaled);
++#if XE_WET_RUNTIME
++  // WET: every resolve into the scaled resolve memory, numbered, so a scaled
++  // texture whose base was only partly overwritten since it was last loaded
++  // can reload just the affected rows (the game writes a 320x184 depth image
++  // over the start of its 1280x720 one, which used to reload all of it).
++  uint64_t WetResolveSequence() const { return wet_resolve_seq_; }
++  // Byte range [lo, hi), relative to base, covering everything resolved into
++  // [base, base + size) after since_seq. False if nothing was, or if the
++  // record doesn't go back that far.
++  bool WetResolvedSince(uint64_t since_seq, uint32_t base, uint32_t size,
++                        uint32_t& lo, uint32_t& hi) const;
++#endif
+   // Ensures the memory backing the range in the scaled resolve address space is
+   // allocated and returns whether it is.
+   virtual bool EnsureScaledResolveMemoryCommitted(
+@@ -122,6 +141,13 @@ class TextureCache {
    }
  
   protected:
@@ -18710,7 +18871,39 @@ index c892eee32..68a57f0e4 100644
    struct TextureKey {
      // Dimensions minus 1 are stored similarly to how they're stored in fetch
      // constants so fewer bits can be used, while the maximum size (8192 for 2D)
-@@ -594,6 +608,15 @@ class TextureCache {
+@@ -241,6 +267,13 @@ class TextureCache {
+ 
+     void LogAction(const char* action) const;
+ 
++#if XE_WET_RUNTIME
++    // Resolve sequence number when the base was last loaded (see
++    // WetResolvedSince), and whether it has been loaded at all.
++    uint64_t wet_loaded_resolve_seq_ = 0;
++    bool wet_base_loaded_ = false;
++#endif
++
+    protected:
+     explicit Texture(TextureCache& texture_cache, const TextureKey& key);
+ 
+@@ -551,6 +584,17 @@ class TextureCache {
+   // implementation to update the internal dependencies of the binding.
+   virtual void UpdateTextureBindingsImpl(uint32_t fetch_constant_mask) {}
+ 
++#if XE_WET_RUNTIME
++ private:
++  struct WetResolveRange {
++    uint64_t seq;
++    uint32_t start, end;
++  };
++  static constexpr uint32_t kWetResolveLogSize = 256;
++  WetResolveRange wet_resolve_log_[kWetResolveLogSize] = {};
++  uint64_t wet_resolve_seq_ = 0;
++#endif
++
+  private:
+   void UpdateTexturesTotalHostMemoryUsage(uint64_t add, uint64_t subtract);
+ 
+@@ -594,6 +638,15 @@ class TextureCache {
    uint64_t current_submission_index_ = 0;
    uint64_t current_submission_time_ = 0;
  
