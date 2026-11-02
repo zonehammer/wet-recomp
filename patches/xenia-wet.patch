@@ -563,7 +563,7 @@ index ffc8eeffa..37bd99fd2 100644
    uint32_t primary_buffer_ptr_ = 0;
    uint32_t primary_buffer_size_ = 0;
 diff --git a/src/xenia/gpu/d3d12/d3d12_command_processor.cc b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
-index 0ec70a7d1..52df8b164 100644
+index 0ec70a7d1..6e2a1588c 100644
 --- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
 +++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
 @@ -8,6 +8,7 @@
@@ -766,7 +766,46 @@ index 0ec70a7d1..52df8b164 100644
  
    reg::RB_DEPTHCONTROL normalized_depth_control =
        draw_util::GetNormalizedDepthControl(regs);
-@@ -2169,6 +2289,13 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+@@ -2104,6 +2224,38 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+                                     normalized_color_mask, *vertex_shader)) {
+     return false;
+   }
++#if XE_WET_RUNTIME
++  if (is_rasterization_done) {
++    auto surface_info = regs.Get<reg::RB_SURFACE_INFO>();
++    auto depth_info = regs.Get<reg::RB_DEPTH_INFO>();
++    bool depth_used = normalized_depth_control.z_enable ||
++                      normalized_depth_control.stencil_enable;
++    WetNoteWork(
++        3,
++        fmt::format(
++            "{}x pitch {}, depth {}{}, colour mask {:04X}",
++            1u << uint32_t(surface_info.msaa_samples),
++            uint32_t(surface_info.surface_pitch),
++            depth_used ? fmt::format("@{} ", uint32_t(depth_info.depth_base))
++                       : std::string("off"),
++            depth_used
++                ? fmt::format(
++                      "z {}{}",
++                      normalized_depth_control.z_enable
++                          ? (normalized_depth_control.z_write_enable
++                                 ? "test+write"
++                                 : "test")
++                          : "off",
++                      normalized_depth_control.stencil_enable
++                          ? (WetStencilWrites(regs, normalized_depth_control)
++                                 ? " stencil writes"
++                                 : " stencil test")
++                          : "")
++                : std::string(),
++            normalized_color_mask),
++        1);
++  }
++#endif
+ 
+   // Create the pipeline (for this, need the actually used render target formats
+   // from the render target cache), translating the shaders - doing this now to
+@@ -2169,6 +2321,13 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
            render_target_cache_->depth_float24_convert_in_pixel_shader(),
        host_render_targets_used, pixel_shader && pixel_shader->writes_depth(),
        viewport_info);
@@ -780,7 +819,7 @@ index 0ec70a7d1..52df8b164 100644
    draw_util::Scissor scissor;
    draw_util::GetScissor(regs, scissor);
    scissor.offset[0] *= draw_resolution_scale_x;
-@@ -2467,6 +2594,11 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+@@ -2467,6 +2626,11 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
      }
    }
  
@@ -792,7 +831,7 @@ index 0ec70a7d1..52df8b164 100644
    return true;
  }
  
-@@ -2663,6 +2795,21 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
+@@ -2663,6 +2827,21 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
        }
        frame_completed_ = frame;
      }
@@ -814,7 +853,7 @@ index 0ec70a7d1..52df8b164 100644
    }
  
    if (!submission_open_) {
-@@ -2672,6 +2819,12 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
+@@ -2672,6 +2851,12 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
      // end of the submission (when async pipeline creation requests are
      // fulfilled).
      deferred_command_list_.Reset();
@@ -827,7 +866,7 @@ index 0ec70a7d1..52df8b164 100644
  
      // Reset cached state of the command list.
      ff_viewport_update_needed_ = true;
-@@ -2790,6 +2943,23 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
+@@ -2790,6 +2975,23 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
      // destroyed between frames.
      SubmitBarriers();
  
@@ -851,7 +890,7 @@ index 0ec70a7d1..52df8b164 100644
      // TODO(Triang3l): Error checking.
  
      ID3D12CommandQueue* direct_queue = provider.GetDirectQueue();
-@@ -2840,6 +3010,12 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
+@@ -2840,6 +3042,12 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
        pix_capturing_ = false;
      }
      frame_open_ = false;
@@ -864,7 +903,7 @@ index 0ec70a7d1..52df8b164 100644
      // Submission already closed now, so minus 1.
      closed_frame_submissions_[(frame_current_++) % kQueueFrames] =
          GetCurrentSubmission() - 1;
-@@ -2882,6 +3058,114 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
+@@ -2882,6 +3090,114 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
    return true;
  }
  
@@ -888,9 +927,9 @@ index 0ec70a7d1..52df8b164 100644
 +void D3D12CommandProcessor::WetLogWork() {
 +  static const char* const kKinds[] = {
 +      "render target copies (EDRAM tiles; a 1280x720 32bpp target is 720)",
-+      "resolves (pixels)", "texture loads"};
++      "resolves (pixels)", "texture loads", "draws by render target setup"};
 +  double frames = double(wet_work_frames_);
-+  for (int kind = 0; kind < 3; ++kind) {
++  for (int kind = 0; kind < 4; ++kind) {
 +    std::vector<std::pair<std::string, WetWork>> sorted(wet_work_[kind].begin(),
 +                                                        wet_work_[kind].end());
 +    uint64_t count = 0, amount = 0;
@@ -979,7 +1018,7 @@ index 0ec70a7d1..52df8b164 100644
  bool D3D12CommandProcessor::CanEndSubmissionImmediately() const {
    return !submission_open_ || !pipeline_cache_->IsCreatingPipelines();
  }
-@@ -4359,6 +4643,304 @@ void D3D12CommandProcessor::WriteGammaRampSRV(
+@@ -4359,6 +4675,304 @@ void D3D12CommandProcessor::WriteGammaRampSRV(
    device->CreateShaderResourceView(gamma_ramp_buffer_.Get(), &desc, handle);
  }
  
@@ -1285,7 +1324,7 @@ index 0ec70a7d1..52df8b164 100644
  }  // namespace gpu
  }  // namespace xe
 diff --git a/src/xenia/gpu/d3d12/d3d12_command_processor.h b/src/xenia/gpu/d3d12/d3d12_command_processor.h
-index 88bdcb438..afd54543a 100644
+index 88bdcb438..05f144d5c 100644
 --- a/src/xenia/gpu/d3d12/d3d12_command_processor.h
 +++ b/src/xenia/gpu/d3d12/d3d12_command_processor.h
 @@ -74,6 +74,42 @@ class D3D12CommandProcessor : public CommandProcessor {
@@ -1309,7 +1348,7 @@ index 88bdcb438..afd54543a 100644
 +  uint8_t WetGpuBegin(uint8_t cat);
 +  // What the GPU-heavy emulation work is (logged every 600 frames):
 +  // 0 = render target copies (amount in EDRAM tiles), 1 = resolves (pixels),
-+  // 2 = texture loads.
++  // 2 = texture loads, 3 = draws by render target setup.
 +  void WetNoteWork(int kind, const std::string& what, uint64_t amount);
 +  class WetGpuScope {
 +   public:
@@ -1351,7 +1390,7 @@ index 88bdcb438..afd54543a 100644
 +    uint64_t count = 0;
 +    uint64_t amount = 0;
 +  };
-+  std::unordered_map<std::string, WetWork> wet_work_[3];
++  std::unordered_map<std::string, WetWork> wet_work_[4];
 +  uint32_t wet_work_frames_ = 0;
 +  void WetLogWork();
 +  void WetTsMark(uint8_t label);
@@ -17733,7 +17772,7 @@ index 8994b20bc..31c0ea546 100644
  
  class GraphicsSystem {
 diff --git a/src/xenia/gpu/render_target_cache.cc b/src/xenia/gpu/render_target_cache.cc
-index 5c070f14e..5a7964aa3 100644
+index 5c070f14e..bc62e1c80 100644
 --- a/src/xenia/gpu/render_target_cache.cc
 +++ b/src/xenia/gpu/render_target_cache.cc
 @@ -10,6 +10,7 @@
@@ -17771,7 +17810,43 @@ index 5c070f14e..5a7964aa3 100644
      }
      if (render_targets_.size() != used_render_targets.size()) {
        typename decltype(render_targets_)::iterator it_next;
-@@ -879,10 +893,17 @@ bool RenderTargetCache::Update(bool is_rasterization_done,
+@@ -570,6 +584,35 @@ void RenderTargetCache::ClearCache() {
+ 
+ void RenderTargetCache::BeginFrame() { ResetAccumulatedRenderTargets(); }
+ 
++#if XE_WET_RUNTIME
++// Whether a draw with stencil enabled can change the stencil buffer (a
++// non-zero write mask and an operation other than keep, front or back).
++bool WetStencilWrites(const RegisterFile& regs,
++                      reg::RB_DEPTHCONTROL depth_control) {
++  if (!depth_control.stencil_enable) {
++    return false;
++  }
++  auto front = regs.Get<reg::RB_STENCILREFMASK>();
++  if (front.stencilwritemask &&
++      (depth_control.stencilfail != xenos::StencilOp::kKeep ||
++       depth_control.stencilzpass != xenos::StencilOp::kKeep ||
++       depth_control.stencilzfail != xenos::StencilOp::kKeep)) {
++    return true;
++  }
++  if (depth_control.backface_enable) {
++    reg::RB_STENCILREFMASK back;
++    back.value = regs[XE_GPU_REG_RB_STENCILREFMASK_BF];
++    if (back.stencilwritemask &&
++        (depth_control.stencilfail_bf != xenos::StencilOp::kKeep ||
++         depth_control.stencilzpass_bf != xenos::StencilOp::kKeep ||
++         depth_control.stencilzfail_bf != xenos::StencilOp::kKeep)) {
++      return true;
++    }
++  }
++  return false;
++}
++#endif
++
+ bool RenderTargetCache::Update(bool is_rasterization_done,
+                                reg::RB_DEPTHCONTROL normalized_depth_control,
+                                uint32_t normalized_color_mask,
+@@ -879,10 +922,17 @@ bool RenderTargetCache::Update(bool is_rasterization_done,
    for (uint32_t i = 0; i < edram_bases_sorted_count; ++i) {
      const std::pair<uint32_t, uint32_t>& rt_base_index = edram_bases_sorted[i];
      uint32_t rt_bit_index = rt_base_index.second;
@@ -17780,7 +17855,7 @@ index 5c070f14e..5a7964aa3 100644
 +    bool rt_writes = rt_bit_index != 0 ||
 +                     (normalized_depth_control.z_enable &&
 +                      normalized_depth_control.z_write_enable) ||
-+                     normalized_depth_control.stencil_enable;
++                     WetStencilWrites(regs, normalized_depth_control);
      ChangeOwnership(rt_keys[rt_bit_index], 0, rt_lengths_tiles[i],
                      interlock_barrier_only
                          ? nullptr
@@ -17790,7 +17865,7 @@ index 5c070f14e..5a7964aa3 100644
    }
  
    if (interlock_barrier_only) {
-@@ -1513,7 +1534,7 @@ bool RenderTargetCache::WouldOwnershipChangeRequireTransfers(
+@@ -1513,7 +1563,7 @@ bool RenderTargetCache::WouldOwnershipChangeRequireTransfers(
  void RenderTargetCache::ChangeOwnership(
      RenderTargetKey dest, uint32_t start_tiles_base_relative,
      uint32_t length_tiles, std::vector<Transfer>* transfers_append_out,
@@ -17799,7 +17874,7 @@ index 5c070f14e..5a7964aa3 100644
    // xenos::kEdramTileCount with length 0 is fine if both the start and the end
    // are clamped to xenos::kEdramTileCount.
    assert_true(start_tiles_base_relative <=
-@@ -1555,6 +1576,15 @@ void RenderTargetCache::ChangeOwnership(
+@@ -1555,6 +1605,15 @@ void RenderTargetCache::ChangeOwnership(
        if (it->second.IsOwnedBy(dest, host_depth_encoding_different)) {
          // Already owned by the needed render target - no need to transfer
          // anything.
@@ -17815,7 +17890,7 @@ index 5c070f14e..5a7964aa3 100644
          ++it;
          continue;
        }
-@@ -1565,7 +1595,27 @@ void RenderTargetCache::ChangeOwnership(
+@@ -1565,7 +1624,27 @@ void RenderTargetCache::ChangeOwnership(
          ownership_ranges_.emplace(extent_end, it->second);
          it->second.end_tiles = extent_end;
        }
@@ -17843,7 +17918,7 @@ index 5c070f14e..5a7964aa3 100644
          RenderTargetKey transfer_source = it->second.render_target;
          // Only perform the copying when actually changing the latest owner, not
          // just the latest host depth owner - the transfer source is expected to
-@@ -1597,6 +1647,11 @@ void RenderTargetCache::ChangeOwnership(
+@@ -1597,6 +1676,11 @@ void RenderTargetCache::ChangeOwnership(
                // Extend the last transfer if, for example, transferring color,
                // but host depth is different.
                transfers_append_out->back().end_tiles = transfer_end_tiles;
@@ -17855,7 +17930,7 @@ index 5c070f14e..5a7964aa3 100644
              } else {
                auto transfer_source_rt_it =
                    render_targets_.find(transfer_source);
-@@ -1617,6 +1672,11 @@ void RenderTargetCache::ChangeOwnership(
+@@ -1617,6 +1701,11 @@ void RenderTargetCache::ChangeOwnership(
                        transfer_host_depth_source_rt_it != render_targets_.end()
                            ? transfer_host_depth_source_rt_it->second
                            : nullptr);
@@ -17867,7 +17942,7 @@ index 5c070f14e..5a7964aa3 100644
                  }
                }
              }
-@@ -1624,6 +1684,13 @@ void RenderTargetCache::ChangeOwnership(
+@@ -1624,6 +1713,13 @@ void RenderTargetCache::ChangeOwnership(
          }
        }
        // Claim the current range.
@@ -17882,7 +17957,7 @@ index 5c070f14e..5a7964aa3 100644
        if (host_depth_encoding_different) {
          it->second.GetHostDepthRenderTarget(dest.GetDepthFormat()) = dest;
 diff --git a/src/xenia/gpu/render_target_cache.h b/src/xenia/gpu/render_target_cache.h
-index 6adf4f364..7599c892f 100644
+index 6adf4f364..850106924 100644
 --- a/src/xenia/gpu/render_target_cache.h
 +++ b/src/xenia/gpu/render_target_cache.h
 @@ -10,6 +10,7 @@
@@ -17893,7 +17968,7 @@ index 6adf4f364..7599c892f 100644
  #include <cmath>
  #include <cstdint>
  #include <functional>
-@@ -40,6 +41,13 @@ DECLARE_bool(snorm16_render_target_full_range);
+@@ -40,6 +41,15 @@ DECLARE_bool(snorm16_render_target_full_range);
  namespace xe {
  namespace gpu {
  
@@ -17902,12 +17977,14 @@ index 6adf4f364..7599c892f 100644
 +// contents (count, EDRAM tiles).
 +extern std::atomic<uint64_t> wet_rt_copies_skipped;
 +extern std::atomic<uint64_t> wet_rt_tiles_skipped;
++bool WetStencilWrites(const RegisterFile& regs,
++                      reg::RB_DEPTHCONTROL depth_control);
 +#endif
 +
  class RenderTargetCache {
   public:
    // High-level emulation logic implementation path.
-@@ -629,6 +637,14 @@ class RenderTargetCache {
+@@ -629,6 +639,14 @@ class RenderTargetCache {
      // empty too.
      RenderTargetKey host_depth_render_target_unorm24;
      RenderTargetKey host_depth_render_target_float24;
@@ -17922,7 +17999,7 @@ index 6adf4f364..7599c892f 100644
      OwnershipRange(uint32_t end_tiles, RenderTargetKey render_target,
                     RenderTargetKey host_depth_render_target_unorm24,
                     RenderTargetKey host_depth_render_target_float24)
-@@ -672,7 +688,11 @@ class RenderTargetCache {
+@@ -672,7 +690,11 @@ class RenderTargetCache {
               host_depth_render_target_unorm24 ==
                   other_range.host_depth_render_target_unorm24 &&
               host_depth_render_target_float24 ==
@@ -17935,7 +18012,7 @@ index 6adf4f364..7599c892f 100644
      }
    };
  
-@@ -698,10 +718,13 @@ class RenderTargetCache {
+@@ -698,10 +720,13 @@ class RenderTargetCache {
                                              uint32_t length_tiles) const;
    // Updates ownership_ranges_, adds the transfers needed for the ownership
    // change to transfers_append_out if it's not null.
