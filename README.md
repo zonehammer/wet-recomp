@@ -146,6 +146,8 @@ scripted input: New Game, into the first level, a couple of minutes of moving an
 the pause menu, then a clean exit. It fails on a crash, a hang (the log stops) or an early
 exit, and lists any unimplemented system functions the game called. Logs go to `soak\`.
 `--runs 3` repeats it; `--script` takes your own steps (see `runtime/src/input.cpp`).
+`--record` lets you play it once yourself (from an empty save folder, until you quit);
+after that every run replays your recording (`soak\recording.txt`) instead of the script.
 
 ## How it works
 

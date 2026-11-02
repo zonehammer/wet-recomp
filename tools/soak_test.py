@@ -5,6 +5,12 @@ input (WET_AUTOPRESS), then checks wet.log for crashes, hangs and new stubs.
     python tools/soak_test.py                 # one run, about 6 minutes
     python tools/soak_test.py --runs 3        # three runs back to back
     python tools/soak_test.py --script "START,WAIT:5,A,EXIT"
+    python tools/soak_test.py --record        # play it yourself once; later runs replay you
+
+--record starts the game with an empty save folder and records your controller,
+keyboard and mouse until you quit (hold Back in the pause menu, or close the
+window). From then on each run replays that recording (soak/recording.txt)
+instead of the built-in script; --script or --no-replay go back to the script.
 
 Run it before tagging a release. Each run uses a fresh save folder (so the game
 always starts with no saves and goes New Game -> first level), keeps its log in
@@ -72,7 +78,7 @@ def analyse(log_text):
     """What a run's log says: crash lines, stubs, frame rates, how far the script got."""
     result = {
         "fatal": [l for l in log_text.splitlines() if " FATAL:" in l],
-        "finished": "Autopress: script finished" in log_text,
+        "finished": "Autopress: script finished" in log_text or "Quit to desktop" in log_text,
         "stubs": sorted(set(re.findall(r"STUB (\w+)\(", log_text))),
         "fps": [float(m) for m in re.findall(r"Performance: (\d+) fps average", log_text)],
         "worst_ms": [float(m) for m in re.findall(r"slowest frame ([\d.]+) ms", log_text)],
@@ -88,7 +94,40 @@ def analyse(log_text):
     return result
 
 
-def run_once(exe, script, delay, index, out_dir, timeout_margin, hang_seconds, keep_saves):
+def recording_seconds(path):
+    last = 0.0
+    with open(path) as f:
+        for line in f:
+            if line.strip() and not line.startswith("#"):
+                last = float(line.split()[0])
+    return last
+
+
+def record(exe, out_dir, keep_saves):
+    path = os.path.join(out_dir, "recording.txt")
+    log_path = os.path.join(out_dir, "record.log")
+    hdd = None
+    args = [exe, "--log", log_path]
+    if not keep_saves:
+        hdd = tempfile.mkdtemp(prefix="wet-soak-hdd-")
+        args += ["--hdd", hdd]
+    env = dict(os.environ)
+    env.update({"WET_RECORD_INPUT": path, "WET_NO_DIALOGS": "1"})
+    print("Recording: play from the start (no saves) into the level, then quit -\n"
+          "hold Back / Backspace in the pause menu, or close the window.", flush=True)
+    try:
+        subprocess.call(args, cwd=os.path.dirname(exe), env=env)
+    finally:
+        if hdd:
+            shutil.rmtree(hdd, ignore_errors=True)
+    if not os.path.exists(path):
+        sys.exit("No recording was written - see " + log_path)
+    changes = sum(1 for l in open(path) if l.strip() and not l.startswith("#"))
+    print(f"Recorded {changes} input changes over {recording_seconds(path) / 60:.1f} minutes to {path}.\n"
+          "Run python tools/soak_test.py to replay it.")
+
+
+def run_once(exe, inputs, limit, index, out_dir, hang_seconds, keep_saves):
     log_path = os.path.join(out_dir, f"run-{index}.log")
     if os.path.exists(log_path):
         os.remove(log_path)
@@ -98,8 +137,8 @@ def run_once(exe, script, delay, index, out_dir, timeout_margin, hang_seconds, k
         hdd = tempfile.mkdtemp(prefix="wet-soak-hdd-")
         args += ["--hdd", hdd]
     env = dict(os.environ)
-    env.update({"WET_AUTOPRESS": script, "WET_AUTOPRESS_DELAY": str(delay), "WET_NO_DIALOGS": "1"})
-    limit = delay + script_seconds(script) + timeout_margin
+    env.update(inputs)
+    env["WET_NO_DIALOGS"] = "1"
     print(f"== Run {index}: up to {limit / 60:.1f} minutes", flush=True)
 
     start = time.time()
@@ -158,20 +197,36 @@ def main():
     ap.add_argument("--delay", type=float, default=40, help="seconds before the script starts (intro videos)")
     ap.add_argument("--hang", type=float, default=90, help="seconds without log output that count as a hang")
     ap.add_argument("--keep-saves", action="store_true", help="use the normal save folder instead of an empty one")
+    ap.add_argument("--record", action="store_true", help="record your own play-through for later runs to replay")
+    ap.add_argument("--no-replay", action="store_true", help="use the script even if there's a recording")
     args = ap.parse_args()
+    script_given = any(a == "--script" or a.startswith("--script=") for a in sys.argv[1:])
 
     exe = os.path.abspath(args.exe) if args.exe else find_exe()
     if not exe or not os.path.exists(exe):
         sys.exit("No WetRecomp.exe found - build first (python tools/build.py) or pass --exe.")
-    script = args.script if "EXIT" in args.script.upper() else args.script + ",EXIT"
     out_dir = os.path.join(REPO, "soak")
     os.makedirs(out_dir, exist_ok=True)
-    print(f"Soak test of {exe}\n{len(script.split(','))} steps, about {script_seconds(script) / 60:.1f} minutes of input "
-          f"after {args.delay:.0f} s")
+    if args.record:
+        record(exe, out_dir, args.keep_saves)
+        return 0
+
+    recording = os.path.join(out_dir, "recording.txt")
+    if os.path.exists(recording) and not script_given and not args.no_replay:
+        seconds = recording_seconds(recording)
+        inputs = {"WET_REPLAY": recording}
+        limit = seconds + 10 + 120
+        print(f"Soak test of {exe}\nreplaying {recording} ({seconds / 60:.1f} minutes)")
+    else:
+        script = args.script if "EXIT" in args.script.upper() else args.script + ",EXIT"
+        inputs = {"WET_AUTOPRESS": script, "WET_AUTOPRESS_DELAY": str(args.delay)}
+        limit = args.delay + script_seconds(script) + 120
+        print(f"Soak test of {exe}\n{len(script.split(','))} steps, about {script_seconds(script) / 60:.1f} minutes "
+              f"of input after {args.delay:.0f} s")
 
     failures, stubs = 0, set()
     for i in range(1, args.runs + 1):
-        verdict, a = run_once(exe, script, args.delay, i, out_dir, 120, args.hang, args.keep_saves)
+        verdict, a = run_once(exe, inputs, limit, i, out_dir, args.hang, args.keep_saves)
         failures += verdict is not None
         stubs.update(a["stubs"])
 

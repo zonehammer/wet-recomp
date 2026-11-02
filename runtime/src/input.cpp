@@ -45,6 +45,10 @@
 //   LOOK:LEFT:1         right stick likewise
 //   EXIT                quit cleanly (logs "Autopress: script finished")
 // tools/soak_test.py uses this to play through the menus and the first level.
+//
+// WET_RECORD_INPUT=<file> records controller 0 (pads, keyboard and mouse, as the
+// game sees them) to a file; WET_REPLAY=<file> plays such a recording back, at
+// the same times after launch (tools/soak_test.py --record).
 
 namespace wet
 {
@@ -196,6 +200,105 @@ namespace wet
             }
         };
         const AutoPress& Auto() { static AutoPress a; return a; }
+
+        // ---- Recording and replay (WET_RECORD_INPUT / WET_REPLAY) ----
+        // One line per change: seconds since launch, buttons (hex), LT, RT, LX, LY, RX, RY.
+        struct InputEvent { double t; uint16_t buttons; uint8_t lt, rt; int16_t lx, ly, rx, ry; };
+
+        double SinceStart()
+        {
+            return std::chrono::duration<double>(std::chrono::steady_clock::now() - s_start).count();
+        }
+
+        struct Recorder
+        {
+            std::FILE* file = nullptr;
+            InputEvent last{};
+            std::mutex lock;
+            Recorder()
+            {
+                const char* path = std::getenv("WET_RECORD_INPUT");
+                if (!path || !*path)
+                    return;
+                file = std::fopen(path, "w");
+                Log(file ? "Input: recording controller 0 to %s" : "Input: can't write the recording %s", path);
+                if (file)
+                    std::fprintf(file, "# WET input recording: seconds buttons lt rt lx ly rx ry\n");
+            }
+            // Sticks are rounded so a resting stick's noise isn't recorded.
+            static int16_t Round(int16_t v)
+            {
+                int r = (int(v) + (v >= 0 ? 1024 : -1024)) / 2048 * 2048;
+                return int16_t(std::clamp(r, -32768, 32767));
+            }
+            void Note(const HostPadState& s)
+            {
+                if (!file)
+                    return;
+                InputEvent e{ SinceStart(), s.buttons, s.leftTrigger, s.rightTrigger,
+                              Round(s.lx), Round(s.ly), Round(s.rx), Round(s.ry) };
+                std::lock_guard g(lock);
+                if (e.buttons == last.buttons && e.lt == last.lt && e.rt == last.rt && e.lx == last.lx &&
+                    e.ly == last.ly && e.rx == last.rx && e.ry == last.ry)
+                    return;
+                last = e;
+                std::fprintf(file, "%.3f %04X %u %u %d %d %d %d\n", e.t, e.buttons, e.lt, e.rt, e.lx, e.ly, e.rx, e.ry);
+                std::fflush(file);
+            }
+        };
+        Recorder& Recording() { static Recorder r; return r; }
+
+        struct Replay
+        {
+            std::vector<InputEvent> events;
+            Replay()
+            {
+                const char* path = std::getenv("WET_REPLAY");
+                if (!path || !*path)
+                    return;
+                if (std::FILE* f = std::fopen(path, "r"))
+                {
+                    char line[160];
+                    while (std::fgets(line, sizeof(line), f))
+                    {
+                        InputEvent e{};
+                        unsigned b, lt, rt;
+                        int lx, ly, rx, ry;
+                        if (line[0] == '#' ||
+                            std::sscanf(line, "%lf %x %u %u %d %d %d %d", &e.t, &b, &lt, &rt, &lx, &ly, &rx, &ry) != 8)
+                            continue;
+                        e.buttons = uint16_t(b), e.lt = uint8_t(lt), e.rt = uint8_t(rt);
+                        e.lx = int16_t(lx), e.ly = int16_t(ly), e.rx = int16_t(rx), e.ry = int16_t(ry);
+                        events.push_back(e);
+                    }
+                    std::fclose(f);
+                }
+                Log("Input: replaying %zu input changes from %s (%.0f s)", events.size(), path,
+                    events.empty() ? 0.0 : events.back().t);
+            }
+            // The recorded state now; after the end, waits 10 s and exits cleanly.
+            void Now(uint16_t& bits, uint8_t& lt, uint8_t& rt, int16_t& lx, int16_t& ly, int16_t& rx, int16_t& ry) const
+            {
+                if (events.empty())
+                    return;
+                double t = SinceStart();
+                if (t > events.back().t + 10)
+                {
+                    Log("Autopress: script finished (end of the recording)");
+                    LogFlush();
+                    renderer_host::ExitProcess();
+                }
+                auto it = std::upper_bound(events.begin(), events.end(), t,
+                                           [](double v, const InputEvent& e) { return v < e.t; });
+                if (it == events.begin())
+                    return;
+                const InputEvent& e = *(it - 1);
+                bits |= e.buttons;
+                lt = std::max(lt, e.lt), rt = std::max(rt, e.rt);
+                lx = e.lx, ly = e.ly, rx = e.rx, ry = e.ry;
+            }
+        };
+        const Replay& Replaying() { static Replay r; return r; }
 
 #ifdef _WIN32
         // keybinds::kActions order: 4 move directions, then these buttons
@@ -789,6 +892,7 @@ namespace wet
         uint16_t extra = 0;
         int16_t klx = 0, kly = 0, krx = 0, kry = 0;
         Auto().Now(extra, out.leftTrigger, out.rightTrigger, klx, kly, krx, kry);
+        Replaying().Now(extra, out.leftTrigger, out.rightTrigger, klx, kly, krx, kry);
 #ifdef _WIN32
         extra |= KeyboardButtons(out.leftTrigger, out.rightTrigger, klx, kly, krx, kry);
 #endif
@@ -817,6 +921,7 @@ namespace wet
         out.packet += s_extraPackets.load() << 20;
         out.buttons |= extra;
         LogButtons(out.buttons);
+        Recording().Note(out);
         return true;
     }
 
