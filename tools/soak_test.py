@@ -30,7 +30,9 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # (loading and the opening cutscene); A also skips cutscenes.
 DEFAULT_SCRIPT = ",".join([
     "WAIT:5", "START", "WAIT:4",                  # press start
-    "A", "WAIT:4", "A", "WAIT:4", "A", "WAIT:4",  # storage / profile prompts, main menu: New Game
+    "A", "WAIT:4",                                # first menu
+    "DOWN", "A", "WAIT:4",                        # no saves: "Continue without saving" (second option)
+    "A", "WAIT:4", "A", "WAIT:4",                 # main menu: New Game
     "A", "WAIT:4", "A",                           # difficulty, confirm
     "WAIT:45",                                    # loading and the opening cutscene
     "A", "WAIT:5", "START", "WAIT:3", "A",        # skip whatever is still playing
