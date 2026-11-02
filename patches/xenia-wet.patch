@@ -563,7 +563,7 @@ index ffc8eeffa..37bd99fd2 100644
    uint32_t primary_buffer_ptr_ = 0;
    uint32_t primary_buffer_size_ = 0;
 diff --git a/src/xenia/gpu/d3d12/d3d12_command_processor.cc b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
-index 0ec70a7d1..5dd7c9478 100644
+index 0ec70a7d1..8e8665e07 100644
 --- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
 +++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
 @@ -8,6 +8,7 @@
@@ -851,17 +851,20 @@ index 0ec70a7d1..5dd7c9478 100644
      // TODO(Triang3l): Error checking.
  
      ID3D12CommandQueue* direct_queue = provider.GetDirectQueue();
-@@ -2840,6 +3010,9 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
+@@ -2840,6 +3010,12 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
        pix_capturing_ = false;
      }
      frame_open_ = false;
 +#if XE_WET_RUNTIME
 +    wet_ts_frame_ = false;
++    if (++wet_work_frames_ >= 600) {
++      WetLogWork();
++    }
 +#endif
      // Submission already closed now, so minus 1.
      closed_frame_submissions_[(frame_current_++) % kQueueFrames] =
          GetCurrentSubmission() - 1;
-@@ -2882,6 +3055,69 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
+@@ -2882,6 +3058,105 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
    return true;
  }
  
@@ -873,6 +876,42 @@ index 0ec70a7d1..5dd7c9478 100644
 +    WetTsMark(cat);
 +  }
 +  return prev;
++}
++
++void D3D12CommandProcessor::WetNoteWork(int kind, const std::string& what,
++                                        uint64_t amount) {
++  WetWork& work = wet_work_[kind][what];
++  ++work.count;
++  work.amount += amount;
++}
++
++void D3D12CommandProcessor::WetLogWork() {
++  static const char* const kKinds[] = {
++      "render target copies (EDRAM tiles; a 1280x720 32bpp target is 720)",
++      "resolves (pixels)", "texture loads"};
++  double frames = double(wet_work_frames_);
++  for (int kind = 0; kind < 3; ++kind) {
++    std::vector<std::pair<std::string, WetWork>> sorted(wet_work_[kind].begin(),
++                                                        wet_work_[kind].end());
++    uint64_t count = 0, amount = 0;
++    for (const auto& e : sorted) {
++      count += e.second.count;
++      amount += e.second.amount;
++    }
++    XELOGW("WET GPU work per frame, {}: {:.1f}, amount {:.0f}", kKinds[kind],
++           count / frames, amount / frames);
++    std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) {
++      return a.second.amount != b.second.amount
++                 ? a.second.amount > b.second.amount
++                 : a.second.count > b.second.count;
++    });
++    for (size_t i = 0; i < sorted.size() && i < 10; ++i) {
++      XELOGW("    {:.2f} x {}, amount {:.0f}", sorted[i].second.count / frames,
++             sorted[i].first, sorted[i].second.amount / frames);
++    }
++    wet_work_[kind].clear();
++  }
++  wet_work_frames_ = 0;
 +}
 +
 +void D3D12CommandProcessor::WetTsMark(uint8_t label) {
@@ -931,7 +970,7 @@ index 0ec70a7d1..5dd7c9478 100644
  bool D3D12CommandProcessor::CanEndSubmissionImmediately() const {
    return !submission_open_ || !pipeline_cache_->IsCreatingPipelines();
  }
-@@ -4359,6 +4595,304 @@ void D3D12CommandProcessor::WriteGammaRampSRV(
+@@ -4359,6 +4634,304 @@ void D3D12CommandProcessor::WriteGammaRampSRV(
    device->CreateShaderResourceView(gamma_ramp_buffer_.Get(), &desc, handle);
  }
  
@@ -1237,10 +1276,10 @@ index 0ec70a7d1..5dd7c9478 100644
  }  // namespace gpu
  }  // namespace xe
 diff --git a/src/xenia/gpu/d3d12/d3d12_command_processor.h b/src/xenia/gpu/d3d12/d3d12_command_processor.h
-index 88bdcb438..4994d5a68 100644
+index 88bdcb438..afd54543a 100644
 --- a/src/xenia/gpu/d3d12/d3d12_command_processor.h
 +++ b/src/xenia/gpu/d3d12/d3d12_command_processor.h
-@@ -74,6 +74,38 @@ class D3D12CommandProcessor : public CommandProcessor {
+@@ -74,6 +74,42 @@ class D3D12CommandProcessor : public CommandProcessor {
      return deferred_command_list_;
    }
  
@@ -1259,6 +1298,10 @@ index 88bdcb438..4994d5a68 100644
 +  };
 +  static constexpr uint32_t kWetGpuCatCount = 7;
 +  uint8_t WetGpuBegin(uint8_t cat);
++  // What the GPU-heavy emulation work is (logged every 600 frames):
++  // 0 = render target copies (amount in EDRAM tiles), 1 = resolves (pixels),
++  // 2 = texture loads.
++  void WetNoteWork(int kind, const std::string& what, uint64_t amount);
 +  class WetGpuScope {
 +   public:
 +    WetGpuScope(D3D12CommandProcessor& cp, uint8_t cat, bool enabled = true)
@@ -1279,7 +1322,7 @@ index 88bdcb438..4994d5a68 100644
    uint64_t GetCurrentSubmission() const {
      return completion_timeline_->GetUpcomingSubmission();
    }
-@@ -400,6 +432,22 @@ class D3D12CommandProcessor : public CommandProcessor {
+@@ -400,6 +436,29 @@ class D3D12CommandProcessor : public CommandProcessor {
    // Submission indices of frames that have already been submitted.
    uint64_t closed_frame_submissions_[kQueueFrames] = {};
  
@@ -1295,6 +1338,13 @@ index 88bdcb438..4994d5a68 100644
 +  uint32_t wet_ts_submission_first_ = 0;
 +  bool wet_ts_frame_ = false;
 +  uint8_t wet_gpu_cat_ = kWetGpuDraw;
++  struct WetWork {
++    uint64_t count = 0;
++    uint64_t amount = 0;
++  };
++  std::unordered_map<std::string, WetWork> wet_work_[3];
++  uint32_t wet_work_frames_ = 0;
++  void WetLogWork();
 +  void WetTsMark(uint8_t label);
 +  void WetTsReadSlot(uint32_t slot);
 +#endif
@@ -1302,7 +1352,7 @@ index 88bdcb438..4994d5a68 100644
    struct CommandAllocator {
      ID3D12CommandAllocator* command_allocator;
      uint64_t last_usage_submission;
-@@ -554,6 +602,31 @@ class D3D12CommandProcessor : public CommandProcessor {
+@@ -554,6 +613,31 @@ class D3D12CommandProcessor : public CommandProcessor {
    Microsoft::WRL::ComPtr<ID3D12Resource> fxaa_source_texture_;
    uint64_t fxaa_source_texture_submission_ = 0;
  
@@ -1335,7 +1385,7 @@ index 88bdcb438..4994d5a68 100644
    std::vector<D3D12_RESOURCE_BARRIER> barriers_;
  
 diff --git a/src/xenia/gpu/d3d12/d3d12_render_target_cache.cc b/src/xenia/gpu/d3d12/d3d12_render_target_cache.cc
-index 342d282cf..759d2f870 100644
+index 342d282cf..bb51e120e 100644
 --- a/src/xenia/gpu/d3d12/d3d12_render_target_cache.cc
 +++ b/src/xenia/gpu/d3d12/d3d12_render_target_cache.cc
 @@ -1298,6 +1298,10 @@ bool D3D12RenderTargetCache::Resolve(const Memory& memory,
@@ -1349,7 +1399,30 @@ index 342d282cf..759d2f870 100644
    written_address_out = 0;
    written_length_out = 0;
  
-@@ -4400,6 +4404,18 @@ void D3D12RenderTargetCache::PerformTransfersAndResolveClears(
+@@ -1316,6 +1320,22 @@ bool D3D12RenderTargetCache::Resolve(const Memory& memory,
+   if (!resolve_info.coordinate_info.width_div_8 || !resolve_info.height_div_8) {
+     return true;
+   }
++#if XE_WET_RUNTIME
++  {
++    uint32_t w = resolve_info.coordinate_info.width_div_8 * 8,
++             h = resolve_info.height_div_8 * 8;
++    command_processor_.WetNoteWork(
++        1,
++        fmt::format("{} {}x{}{}{}",
++                    resolve_info.copy_dest_extent_length
++                        ? (resolve_info.IsCopyingDepth() ? "copy depth"
++                                                         : "copy color")
++                        : "no copy",
++                    w, h, resolve_info.IsClearingDepth() ? " +clear depth" : "",
++                    resolve_info.IsClearingColor() ? " +clear color" : ""),
++        uint64_t(w) * h);
++  }
++#endif
+ 
+   DeferredCommandList& command_list =
+       command_processor_.GetDeferredCommandList();
+@@ -4400,6 +4420,50 @@ void D3D12RenderTargetCache::PerformTransfersAndResolveClears(
      const std::vector<Transfer>* render_target_transfers,
      const uint64_t* render_target_resolve_clear_values,
      const Transfer::Rectangle* resolve_clear_rectangle) {
@@ -1364,6 +1437,38 @@ index 342d282cf..759d2f870 100644
 +  D3D12CommandProcessor::WetGpuScope wet_gpu_scope(
 +      command_processor_, D3D12CommandProcessor::kWetGpuTransfer,
 +      wet_gpu_work);
++  if (wet_gpu_work && render_target_transfers) {
++    for (uint32_t i = 0; i < render_target_count; ++i) {
++      if (!render_targets[i]) {
++        continue;
++      }
++      RenderTargetKey dest_key = render_targets[i]->key();
++      for (const Transfer& transfer : render_target_transfers[i]) {
++        RenderTargetKey source_key = transfer.source->key();
++        command_processor_.WetNoteWork(
++            0,
++            fmt::format("{} {}x pitch {} base {} -> {} {}x pitch {} base {}{}",
++                        source_key.GetFormatName(),
++                        1u << uint32_t(source_key.msaa_samples),
++                        uint32_t(source_key.pitch_tiles_at_32bpp),
++                        uint32_t(source_key.base_tiles),
++                        dest_key.GetFormatName(),
++                        1u << uint32_t(dest_key.msaa_samples),
++                        uint32_t(dest_key.pitch_tiles_at_32bpp),
++                        uint32_t(dest_key.base_tiles),
++                        transfer.host_depth_source ? " (+host depth)" : ""),
++            transfer.end_tiles - transfer.start_tiles);
++      }
++    }
++  }
++  if (render_target_resolve_clear_values && resolve_clear_rectangle) {
++    command_processor_.WetNoteWork(
++        0,
++        fmt::format("resolve clear {}x{}",
++                    uint32_t(resolve_clear_rectangle->width_pixels),
++                    uint32_t(resolve_clear_rectangle->height_pixels)),
++        0);
++  }
 +#endif
    assert_true(GetPath() == Path::kHostRenderTargets);
  
@@ -1385,7 +1490,7 @@ index 901d45925..0bc8c33c7 100644
      return true;
    }
 diff --git a/src/xenia/gpu/d3d12/d3d12_texture_cache.cc b/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
-index b96c200b9..18f10b380 100644
+index b96c200b9..6326f80e6 100644
 --- a/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
 +++ b/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
 @@ -1416,6 +1416,68 @@ ID3D12Resource* D3D12TextureCache::RequestSwapTexture(
@@ -1468,6 +1573,24 @@ index b96c200b9..18f10b380 100644
    D3D12Texture& d3d12_texture = static_cast<D3D12Texture&>(texture);
    TextureKey texture_key = d3d12_texture.key();
  
+@@ -1610,6 +1676,17 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+     return false;
+   }
+   bool texture_resolution_scaled = texture_key.scaled_resolve;
++#if XE_WET_RUNTIME
++  command_processor_.WetNoteWork(
++      2,
++      fmt::format("{} {}x{}x{} at page {:X}{}{}",
++                  FormatInfo::Get(texture_key.format)->name,
++                  texture_key.GetWidth(), texture_key.GetHeight(),
++                  texture_key.GetDepthOrArraySize(), uint32_t(texture_key.base_page),
++                  texture_resolution_scaled ? " (resolved, scaled)" : "",
++                  load_mips && uint32_t(texture_key.mip_max_level) ? " +mips" : ""),
++      1);
++#endif
+   ID3D12PipelineState* pipeline =
+       texture_resolution_scaled ? load_pipelines_scaled_[load_shader].Get()
+                                 : load_pipelines_[load_shader].Get();
 diff --git a/src/xenia/gpu/d3d12/deferred_command_list.cc b/src/xenia/gpu/d3d12/deferred_command_list.cc
 index adaefcd4c..1d48aa7f4 100644
 --- a/src/xenia/gpu/d3d12/deferred_command_list.cc
