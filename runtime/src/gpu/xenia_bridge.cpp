@@ -746,7 +746,7 @@ namespace
         {
             if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingStretchProp))
                 return false;
-            ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 11.5f);
+            ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 15.0f);
             ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch);
             return true;
         }
@@ -1038,7 +1038,8 @@ namespace
             float em = ImGui::GetFontSize();
             ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Appearing,
                                     ImVec2(0.5f, 0.5f));
-            ImGui::SetNextWindowSizeConstraints(ImVec2(em * 34, 0), ImVec2(em * 34, io.DisplaySize.y * 0.9f));
+            float width = std::min(em * 44, io.DisplaySize.x * 0.95f);
+            ImGui::SetNextWindowSizeConstraints(ImVec2(width, 0), ImVec2(width, io.DisplaySize.y * 0.9f));
             bool open = true;
             if (!ImGui::Begin("WET Recompiled " WET_VERSION "###settings", &open,
                               ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize))
