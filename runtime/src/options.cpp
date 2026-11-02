@@ -124,7 +124,7 @@ namespace wet::options
             std::fprintf(f, "hide_borders = %d\n", s_hideBorders.load());
             std::fprintf(f, "# vsync: 1 = never tear (frames wait for the screen's refresh); 0 = present at once (best with G-Sync / FreeSync); restart\n");
             std::fprintf(f, "vsync = %d\n", s_vsync.load());
-            std::fprintf(f, "# button_prompts: 0 = automatic (PlayStation symbols with a PlayStation controller at startup), 1 = Xbox, 2 = PlayStation\n");
+            std::fprintf(f, "# button_prompts: 0 = automatic (keyboard / mouse with no controller at startup, PlayStation symbols with a PlayStation controller, else Xbox), 1 = Xbox, 2 = PlayStation, 3 = keyboard / mouse\n");
             std::fprintf(f, "button_prompts = %d\n", s_buttonPrompts.load());
             std::fprintf(f, "# mouse_aim: 1 = the mouse turns the camera / aims (right stick) while the game window is active\n");
             std::fprintf(f, "mouse_aim = %d\n", s_mouseAim.load());
@@ -241,7 +241,7 @@ namespace wet::options
                 else if (!std::strcmp(key, "widescreen_hud")) s_widescreenHud = value != 0;
                 else if (!std::strcmp(key, "hide_borders")) s_hideBorders = value != 0;
                 else if (!std::strcmp(key, "vsync")) s_vsync = value != 0;
-                else if (!std::strcmp(key, "button_prompts")) s_buttonPrompts = Clamp(value, 0, 2);
+                else if (!std::strcmp(key, "button_prompts")) s_buttonPrompts = Clamp(value, 0, 3);
                 else if (!std::strcmp(key, "vibration")) s_vibration = value != 0;
                 else if (!std::strcmp(key, "gpu_wait")) s_gpuWait = value != 0;
                 else if (!std::strcmp(key, "adaptive_watch")) s_adaptiveWatch = value != 0;
@@ -373,7 +373,7 @@ namespace wet::options
     bool HideBorders() { return s_hideBorders.load(std::memory_order_relaxed) != 0; }
     bool Vsync() { return s_vsync.load(std::memory_order_relaxed) != 0; }
     int ButtonPrompts() { return s_buttonPrompts.load(std::memory_order_relaxed); }
-    void SetButtonPrompts(int v) { s_buttonPrompts = Clamp(v, 0, 2); Save(); }
+    void SetButtonPrompts(int v) { s_buttonPrompts = Clamp(v, 0, 3); Save(); }
     void SetVsync(bool v) { s_vsync = v; Save(); }
     void SetHideBorders(bool v) { s_hideBorders = v; Save(); }
     bool MotionBlur() { return s_motionBlur.load(std::memory_order_relaxed) != 0; }

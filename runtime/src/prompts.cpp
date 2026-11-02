@@ -15,9 +15,12 @@
 //
 // The stream (sub_82B9C1A8): +16 the archive entry { +0 name, +8 data, +12 size }.
 //
-// Setting button_prompts: 0 = automatic (PlayStation art when a PlayStation
-// controller is connected as the images load), 1 = Xbox, 2 = PlayStation.
+// Setting button_prompts: 0 = automatic (keyboard / mouse art with no
+// controller connected as the images load, PlayStation art with a PlayStation
+// controller, Xbox otherwise), 1 = Xbox, 2 = PlayStation, 3 = keyboard / mouse
+// (each button shows the key or mouse button it is bound to).
 #include "input.h"
+#include "keybinds.h"
 #include "log.h"
 #include "memory.h"
 #include "options.h"
@@ -31,14 +34,107 @@
 
 namespace
 {
-    bool WantPlayStation()
+    enum class Art { Xbox, PlayStation, Keyboard };
+
+    // Decided as each texture loads (so in practice at startup).
+    Art WantedArt()
     {
         switch (wet::options::ButtonPrompts())
         {
-        case 1: return false;
-        case 2: return true;
-        default: return wet::PlayStationControllerConnected();
+        case 1: return Art::Xbox;
+        case 2: return Art::PlayStation;
+        case 3: return Art::Keyboard;
+        default:
+        {
+            bool any = false;
+            for (auto& name : wet::ConnectedControllers())
+                any |= !name.empty();
+            if (!any)
+                return Art::Keyboard;
+            return wet::PlayStationControllerConnected() ? Art::PlayStation : Art::Xbox;
         }
+        }
+    }
+
+    // The first key bound to a keybinds action ("" if none).
+    std::string FirstKey(const char* action)
+    {
+        for (int i = 0; i < wet::keybinds::kActionCount; i++)
+        {
+            if (std::strcmp(action, wet::keybinds::kActions[i].id))
+                continue;
+            std::string keys = wet::options::KeyBinding(i);
+            std::string first = keys.substr(0, keys.find(','));
+            size_t a = first.find_first_not_of(" \t"), z = first.find_last_not_of(" \t");
+            first = a == std::string::npos ? std::string() : first.substr(a, z - a + 1);
+            return first == "NONE" ? std::string() : first;
+        }
+        return {};
+    }
+
+    // What a pad button is bound to on the keyboard / mouse: a mouse button
+    // (with mouse aim on) first, otherwise the first key. False if neither.
+    bool KeyboardLabel(wet::prompt_art::Symbol sym, wet::prompt_art::Label& label)
+    {
+        using wet::prompt_art::Symbol;
+        const char* pad = nullptr;
+        switch (sym)
+        {
+        case Symbol::Cross: pad = "A"; break;
+        case Symbol::Circle: pad = "B"; break;
+        case Symbol::Square: pad = "X"; break;
+        case Symbol::Triangle: pad = "Y"; break;
+        case Symbol::L1: pad = "LB"; break;
+        case Symbol::R1: pad = "RB"; break;
+        case Symbol::L2: pad = "LT"; break;
+        case Symbol::R2: pad = "RT"; break;
+        case Symbol::Start: pad = "START"; break;
+        case Symbol::LPress: pad = "LTHUMB"; break;
+        case Symbol::RPress: pad = "RTHUMB"; break;
+        case Symbol::Up: pad = "DPAD_UP"; break;
+        case Symbol::Down: pad = "DPAD_DOWN"; break;
+        case Symbol::Left: pad = "DPAD_LEFT"; break;
+        case Symbol::Right: pad = "DPAD_RIGHT"; break;
+        case Symbol::LStick:   // moving: the movement keys
+            label.kind = wet::prompt_art::Label::Kind::Text;
+            label.text = wet::prompt_art::ShortKeyName(FirstKey("move_up")) + wet::prompt_art::ShortKeyName(FirstKey("move_left")) +
+                         wet::prompt_art::ShortKeyName(FirstKey("move_down")) + wet::prompt_art::ShortKeyName(FirstKey("move_right"));
+            if (label.text.size() > 4)
+                label.text = "MOVE";
+            return true;
+        case Symbol::RStick:   // looking: the mouse
+            if (!wet::options::MouseAim())
+                return false;
+            label.kind = wet::prompt_art::Label::Kind::Mouse;
+            label.mouseButton = -1;
+            return true;
+        default: return false;
+        }
+        if (wet::options::MouseAim())
+            for (int b = 0; b < 5; b++)
+                if (wet::options::MouseBinding(b) == pad)
+                {
+                    if (b < 3)
+                    {
+                        label.kind = wet::prompt_art::Label::Kind::Mouse;
+                        label.mouseButton = b;
+                    }
+                    else
+                    {
+                        label.kind = wet::prompt_art::Label::Kind::Text;
+                        label.text = b == 3 ? "M4" : "M5";
+                    }
+                    return true;
+                }
+        std::string id = pad;
+        for (auto& c : id)
+            c = char(std::tolower(static_cast<unsigned char>(c)));
+        std::string first = FirstKey(id.c_str());
+        if (first.empty())
+            return false;
+        label.kind = wet::prompt_art::Label::Kind::Text;
+        label.text = wet::prompt_art::ShortKeyName(first);
+        return true;
     }
 
     std::mutex s_lock;
@@ -82,21 +178,30 @@ namespace
         auto it = s_seen.find(data);
         if (it != s_seen.end() && it->second == Hash(dds, 128))
             return;
-        if (!WantPlayStation())
+        Art art = WantedArt();
+        wet::prompt_art::Label label;
+        bool orbUnused, flattenUnused;
+        wet::prompt_art::Symbol sym = wet::prompt_art::ForName(name, orbUnused, flattenUnused);
+        if (art == Art::Keyboard && !KeyboardLabel(sym, label))
+            art = Art::Xbox;   // not bound to anything: keep the pad button
+        if (art == Art::PlayStation && sym > wet::prompt_art::Symbol::R2)
+            art = Art::Xbox;   // start, stick and d-pad icons have no PlayStation version
+        if (art == Art::Xbox)
         {
             s_seen[data] = Hash(dds, 128);
             return;
         }
         if (data >= 0xA0000000u)
             wet::PrepareHostWrite(data, size);
-        if (!wet::prompt_art::RedrawDds(name, dds, size))
+        if (!wet::prompt_art::RedrawDds(name, dds, size, art == Art::Keyboard ? &label : nullptr))
         {
-            wet::Log("Prompts: \"%s\" isn't in a format the PlayStation art handles", name.c_str());
+            wet::Log("Prompts: \"%s\" isn't in a format the button art handles", name.c_str());
             return;
         }
         s_seen[data] = Hash(dds, 128);
         if (++s_redrawn <= 3 || s_redrawn % 20 == 0)
-            wet::Log("Prompts: \"%s\" redrawn with PlayStation art (%d so far)", name.c_str(), s_redrawn);
+            wet::Log("Prompts: \"%s\" redrawn with %s art (%d so far)", name.c_str(),
+                     art == Art::Keyboard ? "keyboard / mouse" : "PlayStation", s_redrawn);
     }
 }
 

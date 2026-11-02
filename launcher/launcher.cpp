@@ -1024,8 +1024,8 @@ namespace
         Slider(kSensitivity, kSensitivityValue, 136, 228, 150, 1, 100, ini.Get("mouse_sensitivity", 50), L"");
         Check(kVibration, L"Controller vibration", 22, 256, ini.Get("vibration", 1) != 0, 180);
         Label(L"Prompts", 22, 284, 56);
-        Combo(kPrompts, 80, 282, 128, { L"Automatic", L"Xbox", L"PlayStation" },
-              std::min(std::max(ini.Get("button_prompts", 0), 0), 2));
+        Combo(kPrompts, 80, 282, 128, { L"Automatic", L"Xbox", L"PlayStation", L"Keyboard / mouse" },
+              std::min(std::max(ini.Get("button_prompts", 0), 0), 3));
         Make(L"BUTTON", L"Keyboard...", BS_PUSHBUTTON | WS_TABSTOP, 216, 278, 110, 26, kKeyboard);
 
         // Other

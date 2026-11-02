@@ -727,10 +727,11 @@ namespace
                 ImGui::SameLine();
                 Radio("Automatic", &promptsPick, 0); ImGui::SameLine();
                 Radio("Xbox", &promptsPick, 1); ImGui::SameLine();
-                Radio("PlayStation", &promptsPick, 2);
+                Radio("PlayStation", &promptsPick, 2); ImGui::SameLine();
+                Radio("Keyboard / mouse", &promptsPick, 3);
                 if (promptsPick != prompts)
                     wet::options::SetButtonPrompts(promptsPick);
-                ImGui::TextDisabled("Automatic: PlayStation symbols when a PlayStation controller is connected at startup. Applies after a restart.");
+                ImGui::TextDisabled("Automatic: keyboard / mouse with no controller at startup, PlayStation symbols with a PlayStation controller. Applies after a restart.");
             }
 
             Section("Mouse");
