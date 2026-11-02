@@ -42,6 +42,25 @@ namespace wet::keybinds
     };
     inline constexpr int kActionCount = int(sizeof(kActions) / sizeof(kActions[0]));
 
+    // Mouse buttons (wet.ini mouse_left ... mouse_forward = a controller button).
+    struct MouseButton { const char* id; const char* label; const char* fallback; };
+    inline constexpr MouseButton kMouseButtons[5] = {
+        { "mouse_left", "Left button", "RT" },       { "mouse_right", "Right button", "LT" },
+        { "mouse_middle", "Middle button", "RTHUMB" }, { "mouse_back", "Back side button", "LB" },
+        { "mouse_forward", "Forward side button", "RB" },
+    };
+    // What a mouse button can press, with how it's shown.
+    struct PadChoice { const char* name; const char* label; };
+    inline constexpr PadChoice kPadChoices[] = {
+        { "NONE", "Nothing" }, { "RT", "RT (right trigger)" }, { "LT", "LT (left trigger)" },
+        { "A", "A" }, { "B", "B" }, { "X", "X" }, { "Y", "Y" },
+        { "LB", "LB (left bumper)" }, { "RB", "RB (right bumper)" },
+        { "LTHUMB", "L3 (left stick click)" }, { "RTHUMB", "R3 (right stick click)" },
+        { "START", "Start" }, { "BACK", "Back" },
+        { "UP", "D-pad up" }, { "DOWN", "D-pad down" }, { "LEFT", "D-pad left" }, { "RIGHT", "D-pad right" },
+    };
+    inline constexpr int kPadChoiceCount = int(sizeof(kPadChoices) / sizeof(kPadChoices[0]));
+
     struct Key { const char* name; int vk; };
 
     // F1 and F6-F11 are the runtime's own keys and can't be bound.

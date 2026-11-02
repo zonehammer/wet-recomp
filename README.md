@@ -125,7 +125,7 @@ CMake and Ninja).
 | Stick clicks | L3 / R3 | Left Shift / V |
 
 Every keyboard key can be rebound: in the F1 overlay (Keyboard bindings: click an
-action, press a key), with the launcher's **Keyboard...** button, or in `wet.ini`
+action, press a key), with the launcher's **Key / mouse...** button (mouse buttons too), or in `wet.ini`
 (`key_a = SPACE`, two keys as `key_lb = Q, F`).
 
 | Key | |

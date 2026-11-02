@@ -373,6 +373,13 @@ namespace wet::options
     }
     int KeyBindingsVersion() { return s_keyVersion.load(std::memory_order_relaxed); }
     std::string MouseBinding(int button) { return button >= 0 && button < 5 ? s_mouseBind[button] : std::string(); }
+    void SetMouseBinding(int button, const std::string& pad)
+    {
+        if (button < 0 || button >= 5)
+            return;
+        s_mouseBind[button] = pad.empty() ? "NONE" : pad;
+        Save();
+    }
     void SetFilmGrain(int v) { s_filmGrain = Clamp(v, 0, 100); Save(); }
     int Fov() { return s_fov.load(std::memory_order_relaxed); }
     bool Widescreen() { return s_widescreen.load(std::memory_order_relaxed) != 0; }

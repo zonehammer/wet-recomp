@@ -120,6 +120,7 @@ namespace
         kMenuOpenSaves = 500, kMenuBackup, kMenuImportZip, kMenuImportFolder, kMenuClearShaders, kMenuFreeSpace,
         kKeyFirst = 300,                       // one combo per keybinds action
         kKeysOk = kKeyFirst + wet::keybinds::kActionCount, kKeysReset, kKeysCancel,
+        kMouseFirst = 400,                     // one combo per mouse button
     };
 
     HWND s_window = nullptr, s_keysWindow = nullptr;
@@ -195,6 +196,27 @@ namespace
         return out.empty() ? "NONE" : out;
     }
 
+    // Mouse button combos: the controller button each one presses.
+    void SelectMouse(int button, const std::string& value)
+    {
+        HWND c = KeyItem(kMouseFirst + button);
+        SendMessageW(c, CB_RESETCONTENT, 0, 0);
+        int sel = 0;
+        for (int i = 0; i < wet::keybinds::kPadChoiceCount; i++)
+        {
+            SendMessageW(c, CB_ADDSTRING, 0, LPARAM(Wide(wet::keybinds::kPadChoices[i].label).c_str()));
+            if (value == wet::keybinds::kPadChoices[i].name)
+                sel = i;
+        }
+        SendMessageW(c, CB_SETCURSEL, WPARAM(sel), 0);
+    }
+
+    std::string SelectedMouse(int button)
+    {
+        int sel = int(SendMessageW(KeyItem(kMouseFirst + button), CB_GETCURSEL, 0, 0));
+        return sel >= 0 && sel < wet::keybinds::kPadChoiceCount ? wet::keybinds::kPadChoices[sel].name : "NONE";
+    }
+
     void CloseKeys()
     {
         if (!s_keysWindow)
@@ -215,11 +237,15 @@ namespace
             case kKeysOk:
                 for (int i = 0; i < wet::keybinds::kActionCount; i++)
                     s_ini.SetString(std::string("key_") + wet::keybinds::kActions[i].id, SelectedKey(i));
+                for (int b = 0; b < 5; b++)
+                    s_ini.SetString(wet::keybinds::kMouseButtons[b].id, SelectedMouse(b));
                 CloseKeys();
                 return 0;
             case kKeysReset:
                 for (int i = 0; i < wet::keybinds::kActionCount; i++)
                     SelectKey(i, wet::keybinds::kActions[i].fallback);
+                for (int b = 0; b < 5; b++)
+                    SelectMouse(b, wet::keybinds::kMouseButtons[b].fallback);
                 return 0;
             case kKeysCancel:
             case IDCANCEL:
@@ -242,13 +268,14 @@ namespace
         if (s_keysWindow)
             return;
         constexpr int kRows = (wet::keybinds::kActionCount + 1) / 2;
-        RECT rc{ 0, 0, S(560), S(kRows * 30 + 64) };
+        constexpr int kMouseRows = 3;   // five mouse buttons, two per row, under a heading
+        RECT rc{ 0, 0, S(560), S(kRows * 30 + 64 + 28 + kMouseRows * 30) };
         DWORD style = WS_POPUP | WS_CAPTION | WS_SYSMENU;
         AdjustWindowRect(&rc, style, FALSE);
         RECT owner;
         GetWindowRect(s_window, &owner);
         int w = rc.right - rc.left, h = rc.bottom - rc.top;
-        s_keysWindow = CreateWindowExW(WS_EX_DLGMODALFRAME, L"WetLauncherKeys", L"Keyboard bindings", style,
+        s_keysWindow = CreateWindowExW(WS_EX_DLGMODALFRAME, L"WetLauncherKeys", L"Keyboard and mouse bindings", style,
                                        (owner.left + owner.right - w) / 2, (owner.top + owner.bottom - h) / 2, w, h,
                                        s_window, nullptr, GetModuleHandleW(nullptr), nullptr);
         s_parent = s_keysWindow;
@@ -260,7 +287,16 @@ namespace
             std::string key = std::string("key_") + wet::keybinds::kActions[i].id;
             SelectKey(i, s_ini.GetString(key, wet::keybinds::kActions[i].fallback));
         }
-        int by = kRows * 30 + 22;
+        int my = kRows * 30 + 18;
+        Make(L"STATIC", L"Mouse buttons (each presses a controller button)", SS_LEFT, 12, my, 400, 18, 0);
+        for (int b = 0; b < 5; b++)
+        {
+            int x = (b % 2) * 280 + 12, y = my + 24 + (b / 2) * 30;
+            Make(L"STATIC", Wide(wet::keybinds::kMouseButtons[b].label).c_str(), SS_LEFT, x, y + 3, 120, 18, 0);
+            Make(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, x + 124, y, 136, 300, kMouseFirst + b);
+            SelectMouse(b, s_ini.GetString(wet::keybinds::kMouseButtons[b].id, wet::keybinds::kMouseButtons[b].fallback));
+        }
+        int by = my + 24 + kMouseRows * 30 + 4;
         Make(L"BUTTON", L"Reset to defaults", BS_PUSHBUTTON | WS_TABSTOP, 12, by, 140, 28, kKeysReset);
         Make(L"BUTTON", L"OK", BS_DEFPUSHBUTTON | WS_TABSTOP, 338, by, 100, 28, kKeysOk);
         Make(L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, 448, by, 100, 28, kKeysCancel);
@@ -1370,7 +1406,7 @@ namespace
         Label(L"Prompts", 22, 284, 56);
         Combo(kPrompts, 80, 282, 128, { L"Automatic", L"Xbox", L"PlayStation", L"Keyboard / mouse" },
               std::min(std::max(ini.Get("button_prompts", 0), 0), 3));
-        Make(L"BUTTON", L"Keyboard...", BS_PUSHBUTTON | WS_TABSTOP, 216, 278, 110, 26, kKeyboard);
+        Make(L"BUTTON", L"Key / mouse...", BS_PUSHBUTTON | WS_TABSTOP, 216, 278, 110, 26, kKeyboard);
 
         // Other
         Group(L"Other", 350, 180, 330, 134);

@@ -73,6 +73,8 @@ namespace wet::options
     bool MouseNative();
     void SetMouseNative(bool v);
     std::string MouseBinding(int button);
+    // button 0-4: left, right, middle, back, forward; pad: A B X Y LB RB LT RT LTHUMB RTHUMB START BACK UP DOWN LEFT RIGHT or NONE.
+    void SetMouseBinding(int button, const std::string& pad);
     // Keyboard bindings (keybinds.h actions): "KEY" or "KEY, KEY" or "NONE".
     std::string KeyBinding(int action);
     void SetKeyBinding(int action, const std::string& keys);

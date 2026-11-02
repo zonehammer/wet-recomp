@@ -581,7 +581,7 @@ namespace
             namespace kb = wet::keybinds;
             static int capture = -1;
             static bool held[kb::kKeyCount];
-            if (!ImGui::CollapsingHeader("Keyboard bindings"))
+            if (!ImGui::CollapsingHeader("Keyboard and mouse bindings"))
             {
                 capture = -1;
                 return;
@@ -631,10 +631,42 @@ namespace
                 }
                 ImGui::EndTable();
             }
-            if (ImGui::Button("Reset keyboard to defaults"))
+            // Mouse buttons: each presses a controller button.
+            ImGui::Spacing();
+            ImGui::TextDisabled("Mouse buttons");
+            if (ImGui::BeginTable("mouse", 4, ImGuiTableFlags_SizingFixedFit))
+            {
+                for (int b = 0; b < 5; b++)
+                {
+                    if (b % 2 == 0)
+                        ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::AlignTextToFramePadding();
+                    ImGui::TextUnformatted(kb::kMouseButtons[b].label);
+                    ImGui::TableNextColumn();
+                    std::string bound = wet::options::MouseBinding(b);
+                    int pick = 0;
+                    for (int c = 0; c < kb::kPadChoiceCount; c++)
+                        if (bound == kb::kPadChoices[c].name)
+                            pick = c;
+                    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 9);
+                    std::string id = "##mouse" + std::to_string(b);
+                    if (ImGui::BeginCombo(id.c_str(), kb::kPadChoices[pick].label))
+                    {
+                        for (int c = 0; c < kb::kPadChoiceCount; c++)
+                            if (ImGui::Selectable(kb::kPadChoices[c].label, c == pick))
+                                wet::options::SetMouseBinding(b, kb::kPadChoices[c].name);
+                        ImGui::EndCombo();
+                    }
+                }
+                ImGui::EndTable();
+            }
+            if (ImGui::Button("Reset keyboard and mouse to defaults"))
             {
                 for (int i = 0; i < kb::kActionCount; i++)
                     wet::options::SetKeyBinding(i, kb::kActions[i].fallback);
+                for (int b = 0; b < 5; b++)
+                    wet::options::SetMouseBinding(b, kb::kMouseButtons[b].fallback);
                 capture = -1;
             }
             ImGui::SameLine();
