@@ -19,10 +19,18 @@ nothing derived from the game is ever committed.
   FXAA, and a **film grain** slider.
 - **Controllers**: Xbox, PlayStation 4/5 (USB or Bluetooth), Switch Pro and others, up
   to four, with rumble.
-- **Keyboard and mouse**: WASD movement and mouse aim.
+- **Keyboard and mouse**: WASD movement and mouse aim, with on-screen button prompts
+  that show your keys and mouse buttons (or Xbox / PlayStation symbols with a controller).
+- **Five languages** (English, German, French, Spanish, Italian; text and speech), chosen
+  automatically from Windows or in the settings.
+- **Options the console didn't have**: field of view, widescreen / ultrawide, and
+  motion blur, depth of field and camera shake on or off.
 - **Achievements** with on-screen pop-ups and a list in the overlay.
-- **Shader cache**, so shader compilation stutter only happens once.
+- **Shader cache**, built in the background so the game starts straight away; shader
+  compilation stutter only happens once.
+- **Settings picked for your graphics card** on the first start.
 - An in-game settings overlay (**F1**) and a **launcher** with settings and a Play button.
+- **Quit to desktop** from the pause menu (hold Back / Backspace) or the F1 overlay.
 
 ## Building (Windows 10/11, 64-bit)
 
@@ -113,17 +121,22 @@ action, press a key), with the launcher's **Keyboard...** button, or in `wet.ini
 
 | Key | |
 |---|---|
-| F1 | Settings overlay (frame rate, resolution, scaling, film grain, mouse, controllers, achievements); frees the mouse |
+| F1 | Settings overlay (General, Display, Graphics, Performance, Controls and Achievements tabs; Quit to desktop); frees the mouse |
 | F6 | Cycle the frame rate |
 | F11 | Fullscreen |
 | F8 | Save the next 48 frames to `frames\` (bug reports) |
 | F10 | Profiler on/off (`profile.txt`, bug reports) |
 
+In the pause menu, **hold Back (Backspace) for 1.5 seconds to quit to desktop**.
+
 Settings live in `wet.ini` next to the exe; the mouse buttons can be rebound there
 (`mouse_left = RT` ...) as well as the keys. Widescreen / ultrawide (`widescreen = 1`, also in F1 and the launcher) fills 21:9 and
 32:9 screens with a wider view and keeps the HUD 16:9 in the middle. The field of view is `fov` (horizontal degrees at 16:9, 90 = original; also in F1 and
 the launcher). Direct mouse aim (`mouse_direct`, on by default) turns the camera
-by how far the mouse moves, with no stick speed limit. Saves, `achievements.ini` and the shader cache are in
+by how far the mouse moves, with no stick speed limit. `language` picks the game's
+language (0 = the Windows language, 1 English, 3 German, 4 French, 5 Spanish, 6 Italian)
+and `button_prompts` the prompt symbols (0 automatic, 1 Xbox, 2 PlayStation, 3 keyboard /
+mouse). Saves, `achievements.ini` and the shader cache are in
 `game\hdd`. `WetRecomp.exe --console` shows the log live; `wet.log` always has it.
 
 ## How it works

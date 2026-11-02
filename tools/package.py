@@ -83,23 +83,28 @@ Triangle = Y, Options = Start, Share/Create or touchpad click = Back.
 Keyboard and mouse: WASD move, the mouse turns the camera and aims, left click RT,
 right click LT, Space A, Esc B, X / Y, Q / E bumpers, Z / C triggers, Left Shift / V
 stick clicks, Enter Start, Backspace Back, arrow keys D-pad. The cursor is hidden
-while you play; F1 or Alt+Tab frees it.
+while you play; F1 or Alt+Tab frees it. With no controller connected, the game's
+button prompts show your keys and mouse buttons (Button prompts in the launcher or F1).
+
+Quit to desktop: in the pause menu, hold Back (Backspace) for 1.5 seconds, or use
+the Quit to desktop button in the F1 overlay.
 
 Rebind any key in the F1 overlay (Keyboard bindings: click an action, then press a
 key), with the launcher's Keyboard... button, or in wet.ini (key_a = SPACE).
 
 Keys
 ----
-F1   settings overlay (frame rate, resolution, scaling, field of view, film grain,
-     mouse, keyboard, controllers, achievements)
+F1   settings overlay (language, display, graphics, performance, controls,
+     achievements; Quit to desktop)
 F6   cycle the frame rate (30 / 60 / 120 / 144 / 165 / 240 / monitor)
 F11  fullscreen
 F8   save the next 48 frames to frames\\ (for bug reports)
 F10  start / stop the profiler (profile.txt, for bug reports)
 
 There's no console window; to watch the log while playing, start it with
-WetRecomp.exe --console. Settings are saved in wet.ini next to WetRecomp.exe. Some (resolution, shader
-cache) apply at the next start.
+WetRecomp.exe --console. Settings are saved in wet.ini next to WetRecomp.exe. Some (resolution,
+language, button prompts) apply at the next start. The first start picks settings to
+suit your graphics card.
 
 Saves, achievements, shader cache
 ---------------------------------

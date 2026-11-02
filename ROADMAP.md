@@ -24,6 +24,9 @@ Make a full playthrough reliable before adding more features.
 | ~~Direct mouse aim~~ (done: `mouse_direct`, uncapped stick values written into the game's pad object) | True 1:1 aim, no stick speed cap or acceleration | M–L |
 | ~~Keyboard rebinding~~ (done: wet.ini `key_*`, the F1 overlay and the launcher) | Everything except the mouse buttons is fixed today | S |
 | ~~PlayStation button prompts~~ (done: `button_prompts`; the game's button textures redrawn with PlayStation symbols as they load) | Matches the controller in hand | L |
+| ~~Keyboard / mouse button prompts~~ (done: the prompts show the bound key or mouse button; automatic with no controller) | Prompts match the keys you press | M |
+| ~~Language option~~ (done: `language`, the disc's five languages, text and speech) | Play in your own language | S |
+| ~~Settings overlay redesign and quit to desktop~~ (done: tabbed F1 overlay; hold Back in the pause menu or the F1 button) | Less clutter; no Alt+F4 needed | S |
 
 ## 0.4 — Performance and visuals
 
