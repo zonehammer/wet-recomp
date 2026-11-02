@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/banner.jpg" alt="WET Recompiled - native PC port" width="100%"></p>
+
 # WET Recompiled
 
 A native Windows port of **WET** (Xbox 360, 2009) made by **static recompilation**: the
