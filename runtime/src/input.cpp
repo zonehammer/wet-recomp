@@ -346,6 +346,8 @@ namespace wet
             std::chrono::steady_clock::time_point last = std::chrono::steady_clock::now();
             double stickX = 0, stickY = 0;
             double directX = 0, directY = 0;   // pixels not yet taken by the pad hook (direct aim)
+            double lookX = 0, lookY = 0;       // pixels not yet taken by the camera hook (mouselook.cpp)
+            std::chrono::steady_clock::time_point lastLook{};   // the camera hook's last call
         };
         MouseState s_mouse;
         std::mutex s_mouseLock;
@@ -369,6 +371,15 @@ namespace wet
             s_mouse.captured = false;
             s_mouse.stickX = s_mouse.stickY = 0;
             s_mouse.directX = s_mouse.directY = 0;
+            s_mouse.lookX = s_mouse.lookY = 0;
+        }
+
+        // The third-person camera takes the mouse itself (mouselook.cpp) while its
+        // hook keeps asking; elsewhere the mouse goes to the right stick.
+        bool NativeLookActive()
+        {
+            return options::MouseDirect() &&
+                   std::chrono::steady_clock::now() - s_mouse.lastLook < std::chrono::milliseconds(300);
         }
 
         void AddMouseButtons(uint16_t& buttons, uint8_t& lt, uint8_t& rt)
@@ -423,6 +434,17 @@ namespace wet
             }
             SetCursorPos(center.x, center.y);
             s_mouse.center = center;
+            if (NativeLookActive())
+            {
+                s_mouse.lookX += s_mouse.directX;
+                s_mouse.lookY += s_mouse.directY;
+                s_mouse.directX = s_mouse.directY = 0;
+                s_mouse.accX = s_mouse.accY = 0;
+                s_mouse.stickX = s_mouse.stickY = 0;
+                AddMouseButtons(buttons, lt, rt);
+                return true;
+            }
+            s_mouse.lookX = s_mouse.lookY = 0;
             if (options::MouseDirect())
             {
                 // The pad hook takes the movement; the stick is left to the controller.
@@ -829,6 +851,23 @@ namespace wet
         dx = s_mouse.directX;
         dy = s_mouse.directY;
         s_mouse.directX = s_mouse.directY = 0;
+        return true;
+#else
+        return false;
+#endif
+    }
+
+    bool TakeLookDelta(double& dx, double& dy)
+    {
+        dx = dy = 0;
+#ifdef _WIN32
+        std::lock_guard lock(s_mouseLock);
+        s_mouse.lastLook = std::chrono::steady_clock::now();
+        if (!s_mouse.captured || !options::MouseDirect())
+            return false;
+        dx = s_mouse.lookX;
+        dy = s_mouse.lookY;
+        s_mouse.lookX = s_mouse.lookY = 0;
         return true;
 #else
         return false;

@@ -105,3 +105,26 @@ name = "WetFilmShakeHook"
 address = 0x82751660
 registers = ["r10"]
 after_instruction = true
+
+# Native mouse look into the third-person camera (wetcamera::Cam3rd), see
+# runtime/src/mouselook.cpp. Hook points from nikolaygorb/WetRecomp (MIT).
+# sub_829B8078 (camera input gather, every camera update), mr r4,r30 before the
+# right stick is read: takes the mouse turn. r29 = camera.
+[[midasm_hook]]
+name = "WetMouseLookGather"
+address = 0x829B80EC
+registers = ["r29"]
+
+# sub_829B8078, stw r10,0(r31): the camera flags with the "right stick touched"
+# bits just worked out. r29 = camera.
+[[midasm_hook]]
+name = "WetMouseLookTouched"
+address = 0x829B82D0
+registers = ["r10", "r29"]
+
+# sub_829AB470 (yaw / pitch step), before bl sub_829A8168: f2 = delta (radians),
+# f28 = turn speed, r30 = result pointer (tells yaw from pitch), r31 = camera.
+[[midasm_hook]]
+name = "WetMouseLookTurn"
+address = 0x829AB4DC
+registers = ["r1", "r30", "r31", "f2", "f28"]

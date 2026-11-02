@@ -132,8 +132,10 @@ In the pause menu, **hold Back (Backspace) for 1.5 seconds to quit to desktop**.
 Settings live in `wet.ini` next to the exe; the mouse buttons can be rebound there
 (`mouse_left = RT` ...) as well as the keys. Widescreen / ultrawide (`widescreen = 1`, also in F1 and the launcher) fills 21:9 and
 32:9 screens with a wider view and keeps the HUD 16:9 in the middle. The field of view is `fov` (horizontal degrees at 16:9, 90 = original; also in F1 and
-the launcher). Direct mouse aim (`mouse_direct`, on by default) turns the camera
-by how far the mouse moves, with no stick speed limit. `language` picks the game's
+the launcher). Direct mouse aim (`mouse_direct`, on by default) turns the third-person
+camera by an angle per mouse count (native mouse look, as nikolaygorb/WetRecomp does it:
+no stick dead zone, curve, turn speed or slow-motion scaling); elsewhere the mouse
+turns as far as it moves, with no stick speed limit. `language` picks the game's
 language (0 = the Windows language, 1 English, 3 German, 4 French, 5 Spanish, 6 Italian)
 and `button_prompts` the prompt symbols (0 automatic, 1 Xbox, 2 PlayStation, 3 keyboard /
 mouse). Saves, `achievements.ini` and the shader cache are in

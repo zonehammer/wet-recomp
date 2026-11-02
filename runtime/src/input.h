@@ -27,4 +27,8 @@ namespace wet
     // Direct mouse aim: the mouse movement (pixels) since the last call; false while
     // the mouse isn't captured for aiming or direct aim is off.
     bool TakeMouseDelta(double& dx, double& dy);
+    // Mouse movement (pixels) for the camera's native look hook (mouselook.cpp)
+    // since its last call; false if the mouse isn't aiming. Calling it also keeps
+    // the mouse away from the right stick for the next 300 ms.
+    bool TakeLookDelta(double& dx, double& dy);
 }
