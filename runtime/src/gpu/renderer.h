@@ -54,6 +54,9 @@ namespace wet::renderer
     // F1 settings overlay; while it's open the keyboard doesn't drive the game.
     void ToggleOverlay();
     bool OverlayOpen();
+    // Pause menu "hold Back to quit" hint: < 0 hidden (not paused), else how far
+    // the hold has got (0..1). Any thread.
+    void SetQuitHold(float progress);
 }
 
 // Provided by the kernel for the renderer's threads.

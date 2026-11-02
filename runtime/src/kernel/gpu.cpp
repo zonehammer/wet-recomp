@@ -852,6 +852,44 @@ static void NotePerformance()
     }
 }
 
+namespace wet { extern std::atomic<uint16_t> g_guestPadButtons; }
+extern "C" void __imp__sub_828D5BD0(PPCContext& ctx, uint8_t* base);
+
+// Pause menu: holding Back (Backspace) quits to desktop; the overlay shows a
+// hint and the hold's progress. GameStateUtil::IsPauseMenuActive (sub_828D5BD0)
+// compares the top of the game state stack with the pause state; it reads two
+// globals, checked here first so it's never called before the game set them up.
+static void UpdatePauseQuit(PPCContext& ctx)
+{
+    static constexpr double kHoldSeconds = 1.5;
+    static std::chrono::steady_clock::time_point holdStart;
+    static bool holding = false, shown = false;
+    uint32_t app = Ld32(0x834FB234), states = Ld32(0x834C4908);
+    bool paused = false;
+    if (app && states && Ld32(app + 172))
+    {
+        PPCContext saved = ctx;
+        __imp__sub_828D5BD0(ctx, g_mem.base);
+        paused = ctx.r3.u32 != 0;
+        ctx = saved;
+    }
+    bool back = paused && (g_guestPadButtons.load() & 0x0020) && !renderer::OverlayOpen();
+    auto now = std::chrono::steady_clock::now();
+    if (back && !holding)
+        holdStart = now;
+    holding = back;
+    float progress = holding ? float(std::chrono::duration<double>(now - holdStart).count() / kHoldSeconds) : 0.0f;
+    if (paused != shown || paused)
+        renderer::SetQuitHold(paused ? progress : -1.0f);
+    shown = paused;
+    if (holding && progress >= 1.0f)
+    {
+        Log("Quit to desktop (pause menu)");
+        LogFlush();
+        os::ExitProcess(0);
+    }
+}
+
 GUEST_IMPORT(VdSwap)
 {
     uint32_t buffer = Arg(ctx, 0), fetch = Arg(ctx, 1);
@@ -885,6 +923,8 @@ GUEST_IMPORT(VdSwap)
     TraceEvent('S', uint32_t(n));
     NotePerformance();
     renderer::DisplayAspect();
+    if (renderer::Enabled())
+        UpdatePauseQuit(ctx);
     if (n <= 3 || (n & (n - 1)) == 0)
     {
         uint64_t faults, protects, checks, inval, cooled;

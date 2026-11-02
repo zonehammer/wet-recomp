@@ -171,6 +171,10 @@ GUEST_IMPORT(XamInputGetCapabilities)
     Ret(ctx, ERROR_SUCCESS);
 }
 
+// The buttons the game last read from controller 0 (kernel/gpu.cpp: pause
+// menu quit). Keyboard keys are already mapped in.
+namespace wet { std::atomic<uint16_t> g_guestPadButtons{ 0 }; }
+
 // XamInputGetState(user, flags, X_INPUT_STATE*)
 GUEST_IMPORT(XamInputGetState)
 {
@@ -190,6 +194,8 @@ GUEST_IMPORT(XamInputGetState)
     HostPadState s;
     if (!HostPadGetState(user, s))
         return Ret(ctx, ERROR_DEVICE_NOT_CONNECTED);
+    if (user == 0)
+        g_guestPadButtons = s.buttons;
     St32(state + 0, s.packet);
     St16(state + 4, s.buttons);
     St8(state + 6, s.leftTrigger);

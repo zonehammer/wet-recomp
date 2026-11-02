@@ -358,6 +358,7 @@ namespace
     std::unique_ptr<xe::ui::ImmediateDrawer> s_immediateDrawer;
     std::unique_ptr<xe::ui::ImGuiDrawer> s_imgui;
     std::atomic<bool> s_overlayOpen{ false };
+    std::atomic<float> s_quitHold{ -1.0f };   // pause menu quit hint (SetQuitHold)
     class OverlayDialog;
     OverlayDialog* s_overlay = nullptr;   // UI thread only
     bool s_nisUnsupported = false;        // UI thread only
@@ -446,8 +447,10 @@ namespace
 
             if (s_overlayOpen)
                 DrawSettings(io, scale);
+            else
+                DrawQuitHint(io, scale);
 
-            if (!s_overlayOpen && !wet::options::ShowFps() && !PopupPending())
+            if (!s_overlayOpen && !wet::options::ShowFps() && !PopupPending() && s_quitHold < 0)
                 Close();
         }
 
@@ -533,7 +536,7 @@ namespace
             bool popups = wet::options::AchievementPopups();
             if (ImGui::Checkbox("Show pop-ups", &popups))
                 wet::options::SetAchievementPopups(popups);
-            if (!ImGui::CollapsingHeader("Achievement list"))
+            if (!ImGui::CollapsingHeader("Achievement list", ImGuiTreeNodeFlags_DefaultOpen))
                 return;
             ImGui::BeginChild("##achievements", ImVec2(560 * scale / 1.5f, 220 * scale / 1.5f), true);
             for (auto& a : list)
@@ -565,13 +568,6 @@ namespace
                 ImGui::EndGroup();
             }
             ImGui::EndChild();
-        }
-
-        static void Section(const char* title)
-        {
-            ImGui::Spacing();
-            ImGui::TextUnformatted(title);
-            ImGui::Separator();
         }
 
         // Keyboard bindings: click an action, press a key. Right click clears it.
@@ -640,211 +636,265 @@ namespace
             ImGui::TextDisabled("Click, then press a key; right click clears. Two keys: wet.ini key_* = Q, F");
         }
 
-        static bool Radio(const char* label, int* value, int choice)
+        // Pause menu: "Hold Back to quit to desktop", with the hold's progress.
+        static void DrawQuitHint(ImGuiIO& io, float scale)
         {
-            return ImGui::RadioButton(label, value, choice);
+            float progress = s_quitHold;
+            if (progress < 0)
+                return;
+            ApplyStyle(scale);
+            float em = ImGui::GetFontSize();
+            ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y - em * 2.5f), ImGuiCond_Always,
+                                    ImVec2(0.5f, 1.0f));
+            ImGui::SetNextWindowBgAlpha(progress > 0 ? 0.9f : 0.6f);
+            ImGui::Begin("##quit", nullptr,
+                         ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs |
+                             ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoSavedSettings);
+            // A small "exit door" icon: a frame with an arrow out of it.
+            ImDrawList* draw = ImGui::GetWindowDrawList();
+            ImVec2 p = ImGui::GetCursorScreenPos();
+            float s = em, t = std::max(1.0f, em * 0.09f);
+            ImU32 col = ImGui::GetColorU32(progress > 0 ? ImVec4(0.95f, 0.35f, 0.35f, 1.0f) : ImVec4(0.92f, 0.92f, 0.93f, 1.0f));
+            draw->AddLine(ImVec2(p.x + s * 0.55f, p.y + s * 0.1f), ImVec2(p.x + s * 0.1f, p.y + s * 0.1f), col, t);
+            draw->AddLine(ImVec2(p.x + s * 0.1f, p.y + s * 0.1f), ImVec2(p.x + s * 0.1f, p.y + s * 0.9f), col, t);
+            draw->AddLine(ImVec2(p.x + s * 0.1f, p.y + s * 0.9f), ImVec2(p.x + s * 0.55f, p.y + s * 0.9f), col, t);
+            draw->AddLine(ImVec2(p.x + s * 0.38f, p.y + s * 0.5f), ImVec2(p.x + s * 0.95f, p.y + s * 0.5f), col, t);
+            draw->AddLine(ImVec2(p.x + s * 0.75f, p.y + s * 0.3f), ImVec2(p.x + s * 0.95f, p.y + s * 0.5f), col, t);
+            draw->AddLine(ImVec2(p.x + s * 0.75f, p.y + s * 0.7f), ImVec2(p.x + s * 0.95f, p.y + s * 0.5f), col, t);
+            ImGui::Dummy(ImVec2(s, s));
+            ImGui::SameLine();
+            auto pads = wet::ConnectedControllers();
+            bool keyboard = std::all_of(pads.begin(), pads.end(), [](const std::string& n) { return n.empty(); });
+            ImGui::Text("Hold %s to quit to desktop", keyboard ? "Backspace" : "Back");
+            if (progress > 0)
+            {
+                ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.85f, 0.2f, 0.2f, 1.0f));
+                ImGui::ProgressBar(std::min(progress, 1.0f), ImVec2(-FLT_MIN, em * 0.3f), "");
+                ImGui::PopStyleColor();
+            }
+            ImGui::End();
         }
 
-        void DrawSettings(ImGuiIO& io, float scale)
+        // ---- Settings window (F1) ----
+        // Tabs of label / control rows; longer explanations are in (?) tooltips.
+
+        // The overlay's look; sizes follow the font scale (the text is scaled
+        // with FontGlobalScale, which leaves padding and rounding alone).
+        static void ApplyStyle(float scale)
         {
-            ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Appearing,
-                                    ImVec2(0.5f, 0.5f));
-            ImGui::SetNextWindowBgAlpha(0.88f);
-            bool open = true;
-            if (!ImGui::Begin("WET Recomp " WET_VERSION " - settings (F1 to close)###settings", &open,
-                              ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize))
-            {
-                ImGui::End();
+            static float applied = 0;
+            if (applied == scale)
                 return;
-            }
+            applied = scale;
+            ImGuiStyle& st = ImGui::GetStyle();
+            st = ImGuiStyle();
+            st.WindowRounding = 10;
+            st.ChildRounding = 8;
+            st.FrameRounding = 6;
+            st.PopupRounding = 8;
+            st.GrabRounding = 6;
+            st.TabRounding = 6;
+            st.ScrollbarRounding = 8;
+            st.WindowBorderSize = 0;
+            st.FrameBorderSize = 0;
+            st.WindowPadding = ImVec2(14, 12);
+            st.FramePadding = ImVec2(8, 4);
+            st.ItemSpacing = ImVec2(10, 6);
+            st.ItemInnerSpacing = ImVec2(6, 4);
+            st.WindowTitleAlign = ImVec2(0.0f, 0.5f);
+            ImVec4* c = st.Colors;
+            const ImVec4 bg(0.075f, 0.08f, 0.095f, 0.97f), panel(0.13f, 0.14f, 0.16f, 1.0f),
+                panelHi(0.19f, 0.2f, 0.23f, 1.0f), accent(0.78f, 0.16f, 0.17f, 1.0f), accentHi(0.9f, 0.24f, 0.24f, 1.0f),
+                text(0.92f, 0.92f, 0.93f, 1.0f), dim(0.56f, 0.58f, 0.62f, 1.0f);
+            c[ImGuiCol_Text] = text;
+            c[ImGuiCol_TextDisabled] = dim;
+            c[ImGuiCol_WindowBg] = bg;
+            c[ImGuiCol_ChildBg] = ImVec4(0, 0, 0, 0);
+            c[ImGuiCol_PopupBg] = ImVec4(0.1f, 0.105f, 0.12f, 0.98f);
+            c[ImGuiCol_Border] = ImVec4(1, 1, 1, 0.08f);
+            c[ImGuiCol_FrameBg] = panel;
+            c[ImGuiCol_FrameBgHovered] = panelHi;
+            c[ImGuiCol_FrameBgActive] = panelHi;
+            c[ImGuiCol_TitleBg] = bg;
+            c[ImGuiCol_TitleBgActive] = bg;
+            c[ImGuiCol_TitleBgCollapsed] = bg;
+            c[ImGuiCol_CheckMark] = accentHi;
+            c[ImGuiCol_SliderGrab] = accent;
+            c[ImGuiCol_SliderGrabActive] = accentHi;
+            c[ImGuiCol_Button] = panel;
+            c[ImGuiCol_ButtonHovered] = panelHi;
+            c[ImGuiCol_ButtonActive] = accent;
+            c[ImGuiCol_Header] = panel;
+            c[ImGuiCol_HeaderHovered] = panelHi;
+            c[ImGuiCol_HeaderActive] = accent;
+            c[ImGuiCol_Separator] = ImVec4(1, 1, 1, 0.08f);
+            c[ImGuiCol_Tab] = ImVec4(0, 0, 0, 0);
+            c[ImGuiCol_TabHovered] = panelHi;
+            c[ImGuiCol_TabActive] = accent;
+            c[ImGuiCol_TabUnfocused] = ImVec4(0, 0, 0, 0);
+            c[ImGuiCol_TabUnfocusedActive] = accent;
+            c[ImGuiCol_PlotHistogram] = accent;
+            c[ImGuiCol_ScrollbarBg] = ImVec4(0, 0, 0, 0);
+            c[ImGuiCol_ScrollbarGrab] = panel;
+            c[ImGuiCol_ScrollbarGrabHovered] = panelHi;
+            c[ImGuiCol_ScrollbarGrabActive] = accent;
+            c[ImGuiCol_ModalWindowDimBg] = ImVec4(0, 0, 0, 0.55f);
+            st.ScaleAllSizes(scale / 1.5f);
+        }
 
-            Section("Frame rate");
-            int fps = wet::options::ConfiguredFps();
-            int pick = fps;
-            static constexpr int kChoices[] = { 30, 60, 120, 144, 165, 240 };
-            bool listed = fps == 0;
-            for (int c : kChoices)
-            {
-                char label[24];
-                std::snprintf(label, sizeof(label), c == 30 ? "%d (original)" : "%d", c);
-                Radio(label, &pick, c);
-                ImGui::SameLine();
-                listed |= fps == c;
-            }
-            char monitor[40];
-            std::snprintf(monitor, sizeof(monitor), "Monitor (%d Hz)", wet::options::MonitorRefreshRate());
-            Radio(monitor, &pick, 0);
-            // Any other rate: the slider (also shows a custom rate from wet.ini).
-            int custom = pick == 0 ? wet::options::MonitorRefreshRate() : pick;
-            if (ImGui::SliderInt(listed ? "Other rate" : "Other rate (in use)", &custom, 30, 360, "%d FPS"))
-                pick = custom;
-            if (pick != fps)
-                wet::options::SetFps(pick);
-            bool asyncShaders = wet::options::AsyncShaders();
-            if (ImGui::Checkbox("Don't wait for new shaders (less stutter; objects may pop in)", &asyncShaders))
-            {
-                wet::options::SetAsyncShaders(asyncShaders);
-                ApplyPostProcessing();
-            }
-            bool videoMode = wet::options::VideoMode();
-            if (ImGui::Checkbox("Videos at 30 FPS (avoids video flicker)", &videoMode))
-                wet::options::SetVideoMode(videoMode);
-            bool cutsceneFps = wet::options::CutsceneFps30();
-            if (ImGui::Checkbox("In-game cutscenes at 30 FPS (keeps speech in sync)", &cutsceneFps))
-                wet::options::SetCutsceneFps30(cutsceneFps);
-            if (wet::options::Fps() != (wet::options::ConfiguredFps() ? wet::options::ConfiguredFps() : wet::options::MonitorRefreshRate()))
-                ImGui::TextDisabled("A video or cutscene is playing: %d FPS until it ends", wet::options::Fps());
-            bool showFps = wet::options::ShowFps();
-            if (ImGui::Checkbox("Show FPS counter", &showFps))
-                wet::options::SetShowFps(showFps);
-            bool adaptive = wet::options::AdaptiveWatch();
-            if (ImGui::Checkbox("Fast memory tracking (turn off if textures or models glitch)", &adaptive))
-                wet::options::SetAdaptiveWatchOption(adaptive);
-            bool gpuWait = wet::options::GpuWait();
-            if (ImGui::Checkbox("Low-CPU GPU wait (render thread sleeps instead of spinning)", &gpuWait))
-                wet::options::SetGpuWait(gpuWait);
+        static bool BeginRows(const char* id)
+        {
+            if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingStretchProp))
+                return false;
+            ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 11.5f);
+            ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch);
+            return true;
+        }
 
-            Section("Achievements");
-            DrawAchievements(scale);
-
-            Section("Controllers");
+        // A row: the label (with an optional (?) tooltip), then the control.
+        static void Row(const char* label, const char* help = nullptr)
+        {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(label);
+            if (help)
             {
-                auto pads = wet::ConnectedControllers();
-                bool any = false;
-                for (size_t i = 0; i < pads.size(); i++)
-                    if (!pads[i].empty())
-                    {
-                        ImGui::Text("Player %zu: %s", i + 1, pads[i].c_str());
-                        any = true;
-                    }
-                if (!any)
-                    ImGui::TextDisabled("No controller connected (keyboard: WASD, arrows, Space, Esc, X, Y, Q, E, Z, C, Enter)");
-                bool vibration = wet::options::Vibration();
-                if (ImGui::Checkbox("Vibration", &vibration))
-                    wet::options::SetVibration(vibration);
-                int prompts = wet::options::ButtonPrompts(), promptsPick = prompts;
-                ImGui::TextUnformatted("Button prompts:");
-                ImGui::SameLine();
-                Radio("Automatic", &promptsPick, 0); ImGui::SameLine();
-                Radio("Xbox", &promptsPick, 1); ImGui::SameLine();
-                Radio("PlayStation", &promptsPick, 2); ImGui::SameLine();
-                Radio("Keyboard / mouse", &promptsPick, 3);
+                ImGui::SameLine(0, 4);
+                ImGui::TextDisabled("(?)");
+                if (ImGui::IsItemHovered())
                 {
-                    static const int kIds[] = { 0, 1, 3, 4, 5, 6 };
-                    static const char* kNames[] = { "Automatic (Windows)", "English", "Deutsch", "Fran\xC3\xA7" "ais",
-                                                    "Espa\xC3\xB1" "ol", "Italiano" };
-                    int setting = wet::options::LanguageSetting(), pick = 0;
-                    for (int i = 0; i < 6; i++)
-                        if (kIds[i] == setting)
-                            pick = i;
-                    if (ImGui::Combo("Language (text and speech; after a restart)", &pick, kNames, 6))
-                        wet::options::SetLanguage(kIds[pick]);
+                    ImGui::BeginTooltip();
+                    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 24);
+                    ImGui::TextUnformatted(help);
+                    ImGui::PopTextWrapPos();
+                    ImGui::EndTooltip();
                 }
-                if (promptsPick != prompts)
-                    wet::options::SetButtonPrompts(promptsPick);
-                ImGui::TextDisabled("Automatic: keyboard / mouse with no controller at startup, PlayStation symbols with a PlayStation controller. Applies after a restart.");
             }
+            ImGui::TableNextColumn();
+            ImGui::SetNextItemWidth(-FLT_MIN);
+        }
 
-            Section("Mouse");
+        static bool RowCheck(const char* label, bool* v, const char* help = nullptr)
+        {
+            Row(label, help);
+            ImGui::PushID(label);
+            bool changed = ImGui::Checkbox("##v", v);
+            ImGui::PopID();
+            return changed;
+        }
+
+        static bool RowCombo(const char* label, int* index, const char* const* items, int count, const char* help = nullptr)
+        {
+            Row(label, help);
+            ImGui::PushID(label);
+            bool changed = ImGui::Combo("##v", index, items, count);
+            ImGui::PopID();
+            return changed;
+        }
+
+        static void Note(const char* text)
+        {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TableNextColumn();
+            ImGui::PushTextWrapPos(0);
+            ImGui::TextColored(ImVec4(1.0f, 0.78f, 0.35f, 1.0f), "%s", text);
+            ImGui::PopTextWrapPos();
+        }
+
+        void TabGeneral()
+        {
+            if (!BeginRows("general"))
+                return;
             {
-                bool aim = wet::options::MouseAim();
-                if (ImGui::Checkbox("Mouse aim (camera / aiming; F1 or Alt+Tab frees the cursor)", &aim))
-                    wet::options::SetMouseAim(aim);
-                int sens = wet::options::MouseSensitivity(), sensPick = sens;
-                ImGui::SliderInt("Mouse sensitivity", &sensPick, 1, 100);
-                if (sensPick != sens)
-                    wet::options::SetMouseSensitivity(sensPick);
-                bool invert = wet::options::MouseInvertY();
-                if (ImGui::Checkbox("Invert mouse Y", &invert))
-                    wet::options::SetMouseInvertY(invert);
-                bool direct = wet::options::MouseDirect();
-                if (ImGui::Checkbox("Direct mouse aim (turn by how far the mouse moves, no stick speed limit)", &direct))
-                    wet::options::SetMouseDirect(direct);
-                ImGui::TextDisabled("Left click RT, right click LT (other buttons: wet.ini mouse_*)");
+                static const int kIds[] = { 0, 1, 3, 4, 5, 6 };
+                static const char* kNames[] = { "Automatic (Windows)", "English", "Deutsch", "Fran\xC3\xA7" "ais",
+                                                "Espa\xC3\xB1" "ol", "Italiano" };
+                int setting = wet::options::LanguageSetting(), pick = 0;
+                for (int i = 0; i < 6; i++)
+                    if (kIds[i] == setting)
+                        pick = i;
+                if (RowCombo("Language", &pick, kNames, 6, "Text and speech. Takes effect at the next start."))
+                    wet::options::SetLanguage(kIds[pick]);
             }
+            {
+                static const char* kNames[] = { "Automatic", "Xbox", "PlayStation", "Keyboard / mouse" };
+                int pick = wet::options::ButtonPrompts();
+                if (RowCombo("Button prompts", &pick, kNames, 4,
+                             "Automatic: keyboard and mouse with no controller connected at startup, PlayStation "
+                             "symbols with a PlayStation controller, Xbox otherwise. Takes effect at the next start."))
+                    wet::options::SetButtonPrompts(pick);
+            }
+            bool showFps = wet::options::ShowFps();
+            if (RowCheck("FPS counter", &showFps))
+                wet::options::SetShowFps(showFps);
+            ImGui::EndTable();
+        }
 
-            DrawKeyboard();
-
-            Section("Resolution");
-            int res = wet::options::ResolutionScale();
-            int resPick = res;
-            Radio("720p (original)", &resPick, 1); ImGui::SameLine();
-            Radio("1440p", &resPick, 2); ImGui::SameLine();
-            Radio("2160p / 4K", &resPick, 3);
-            if (resPick != res)
-                wet::options::SetResolutionScale(resPick);
-            if (wet::options::ResolutionScale() != wet::options::RunningResolutionScale())
-                ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "Restart the game to change the resolution.");
-
-            Section("Display");
+        void TabDisplay()
+        {
+            if (!BeginRows("display"))
+                return;
             bool fullscreen = s_window && s_window->window && s_window->window->IsFullscreen();
-            if (ImGui::Checkbox("Fullscreen (F11)", &fullscreen))
+            if (RowCheck("Fullscreen", &fullscreen, "Also F11."))
             {
                 // Not while painting: switching resizes the swap chain the
                 // presenter is drawing into (that crashed in the driver).
-                s_window->app->CallInUIThreadDeferred([fullscreen] {
-                    s_window->window->SetFullscreen(fullscreen);
-                });
+                s_window->app->CallInUIThreadDeferred([fullscreen] { s_window->window->SetFullscreen(fullscreen); });
                 wet::options::SetFullscreen(fullscreen);
             }
-
-            int grain = wet::options::FilmGrain(), grainPick = grain;
-            ImGui::SliderInt("Film grain", &grainPick, 0, 100, "%d%%");
-            if (grainPick != grain)
             {
-                wet::options::SetFilmGrain(grainPick);
-                ApplyPostProcessing();
+                static const char* kNames[] = { "720p (original)", "1440p", "2160p (4K)" };
+                int pick = wet::options::ResolutionScale() - 1;
+                if (RowCombo("Resolution", &pick, kNames, 3, "The game renders at this resolution; takes effect at the next start."))
+                    wet::options::SetResolutionScale(pick + 1);
+                if (wet::options::ResolutionScale() != wet::options::RunningResolutionScale())
+                    Note("Restart the game to change the resolution.");
             }
-
             bool wide = wet::options::Widescreen();
-            if (ImGui::Checkbox("Widescreen / ultrawide (fill wider screens; sharpest after a restart)", &wide))
+            if (RowCheck("Widescreen / ultrawide", &wide, "Fills 21:9 and 32:9 screens with a wider view. Sharpest after a restart."))
                 wet::options::SetWidescreen(wide);
             if (wide)
             {
                 bool hud = wet::options::WidescreenHud();
-                if (ImGui::Checkbox("Keep the HUD and menus 16:9 in the middle", &hud))
+                if (RowCheck("HUD in the middle", &hud, "Keeps the HUD and menus 16:9 in the middle of a wider screen."))
                     wet::options::SetWidescreenHud(hud);
             }
-            bool vsync = wet::options::Vsync();
-            if (ImGui::Checkbox("V-Sync: no tearing (turn off for G-Sync / FreeSync; after a restart)", &vsync))
-                wet::options::SetVsync(vsync);
-            bool borders = wet::options::HideBorders();
-            if (ImGui::Checkbox("Hide the dark frame at the screen edges (vignette / cinematic borders)", &borders))
-                wet::options::SetHideBorders(borders);
-            bool blur = wet::options::MotionBlur(), dof = wet::options::DepthOfField(),
-                 shake = wet::options::CameraShake();
-            if (ImGui::Checkbox("Motion blur", &blur))
-                wet::options::SetMotionBlur(blur);
-            ImGui::SameLine();
-            if (ImGui::Checkbox("Depth of field", &dof))
-                wet::options::SetDepthOfField(dof);
-            ImGui::SameLine();
-            if (ImGui::Checkbox("Camera shake", &shake))
-                wet::options::SetCameraShake(shake);
-
-            int fov = wet::options::Fov(), fovPick = fov;
-            ImGui::SliderInt("Field of view (90 = original)", &fovPick, 60, 130, "%d deg");
-            if (fovPick != fov)
-                wet::options::SetFov(fovPick);
-
-            int aa = wet::options::Antialiasing(), aaPick = aa;
-            ImGui::TextUnformatted("Anti-aliasing:");
-            Radio("Off", &aaPick, 0); ImGui::SameLine();
-            Radio("FXAA", &aaPick, 1); ImGui::SameLine();
-            Radio("FXAA (extreme)", &aaPick, 2); ImGui::SameLine();
-            Radio("SMAA (sharper)", &aaPick, 3);
-            int filter = wet::options::Filter(), filterPick = filter;
-            ImGui::TextUnformatted("Scaling to the window:");
-            Radio("Bilinear", &filterPick, 0); ImGui::SameLine();
-            Radio("AMD CAS (sharpen)", &filterPick, 1); ImGui::SameLine();
-            Radio("AMD FSR (upscale)", &filterPick, 2); ImGui::SameLine();
-            Radio("NVIDIA NIS (upscale)", &filterPick, 3);
-            int sharp = wet::options::Sharpness(), sharpPick = sharp;
-            if (filter == 3)
             {
+                int fov = wet::options::Fov(), pick = fov;
+                Row("Field of view", "Horizontal, at 16:9. 90 is the game's own.");
+                ImGui::SliderInt("##fov", &pick, 60, 130, "%d\xC2\xB0");
+                if (pick != fov)
+                    wet::options::SetFov(pick);
+            }
+            bool vsync = wet::options::Vsync();
+            if (RowCheck("V-Sync", &vsync, "No tearing. Turn off for G-Sync / FreeSync. Takes effect at the next start."))
+                wet::options::SetVsync(vsync);
+            ImGui::EndTable();
+        }
+
+        void TabGraphics()
+        {
+            if (!BeginRows("graphics"))
+                return;
+            int aa = wet::options::Antialiasing(), aaPick = aa;
+            int filter = wet::options::Filter(), filterPick = filter;
+            int sharp = wet::options::Sharpness(), sharpPick = sharp;
+            {
+                static const char* kNames[] = { "Off", "FXAA", "FXAA (extreme)", "SMAA (sharper)" };
+                RowCombo("Anti-aliasing", &aaPick, kNames, 4);
+            }
+            {
+                static const char* kNames[] = { "Bilinear", "AMD CAS (sharpen)", "AMD FSR (upscale)", "NVIDIA NIS (upscale)" };
+                RowCombo("Scaling", &filterPick, kNames, 4, "How the image is scaled to the window or screen.");
+            }
+            if (filterPick == 3)
+            {
+                Row("NIS sharpness");
+                ImGui::SliderInt("##nis", &sharpPick, 0, 100, "%d%%");
                 if (s_nisUnsupported)
-                    ImGui::TextDisabled("NIS needs the D3D12 renderer; AMD FSR is used instead.");
-                ImGui::SliderInt("NIS sharpness", &sharpPick, 0, 100, "%d%%");
+                    Note("NIS needs the Direct3D 12 renderer; AMD FSR is used instead.");
             }
             if (aaPick != aa || filterPick != filter || sharpPick != sharp)
             {
@@ -853,9 +903,186 @@ namespace
                 wet::options::SetSharpness(sharpPick);
                 ApplyPostProcessing();
             }
+            {
+                int grain = wet::options::FilmGrain(), pick = grain;
+                Row("Film grain");
+                ImGui::SliderInt("##grain", &pick, 0, 100, "%d%%");
+                if (pick != grain)
+                {
+                    wet::options::SetFilmGrain(pick);
+                    ApplyPostProcessing();
+                }
+            }
+            bool blur = wet::options::MotionBlur(), dof = wet::options::DepthOfField(), shake = wet::options::CameraShake();
+            if (RowCheck("Motion blur", &blur, "Off is also a little faster on slower graphics cards."))
+                wet::options::SetMotionBlur(blur);
+            if (RowCheck("Depth of field", &dof, "Off is also a little faster on slower graphics cards."))
+                wet::options::SetDepthOfField(dof);
+            if (RowCheck("Camera shake", &shake, "Including the shaky film effect that goes with it."))
+                wet::options::SetCameraShake(shake);
+            bool borders = wet::options::HideBorders();
+            if (RowCheck("Hide screen-edge frame", &borders, "The dark vignette / cinematic frame at the edges of the screen."))
+                wet::options::SetHideBorders(borders);
+            ImGui::EndTable();
+        }
+
+        void TabPerformance()
+        {
+            if (!BeginRows("performance"))
+                return;
+            {
+                // Choices, then "Custom" with a slider for any other rate.
+                static const int kRates[] = { 30, 60, 120, 144, 165, 240, 360 };
+                int fps = wet::options::ConfiguredFps();
+                char monitor[40];
+                std::snprintf(monitor, sizeof(monitor), "Match monitor (%d Hz)", wet::options::MonitorRefreshRate());
+                const char* names[] = { monitor, "30 (original)", "60", "120", "144", "165", "240", "360", "Custom" };
+                static bool custom = false;
+                int index = 8;
+                if (fps == 0)
+                    index = 0;
+                for (int i = 0; i < 7; i++)
+                    if (fps == kRates[i])
+                        index = i + 1;
+                if (custom)
+                    index = 8;
+                if (RowCombo("Frame rate", &index, names, 9, "The game's own speed is 30 FPS; higher rates keep game time correct."))
+                {
+                    custom = index == 8;
+                    if (index == 0)
+                        wet::options::SetFps(0);
+                    else if (index <= 7)
+                        wet::options::SetFps(kRates[index - 1]);
+                }
+                if (index == 8)
+                {
+                    int rate = fps ? fps : wet::options::MonitorRefreshRate(), pick = rate;
+                    Row("Custom rate");
+                    ImGui::SliderInt("##rate", &pick, 30, 360, "%d FPS");
+                    if (pick != rate)
+                        wet::options::SetFps(pick);
+                }
+                int running = wet::options::Fps(), wanted = fps ? fps : wet::options::MonitorRefreshRate();
+                if (running != wanted)
+                {
+                    char text[80];
+                    std::snprintf(text, sizeof(text), "A video or cutscene is playing: %d FPS until it ends.", running);
+                    Note(text);
+                }
+            }
+            bool videoMode = wet::options::VideoMode();
+            if (RowCheck("Videos at 30 FPS", &videoMode, "Avoids flicker in the game's videos."))
+                wet::options::SetVideoMode(videoMode);
+            bool cutsceneFps = wet::options::CutsceneFps30();
+            if (RowCheck("Cutscenes at 30 FPS", &cutsceneFps, "In-game cutscenes as on the console, which keeps speech in sync."))
+                wet::options::SetCutsceneFps30(cutsceneFps);
+            bool asyncShaders = wet::options::AsyncShaders();
+            if (RowCheck("Don't wait for shaders", &asyncShaders,
+                         "Less stutter the first time something is drawn; an object may appear a moment late instead."))
+            {
+                wet::options::SetAsyncShaders(asyncShaders);
+                ApplyPostProcessing();
+            }
+            bool adaptive = wet::options::AdaptiveWatch();
+            if (RowCheck("Fast memory tracking", &adaptive, "Turn off if textures or models glitch."))
+                wet::options::SetAdaptiveWatchOption(adaptive);
+            bool gpuWait = wet::options::GpuWait();
+            if (RowCheck("Low-CPU GPU wait", &gpuWait, "The render thread sleeps while it waits for the GPU instead of spinning."))
+                wet::options::SetGpuWait(gpuWait);
+            ImGui::EndTable();
+        }
+
+        void TabControls()
+        {
+            auto pads = wet::ConnectedControllers();
+            bool any = false;
+            for (size_t i = 0; i < pads.size(); i++)
+                if (!pads[i].empty())
+                {
+                    ImGui::TextDisabled("Player %zu", i + 1);
+                    ImGui::SameLine();
+                    ImGui::TextUnformatted(pads[i].c_str());
+                    any = true;
+                }
+            if (!any)
+                ImGui::TextDisabled("No controller connected - keyboard and mouse");
+            ImGui::Spacing();
+            if (BeginRows("controls"))
+            {
+                bool vibration = wet::options::Vibration();
+                if (RowCheck("Vibration", &vibration))
+                    wet::options::SetVibration(vibration);
+                bool aim = wet::options::MouseAim();
+                if (RowCheck("Mouse aim", &aim, "The mouse turns the camera and aims. F1 or Alt+Tab frees the cursor."))
+                    wet::options::SetMouseAim(aim);
+                int sens = wet::options::MouseSensitivity(), pick = sens;
+                Row("Mouse sensitivity");
+                ImGui::SliderInt("##sens", &pick, 1, 100);
+                if (pick != sens)
+                    wet::options::SetMouseSensitivity(pick);
+                bool invert = wet::options::MouseInvertY();
+                if (RowCheck("Invert mouse Y", &invert))
+                    wet::options::SetMouseInvertY(invert);
+                bool direct = wet::options::MouseDirect();
+                if (RowCheck("Direct mouse aim", &direct, "Turns by how far the mouse moves, with no stick speed limit."))
+                    wet::options::SetMouseDirect(direct);
+                ImGui::EndTable();
+            }
+            ImGui::Spacing();
+            DrawKeyboard();
+        }
+
+        void DrawSettings(ImGuiIO& io, float scale)
+        {
+            ApplyStyle(scale);
+            float em = ImGui::GetFontSize();
+            ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Appearing,
+                                    ImVec2(0.5f, 0.5f));
+            ImGui::SetNextWindowSizeConstraints(ImVec2(em * 34, 0), ImVec2(em * 34, io.DisplaySize.y * 0.9f));
+            bool open = true;
+            if (!ImGui::Begin("WET Recompiled " WET_VERSION "###settings", &open,
+                              ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                ImGui::End();
+                return;
+            }
+            if (ImGui::BeginTabBar("tabs", ImGuiTabBarFlags_FittingPolicyResizeDown))
+            {
+                if (ImGui::BeginTabItem("General")) { ImGui::Spacing(); TabGeneral(); ImGui::EndTabItem(); }
+                if (ImGui::BeginTabItem("Display")) { ImGui::Spacing(); TabDisplay(); ImGui::EndTabItem(); }
+                if (ImGui::BeginTabItem("Graphics")) { ImGui::Spacing(); TabGraphics(); ImGui::EndTabItem(); }
+                if (ImGui::BeginTabItem("Performance")) { ImGui::Spacing(); TabPerformance(); ImGui::EndTabItem(); }
+                if (ImGui::BeginTabItem("Controls")) { ImGui::Spacing(); TabControls(); ImGui::EndTabItem(); }
+                if (ImGui::BeginTabItem("Achievements")) { ImGui::Spacing(); DrawAchievements(scale); ImGui::EndTabItem(); }
+                ImGui::EndTabBar();
+            }
 
             ImGui::Spacing();
-            ImGui::TextDisabled("Settings are saved in wet.ini. While this is open, the keyboard doesn't control the game.");
+            ImGui::Separator();
+            ImGui::Spacing();
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextDisabled("Saved automatically  \xC2\xB7  F1 closes");
+            float quitWidth = ImGui::CalcTextSize("Quit to desktop").x + ImGui::GetStyle().FramePadding.x * 2;
+            ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - quitWidth);
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.55f, 0.12f, 0.13f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.75f, 0.17f, 0.18f, 1.0f));
+            if (ImGui::Button("Quit to desktop"))
+                ImGui::OpenPopup("Quit WET?");
+            ImGui::PopStyleColor(2);
+            if (ImGui::BeginPopupModal("Quit WET?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                ImGui::TextUnformatted("Progress since the last checkpoint will be lost.");
+                ImGui::Spacing();
+                if (ImGui::Button("Quit", ImVec2(em * 7, 0)))
+                {
+                    wet::renderer_host::Log("Quit to desktop (settings)");
+                    wet::renderer_host::ExitProcess();
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel", ImVec2(em * 7, 0)))
+                    ImGui::CloseCurrentPopup();
+                ImGui::EndPopup();
+            }
             ImGui::End();
             if (!open)
                 s_overlayOpen = false;
@@ -871,7 +1098,7 @@ namespace
     {
         if (!s_imgui)
             return;
-        if (!s_overlay && (s_overlayOpen || wet::options::ShowFps() || PopupPending()))
+        if (!s_overlay && (s_overlayOpen || wet::options::ShowFps() || PopupPending() || s_quitHold >= 0))
             s_overlay = new OverlayDialog(s_imgui.get());
     }
 
@@ -1381,6 +1608,17 @@ namespace wet::renderer
             return;
         wet::renderer_host::Log("Renderer: F8 - capturing the next 48 frames");
         wet::renderer_host::StartThread(BurstThread, nullptr, "Burst capture");
+    }
+
+    void SetQuitHold(float progress)
+    {
+#if XE_PLATFORM_WIN32
+        float was = s_quitHold.exchange(progress);
+        if (was < 0 && progress >= 0 && s_window && s_window->app && s_imgui)
+            s_window->app->CallInUIThread([] { UpdateOverlay(); });
+#else
+        (void)progress;
+#endif
     }
 
     void AchievementUnlocked()
