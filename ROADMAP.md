@@ -34,7 +34,8 @@ Make a full playthrough reliable before adding more features.
 | ~~Field of view slider~~ (done: `fov`, overlay and launcher) | Common request, especially with wide screens | M |
 | ~~Any frame rate~~ (done: 30-360 or match the monitor; VRR works. Truly uncapped would need a variable time step) | Today it's 30 / 60 / 120 / 144 | M |
 | ~~Better anti-aliasing~~ (done: SMAA, `antialiasing = 3`) | FXAA is soft | M |
-| **Further GPU-thread work** (fewer memory traps, cheaper fence wake-ups) | Headroom for 4K at 144 FPS on slower CPUs | M |
+| Lower-spec performance, first pass (done in 0.2.5: the console's 4x clears drawn at 1x, shader constants written in bulk, vblank thread sleeps, adaptive vblank; +25% at 4K, 720p at the 360 cap here) | Lower-end GPUs and CPUs | M |
+| **Further GPU-thread work** (resolves and texture loads at high resolution, driver submission cost, fewer memory traps) | Headroom for 4K at 144 FPS on slower PCs | M |
 
 ## 0.5 — Packaging and ease of use
 
