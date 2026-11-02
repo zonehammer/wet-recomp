@@ -35,7 +35,8 @@ Make a full playthrough reliable before adding more features.
 | ~~Any frame rate~~ (done: 30-360 or match the monitor; VRR works. Truly uncapped would need a variable time step) | Today it's 30 / 60 / 120 / 144 | M |
 | ~~Better anti-aliasing~~ (done: SMAA, `antialiasing = 3`) | FXAA is soft | M |
 | Lower-spec performance, first pass (done in 0.2.5: the console's 4x clears drawn at 1x, shader constants written in bulk, vblank thread sleeps, adaptive vblank; +25% at 4K, 720p at the 360 cap here) | Lower-end GPUs and CPUs | M |
-| **Further GPU-thread work** (resolves and texture loads at high resolution, driver submission cost, fewer memory traps) | Headroom for 4K at 144 FPS on slower PCs | M |
+| Shader cache built in the background (done in 0.2.6; `shader_preload = 1` builds it up front instead) | No half-minute black screen when the driver's cache is cold | S |
+| **Further GPU-thread work** (resolves and texture loads at high resolution (partial reloads done in 0.2.6; resolving straight into textures next), driver submission cost, fewer memory traps) | Headroom for 4K at 144 FPS on slower PCs | M |
 
 ## 0.5 — Packaging and ease of use
 
