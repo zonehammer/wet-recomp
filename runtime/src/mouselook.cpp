@@ -103,12 +103,26 @@ namespace
         y = PPC_LOAD_U8(options + 3) ? 1.0 : -1.0;
     }
 
-    void AddTurn(PPCRegister& delta, double turn, double stickSign, double speed)
+    // The camera's usual turn speed per axis: a slow average (a few seconds) of
+    // what it has been. Where the camera data restricts the camera (e.g. wall
+    // runs, keeping it out of the walls) the game turns slower than that, and the
+    // mouse turns slower by as much.
+    std::atomic<double> s_normalSpeed[2] = { 0.0, 0.0 };
+
+    void AddTurn(PPCRegister& delta, double turn, double stickSign, double speed, int axis)
     {
         if (speed == 0.0 || !std::isfinite(speed))
             return;
         double sign = speed > 0.0 ? stickSign : -stickSign;
-        delta.f64 = double(float(delta.f64 + turn * sign));
+        double magnitude = std::fabs(speed), normal = s_normalSpeed[axis].load();
+        normal = normal > 0 ? normal + (magnitude - normal) * 0.002 : magnitude;
+        s_normalSpeed[axis] = normal;
+        // Slower than usual: the mouse turns slower by as much.
+        double scale = normal > 0 ? std::clamp(magnitude / normal, 0.0, 1.0) : 1.0;
+        static std::atomic<bool> s_logged{ false };
+        if (scale < 0.5 && !s_logged.exchange(true))
+            wet::Log("Mouse: the camera turns slower here (x%.2f); mouse look follows", scale);
+        delta.f64 = double(float(delta.f64 + turn * sign * scale));
     }
 }
 
@@ -117,7 +131,7 @@ void WetMouseLookGather(PPCRegister& r29)
 {
     t_turn = {};
     wet::photo::NoteThirdPersonCamera();
-    if (Disabled() || !wet::options::MouseAim() || !HasInput(r29.u32))
+    if (Disabled() || !wet::options::MouseAim() || !wet::options::MouseNative() || !HasInput(r29.u32))
         return;
     double dx, dy;
     if (!wet::TakeLookDelta(dx, dy) || (dx == 0 && dy == 0))
@@ -144,7 +158,7 @@ void WetMouseLookGather(PPCRegister& r29)
 // mouse turns, the "right stick touched" bits make Update run the manual orbit step.
 void WetMouseLookTouched(PPCRegister& r10, PPCRegister& r29)
 {
-    if (Disabled() || !wet::options::MouseAim() || !HasInput(r29.u32))
+    if (Disabled() || !wet::options::MouseAim() || !wet::options::MouseNative() || !HasInput(r29.u32))
         return;
     bool turning = t_turn.camera == r29.u32 && t_turn.yawPending;
     if (!turning && Now() - s_lastMotion.load() > kTouchedSeconds)
@@ -164,12 +178,12 @@ void WetMouseLookTurn(PPCRegister& r1, PPCRegister& r30, PPCRegister& r31, PPCRe
     {
         t_turn.yawPending = false;
         FilterSigns(r31.u32, sx, sy);
-        AddTurn(f2, t_turn.yaw, sx, f28.f64);
+        AddTurn(f2, t_turn.yaw, sx, f28.f64, 0);
     }
     else if (result == kPitchResult && t_turn.pitchPending)
     {
         t_turn.pitchPending = false;
         FilterSigns(r31.u32, sx, sy);
-        AddTurn(f2, t_turn.pitch, sy, f28.f64);
+        AddTurn(f2, t_turn.pitch, sy, f28.f64, 1);
     }
 }

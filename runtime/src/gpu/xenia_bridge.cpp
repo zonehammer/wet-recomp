@@ -1077,6 +1077,12 @@ namespace
                 bool invert = wet::options::MouseInvertY();
                 if (RowCheck("Invert mouse Y", &invert))
                     wet::options::SetMouseInvertY(invert);
+                bool native = wet::options::MouseNative();
+                if (RowCheck("Native mouse look", &native,
+                             "The mouse turns the third-person camera directly by an angle (no stick dead zone, curve "
+                             "or speed limit). Off: the mouse goes through the right stick, as the game's own "
+                             "camera expects."))
+                    wet::options::SetMouseNative(native);
                 bool direct = wet::options::MouseDirect();
                 if (RowCheck("Direct mouse aim", &direct, "Outside the normal third-person camera (turrets, vehicles, menus): turns by how far the mouse moves, with no stick speed limit. Off: the mouse acts as a stick there."))
                     wet::options::SetMouseDirect(direct);

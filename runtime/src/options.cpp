@@ -30,7 +30,7 @@ namespace wet::options
         std::atomic<bool> s_inCutscene{ false };
         std::atomic<int> s_videoMode{ 1 };
         int s_scale = 1, s_scaleRunning = 1;
-        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_fov{ 90 }, s_widescreen{ 0 }, s_widescreenHud{ 1 }, s_hideBorders{ 0 }, s_vsync{ 0 }, s_buttonPrompts{ 0 }, s_mouseAim{ 1 }, s_mouseSens{ 50 }, s_mouseInvert{ 0 }, s_mouseDirect{ 1 }, s_shaderCache{ 1 }, s_asyncShaders{ 1 }, s_shaderPreload{ 0 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 }, s_motionBlur{ 1 }, s_depthOfField{ 1 }, s_cameraShake{ 1 }, s_language{ 0 };
+        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_fov{ 90 }, s_widescreen{ 0 }, s_widescreenHud{ 1 }, s_hideBorders{ 0 }, s_vsync{ 0 }, s_buttonPrompts{ 0 }, s_mouseAim{ 1 }, s_mouseSens{ 50 }, s_mouseInvert{ 0 }, s_mouseDirect{ 1 }, s_mouseNative{ 1 }, s_shaderCache{ 1 }, s_asyncShaders{ 1 }, s_shaderPreload{ 0 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 }, s_motionBlur{ 1 }, s_depthOfField{ 1 }, s_cameraShake{ 1 }, s_language{ 0 };
         constexpr const char* kFile = "wet.ini";
         // Mouse button bindings: left, right, middle, back (X1), forward (X2).
         constexpr const char* kMouseKeys[5] = { "mouse_left", "mouse_right", "mouse_middle", "mouse_back", "mouse_forward" };
@@ -134,6 +134,8 @@ namespace wet::options
             std::fprintf(f, "mouse_invert_y = %d\n", s_mouseInvert.load());
             std::fprintf(f, "# mouse_direct: 1 = the mouse turns the camera by how far it moves (no stick speed limit); 0 = the mouse acts as a stick\n");
             std::fprintf(f, "mouse_direct = %d\n", s_mouseDirect.load());
+            std::fprintf(f, "# mouse_native: 1 = the mouse turns the third-person camera directly (native mouse look); 0 = through the right stick\n");
+            std::fprintf(f, "mouse_native = %d\n", s_mouseNative.load());
             std::fprintf(f, "# mouse buttons: A B X Y LB RB LT RT LTHUMB RTHUMB START BACK UP DOWN LEFT RIGHT or NONE\n");
             for (int i = 0; i < 5; i++)
                 std::fprintf(f, "%s = %s\n", kMouseKeys[i], s_mouseBind[i].c_str());
@@ -239,6 +241,7 @@ namespace wet::options
                 else if (!std::strcmp(key, "mouse_sensitivity")) s_mouseSens = Clamp(value, 1, 200);
                 else if (!std::strcmp(key, "mouse_invert_y")) s_mouseInvert = value != 0;
                 else if (!std::strcmp(key, "mouse_direct")) s_mouseDirect = value != 0;
+                else if (!std::strcmp(key, "mouse_native")) s_mouseNative = value != 0;
                 else if (!std::strcmp(key, "film_grain")) s_filmGrain = Clamp(value, 0, 100);
                 else if (!std::strcmp(key, "fov")) s_fov = Clamp(value, 60, 130);
                 else if (!std::strcmp(key, "widescreen")) s_widescreen = value != 0;
@@ -348,6 +351,8 @@ namespace wet::options
     void SetMouseInvertY(bool v) { s_mouseInvert = v; Save(); }
     bool MouseDirect() { return s_mouseDirect.load(std::memory_order_relaxed) != 0; }
     void SetMouseDirect(bool v) { s_mouseDirect = v; Save(); }
+    bool MouseNative() { return s_mouseNative.load(std::memory_order_relaxed) != 0; }
+    void SetMouseNative(bool v) { s_mouseNative = v; Save(); }
     std::string KeyBinding(int action)
     {
         if (action < 0 || action >= keybinds::kActionCount)

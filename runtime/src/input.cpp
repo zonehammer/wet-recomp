@@ -393,7 +393,7 @@ namespace wet
         // hook keeps asking; elsewhere the mouse goes to the right stick.
         bool NativeLookActive()
         {
-            return options::MouseAim() &&
+            return options::MouseAim() && options::MouseNative() &&
                    std::chrono::steady_clock::now() - s_mouse.lastLook < std::chrono::milliseconds(300);
         }
 

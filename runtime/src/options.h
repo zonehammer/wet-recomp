@@ -69,6 +69,9 @@ namespace wet::options
     // right-stick value each frame, without the stick's -1..1 limit.
     bool MouseDirect();
     void SetMouseDirect(bool v);
+    // Native mouse look (mouselook.cpp): the mouse turns the third-person camera directly.
+    bool MouseNative();
+    void SetMouseNative(bool v);
     std::string MouseBinding(int button);
     // Keyboard bindings (keybinds.h actions): "KEY" or "KEY, KEY" or "NONE".
     std::string KeyBinding(int action);
