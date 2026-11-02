@@ -29,7 +29,7 @@ namespace wet::options
         std::atomic<bool> s_inCutscene{ false };
         std::atomic<int> s_videoMode{ 1 };
         int s_scale = 1, s_scaleRunning = 1;
-        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_fov{ 90 }, s_widescreen{ 0 }, s_widescreenHud{ 1 }, s_hideBorders{ 0 }, s_vsync{ 0 }, s_buttonPrompts{ 0 }, s_mouseAim{ 1 }, s_mouseSens{ 50 }, s_mouseInvert{ 0 }, s_mouseDirect{ 1 }, s_shaderCache{ 1 }, s_asyncShaders{ 1 }, s_shaderPreload{ 0 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 }, s_motionBlur{ 1 }, s_depthOfField{ 1 }, s_cameraShake{ 1 };
+        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_fov{ 90 }, s_widescreen{ 0 }, s_widescreenHud{ 1 }, s_hideBorders{ 0 }, s_vsync{ 0 }, s_buttonPrompts{ 0 }, s_mouseAim{ 1 }, s_mouseSens{ 50 }, s_mouseInvert{ 0 }, s_mouseDirect{ 1 }, s_shaderCache{ 1 }, s_asyncShaders{ 1 }, s_shaderPreload{ 0 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 }, s_motionBlur{ 1 }, s_depthOfField{ 1 }, s_cameraShake{ 1 }, s_language{ 0 };
         constexpr const char* kFile = "wet.ini";
         // Mouse button bindings: left, right, middle, back (X1), forward (X2).
         constexpr const char* kMouseKeys[5] = { "mouse_left", "mouse_right", "mouse_middle", "mouse_back", "mouse_forward" };
@@ -151,6 +151,8 @@ namespace wet::options
             std::fprintf(f, "# motion_blur, depth_of_field, camera_shake: the game's effects (1 = on, as designed; 0 = off, also a little faster)\n");
             std::fprintf(f, "motion_blur = %d\ndepth_of_field = %d\ncamera_shake = %d\n", s_motionBlur.load(), s_depthOfField.load(),
                          s_cameraShake.load());
+            std::fprintf(f, "# language: 0 = Windows' language if the game has it, else English; 1 = English, 3 = German, 4 = French, 5 = Spanish, 6 = Italian (text and speech; restart)\n");
+            std::fprintf(f, "language = %d\n", s_language.load());
             std::fprintf(f, "# shader_preload: 1 = build every cached shader before the first frame (slower start, no pop-in); 0 = build them in the background while the game starts\n");
             std::fprintf(f, "shader_preload = %d\n", s_shaderPreload.load());
             {
@@ -228,6 +230,7 @@ namespace wet::options
                 else if (!std::strcmp(key, "async_shaders")) s_asyncShaders = value != 0;
                 else if (!std::strcmp(key, "shader_preload")) s_shaderPreload = value != 0;
                 else if (!std::strcmp(key, "motion_blur")) s_motionBlur = value != 0;
+                else if (!std::strcmp(key, "language")) s_language = (value == 1 || (value >= 3 && value <= 6)) ? value : 0;
                 else if (!std::strcmp(key, "depth_of_field")) s_depthOfField = value != 0;
                 else if (!std::strcmp(key, "camera_shake")) s_cameraShake = value != 0;
                 else if (!std::strcmp(key, "shader_cache")) s_shaderCache = value != 0;
@@ -376,6 +379,24 @@ namespace wet::options
     void SetButtonPrompts(int v) { s_buttonPrompts = Clamp(v, 0, 3); Save(); }
     void SetVsync(bool v) { s_vsync = v; Save(); }
     void SetHideBorders(bool v) { s_hideBorders = v; Save(); }
+    int Language()
+    {
+        int v = s_language.load(std::memory_order_relaxed);
+        if (v)
+            return v;
+        // Automatic: the Windows display language, when the game has it.
+        int windows = os::UserLanguageId();   // primary language id (LANG_*)
+        switch (windows)
+        {
+        case 0x07: return 3;   // German
+        case 0x0C: return 4;   // French
+        case 0x0A: return 5;   // Spanish
+        case 0x10: return 6;   // Italian
+        default: return 1;     // English
+        }
+    }
+    int LanguageSetting() { return s_language.load(std::memory_order_relaxed); }
+    void SetLanguage(int v) { s_language = (v == 1 || (v >= 3 && v <= 6)) ? v : 0; Save(); }
     bool MotionBlur() { return s_motionBlur.load(std::memory_order_relaxed) != 0; }
     void SetMotionBlur(bool v) { s_motionBlur = v; Save(); }
     bool DepthOfField() { return s_depthOfField.load(std::memory_order_relaxed) != 0; }

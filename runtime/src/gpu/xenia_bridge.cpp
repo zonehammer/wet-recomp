@@ -729,6 +729,17 @@ namespace
                 Radio("Xbox", &promptsPick, 1); ImGui::SameLine();
                 Radio("PlayStation", &promptsPick, 2); ImGui::SameLine();
                 Radio("Keyboard / mouse", &promptsPick, 3);
+                {
+                    static const int kIds[] = { 0, 1, 3, 4, 5, 6 };
+                    static const char* kNames[] = { "Automatic (Windows)", "English", "Deutsch", "Fran\xC3\xA7" "ais",
+                                                    "Espa\xC3\xB1" "ol", "Italiano" };
+                    int setting = wet::options::LanguageSetting(), pick = 0;
+                    for (int i = 0; i < 6; i++)
+                        if (kIds[i] == setting)
+                            pick = i;
+                    if (ImGui::Combo("Language (text and speech; after a restart)", &pick, kNames, 6))
+                        wet::options::SetLanguage(kIds[pick]);
+                }
                 if (promptsPick != prompts)
                     wet::options::SetButtonPrompts(promptsPick);
                 ImGui::TextDisabled("Automatic: keyboard / mouse with no controller at startup, PlayStation symbols with a PlayStation controller. Applies after a restart.");

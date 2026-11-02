@@ -78,6 +78,8 @@ namespace wet::os
     void OpenConsole();
     // Refresh rate of the game's display (options::Monitor, else the main one) in Hz (60 if unknown).
     int DisplayRefreshRate();
+    // The user's Windows display language, as a primary language id (LANG_*; 0 if unknown).
+    int UserLanguageId();
     // The game's display: its desktop rectangle (false if unknown).
     bool GameDisplayRect(int& x, int& y, int& width, int& height);
 }

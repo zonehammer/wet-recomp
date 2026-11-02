@@ -108,7 +108,7 @@ namespace
         kFps = 100, kResolution, kFullscreen, kShowFps,
         kFilter, kSharpness, kSharpnessValue, kAntialiasing, kGrain, kGrainValue, kFov, kFovValue, kWidescreen,
         kMouseAim, kSensitivity, kSensitivityValue, kInvertY, kVibration,
-        kShaderCache, kVideoMode, kPopups, kAsyncShaders, kShaderPreload, kMotionBlur, kDepthOfField, kCameraShake,
+        kShaderCache, kVideoMode, kPopups, kAsyncShaders, kShaderPreload, kMotionBlur, kDepthOfField, kCameraShake, kLanguage,
         kStatus, kPlay, kSaves, kClearShaders, kKeyboard,
         kVsync, kHideBorders, kWideHud, kCheckUpdates, kReportBug, kUpdateText, kPrompts,
         kMonitor, kPadTest, kAchievements,
@@ -492,6 +492,11 @@ namespace
         s_ini.Set("async_shaders", Checked(kAsyncShaders));
         s_ini.Set("shader_preload", Checked(kShaderPreload));
         s_ini.Set("motion_blur", Checked(kMotionBlur));
+        {
+            static const int kLanguageIds[] = { 0, 1, 3, 4, 5, 6 };
+            int pick = Selected(kLanguage);
+            s_ini.Set("language", kLanguageIds[pick >= 0 && pick < 6 ? pick : 0]);
+        }
         s_ini.Set("depth_of_field", Checked(kDepthOfField));
         s_ini.Set("camera_shake", Checked(kCameraShake));
         s_ini.SetString("monitor", ChosenMonitor(Selected(kMonitor)));
@@ -1012,6 +1017,16 @@ namespace
         Slider(kGrain, kGrainValue, 456, 114, 160, 0, 100, ini.Get("film_grain", 100), L"%");
         Label(L"Field of view", 362, 144, 90);
         Slider(kFov, kFovValue, 456, 142, 160, 60, 130, std::min(std::max(ini.Get("fov", 90), 60), 130), L"\u00B0");
+        {
+            static const int kLanguageIds[] = { 0, 1, 3, 4, 5, 6 };
+            int lang = ini.Get("language", 0), pick = 0;
+            for (int i = 0; i < 6; i++)
+                if (kLanguageIds[i] == lang)
+                    pick = i;
+            Label(L"Language", 22, 170);
+            Combo(kLanguage, 140, 168, 186,
+                  { L"Automatic (Windows)", L"English", L"Deutsch", L"Fran\u00E7ais", L"Espa\u00F1ol", L"Italiano" }, pick);
+        }
         Check(kMotionBlur, L"Motion blur", 362, 170, ini.Get("motion_blur", 1) != 0, 96);
         Check(kDepthOfField, L"Depth of field", 462, 170, ini.Get("depth_of_field", 1) != 0, 104);
         Check(kCameraShake, L"Camera shake", 570, 170, ini.Get("camera_shake", 1) != 0, 104);

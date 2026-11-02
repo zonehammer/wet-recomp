@@ -96,6 +96,12 @@ namespace wet::options
     void SetHideBorders(bool v);
     // The game's motion blur, depth of field and camera shake (with its film
     // shake), on as designed (wet.ini motion_blur / depth_of_field / camera_shake).
+    // The game's language (Xbox language id: 1 English, 3 German, 4 French,
+    // 5 Spanish, 6 Italian - the five on the disc); wet.ini language, 0 = the
+    // Windows language when it is one of those, else English. Restart.
+    int Language();
+    int LanguageSetting();
+    void SetLanguage(int v);
     bool MotionBlur();
     void SetMotionBlur(bool v);
     bool DepthOfField();

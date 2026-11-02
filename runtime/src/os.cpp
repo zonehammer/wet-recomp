@@ -371,6 +371,8 @@ namespace wet::os
         return false;
     }
 
+    int UserLanguageId() { return PRIMARYLANGID(GetUserDefaultUILanguage()); }
+
     int DisplayRefreshRate()
     {
         DEVMODEW mode{};
@@ -497,6 +499,7 @@ namespace wet::os
     void SetDiagnosticWatch(DiagFaultHandler, DiagStepHandler) {}
     void OpenConsole() {}
     int DisplayRefreshRate() { return 60; }
+    int UserLanguageId() { return 0; }
     bool GameDisplayRect(int&, int&, int&, int&) { return false; }
     uint32_t CurrentHostThreadId() { return uint32_t(syscall(SYS_gettid)); }
 

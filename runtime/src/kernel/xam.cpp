@@ -7,6 +7,7 @@
 #include "input.h"
 #include "os.h"
 
+#include "options.h"
 #include <algorithm>
 
 using namespace wet;
@@ -14,7 +15,7 @@ using namespace wet;
 // ---------------------------------------------------------------------------
 // Console / title info
 // ---------------------------------------------------------------------------
-GUEST_IMPORT(XGetLanguage) { Ret(ctx, 1); }        // English
+GUEST_IMPORT(XGetLanguage) { Ret(ctx, uint32_t(options::Language())); }   // wet.ini language
 GUEST_IMPORT(XGetGameRegion) { Ret(ctx, 0xFFFF); } // region free
 
 GUEST_IMPORT(XamGetExecutionId)
@@ -33,7 +34,7 @@ GUEST_IMPORT(ExGetXConfigSetting)
     auto be32 = [&](uint32_t v) { value[0] = uint8_t(v >> 24); value[1] = uint8_t(v >> 16); value[2] = uint8_t(v >> 8); value[3] = uint8_t(v); };
 
     if (category == 0x0002 && setting == 0x0002)       be32(0x00001000);  // SECURED: AV region (NTSC-M)
-    else if (category == 0x0003 && setting == 0x0009)  be32(1);           // USER: language English
+    else if (category == 0x0003 && setting == 0x0009)  be32(uint32_t(options::Language()));   // USER: language
     else if (category == 0x0003 && setting == 0x000A)  be32(0x00040000);  // USER: video flags (widescreen)
     else if (category == 0x0003 && setting == 0x000B)  be32(0x00010001);  // USER: audio flags
     else if (category == 0x0003 && setting == 0x000C)  be32(0x00000040);  // USER: retail flags
