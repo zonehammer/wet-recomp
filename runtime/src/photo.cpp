@@ -97,6 +97,7 @@ namespace wet::photo
         uint8_t s_lt = 0, s_rt = 0;
         int16_t s_lx = 0, s_ly = 0, s_rx = 0, s_ry = 0;
         bool s_fast = false;
+        bool s_firstFrame = false;
 
         // HUD.
         std::atomic<uint32_t> s_hud{ 0 };
@@ -284,7 +285,12 @@ namespace wet::photo
             s_right = Normal(col[0]);
             s_up = Normal(col[1]);
             s_axis = Normal(col[2]);
-            s_pos = V3{ -Dot(t, col[0]), -Dot(t, col[1]), -Dot(t, col[2]) };
+            // t = -position R, so position = -t R^T = -(t.x col0 + t.y col1 + t.z col2).
+            s_pos = (col[0] * t.x + col[1] * t.y + col[2] * t.z) * -1.0;
+            double err = std::fabs(-Dot(s_pos, col[0]) - t.x) + std::fabs(-Dot(s_pos, col[1]) - t.y) +
+                         std::fabs(-Dot(s_pos, col[2]) - t.z);
+            if (err > 0.01)
+                Log("Photo mode: the view matrix doesn't round-trip (error %.3f)", err);
             // The projection's w = +-z tells which way the view looks.
             float w1 = LoadF(base, proj + 44), w2 = LoadF(base, proj + 56);
             float w = std::fabs(w1) == 1.0f ? w1 : w2;
@@ -297,6 +303,7 @@ namespace wet::photo
                 s_worldUp = s_worldUp * -1.0;
             s_startRight = s_right, s_startUp = s_up, s_startAxis = s_axis, s_startPos = s_pos;
             s_haveCamera = true;
+            s_firstFrame = true;
             s_lastUpdate = Seconds();
             Log("Photo mode camera at %.2f %.2f %.2f (%s matrices, looking along %saxis, up %c)", s_pos.x, s_pos.y,
                 s_pos.z, s_transposed ? "column" : "row", s_forwardSign > 0 ? "+" : "-", "xyz"[k]);
@@ -398,9 +405,20 @@ namespace wet::photo
             r[3][c] = -Dot(s_pos, cols[c]);
         }
         r[3][3] = 1;
+        double diff = 0;
         for (int i = 0; i < 4; i++)
             for (int j = 0; j < 4; j++)
-                StoreF(base, out + uint32_t(s_transposed ? j * 4 + i : i * 4 + j) * 4, float(r[i][j]));
+            {
+                uint32_t index = uint32_t(s_transposed ? j * 4 + i : i * 4 + j);
+                diff = std::max(diff, std::fabs(double(m[index]) - r[i][j]));
+                StoreF(base, out + index * 4, float(r[i][j]));
+            }
+        if (s_firstFrame)
+        {
+            // Right after the start nothing has moved: the view should be the game's.
+            s_firstFrame = false;
+            Log("Photo mode: first view differs from the game's by %.4f", diff);
+        }
         return true;
     }
 }
