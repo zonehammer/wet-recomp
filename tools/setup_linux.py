@@ -181,7 +181,7 @@ def main():
             sys.exit(f"{repo} exists and isn't a copy of the project; choose another --dir.")
         if run(["git", "clone", REPO_URL, repo], env=env) != 0:
             sys.exit("Couldn't download the source code from GitHub.")
-    run(["git", "-C", repo, "fetch", "--tags", "origin"], env=env)
+    run(["git", "-C", repo, "fetch", "--tags", "--force", "origin"], env=env)
     ref = args.branch
     if not ref:
         try:

@@ -445,7 +445,7 @@ namespace
             }
             else
                 Status(L"Updating the source code");
-            Run(L"git -C " + Quote(repo) + L" fetch --tags origin", root);
+            Run(L"git -C " + Quote(repo) + L" fetch --tags --force origin", root);
             if (Run(L"git -C " + Quote(repo) + L" checkout --force " + tag, root) == 0)
                 Log(L"Building release " + tag + L".");
             else if (Run(L"git -C " + Quote(repo) + L" checkout --force main", root) != 0 ||
