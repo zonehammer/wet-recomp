@@ -28,7 +28,7 @@ namespace wet::options
         std::atomic<bool> s_inCutscene{ false };
         std::atomic<int> s_videoMode{ 1 };
         int s_scale = 1, s_scaleRunning = 1;
-        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_fov{ 90 }, s_widescreen{ 0 }, s_widescreenHud{ 1 }, s_hideBorders{ 0 }, s_vsync{ 0 }, s_buttonPrompts{ 0 }, s_mouseAim{ 1 }, s_mouseSens{ 50 }, s_mouseInvert{ 0 }, s_mouseDirect{ 1 }, s_shaderCache{ 1 }, s_asyncShaders{ 1 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 };
+        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_fov{ 90 }, s_widescreen{ 0 }, s_widescreenHud{ 1 }, s_hideBorders{ 0 }, s_vsync{ 0 }, s_buttonPrompts{ 0 }, s_mouseAim{ 1 }, s_mouseSens{ 50 }, s_mouseInvert{ 0 }, s_mouseDirect{ 1 }, s_shaderCache{ 1 }, s_asyncShaders{ 1 }, s_shaderPreload{ 0 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 };
         constexpr const char* kFile = "wet.ini";
         // Mouse button bindings: left, right, middle, back (X1), forward (X2).
         constexpr const char* kMouseKeys[5] = { "mouse_left", "mouse_right", "mouse_middle", "mouse_back", "mouse_forward" };
@@ -147,6 +147,8 @@ namespace wet::options
             std::fprintf(f, "shader_cache = %d\n", s_shaderCache.load());
             std::fprintf(f, "# async_shaders: 1 = don't wait for new shaders (an object may appear a frame or two late instead of a stutter), 0 = wait\n");
             std::fprintf(f, "async_shaders = %d\n", s_asyncShaders.load());
+            std::fprintf(f, "# shader_preload: 1 = build every cached shader before the first frame (slower start, no pop-in); 0 = build them in the background while the game starts\n");
+            std::fprintf(f, "shader_preload = %d\n", s_shaderPreload.load());
             {
                 std::lock_guard lock(s_monitorLock);
                 std::fprintf(f, "# monitor: the display the game opens on (as the launcher lists it, e.g. \\\\.\\DISPLAY2); empty = the main display\n");
@@ -206,6 +208,7 @@ namespace wet::options
                 else if (!std::strcmp(key, "video_mode")) s_videoMode = value != 0;
                 else if (!std::strcmp(key, "cutscene_30fps")) s_cutsceneFps = value != 0;
                 else if (!std::strcmp(key, "async_shaders")) s_asyncShaders = value != 0;
+                else if (!std::strcmp(key, "shader_preload")) s_shaderPreload = value != 0;
                 else if (!std::strcmp(key, "shader_cache")) s_shaderCache = value != 0;
                 else if (!std::strcmp(key, "mouse_aim")) s_mouseAim = value != 0;
                 else if (!std::strcmp(key, "mouse_sensitivity")) s_mouseSens = Clamp(value, 1, 100);
@@ -309,6 +312,7 @@ namespace wet::options
     void SetFilter(int v) { s_filter = Clamp(v, 0, 3); Save(); }
     int FilmGrain() { return s_filmGrain; }
     bool AsyncShaders() { return s_asyncShaders != 0; }
+    bool ShaderPreload() { return s_shaderPreload != 0; }
     void SetAsyncShaders(bool v) { s_asyncShaders = v; Save(); }
     bool ShaderCache() { return s_shaderCache != 0; }
     bool MouseAim() { return s_mouseAim.load(std::memory_order_relaxed) != 0; }

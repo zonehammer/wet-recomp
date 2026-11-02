@@ -1108,6 +1108,7 @@ namespace wet::renderer
         xe::gpu::wet_film_grain = float(options::FilmGrain()) / 100.0f;
 #if WET_HAVE_D3D12
         xe::gpu::d3d12::wet_async_pipelines = options::AsyncShaders();
+        xe::gpu::d3d12::wet_preload_pipelines = options::ShaderPreload();
 #endif
         xe::gpu::wet_gpu_progress = renderer_host::GpuProgress;
         xe::gpu::wet_register_sync_hook = [] { renderer_host::RequestRegisterSync(); };
@@ -1175,7 +1176,12 @@ namespace wet::renderer
             auto started = std::chrono::steady_clock::now();
             s_graphics->InitializeShaderStorage(std::filesystem::path(s_shaderCacheRoot), titleId, true);
             double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
-            std::snprintf(text, sizeof(text), "Renderer: shader cache in %s loaded in %.1f s", s_shaderCacheRoot.c_str(), seconds);
+            bool background = false;
+#if WET_HAVE_D3D12
+            background = xe::gpu::d3d12::wet_async_pipelines && !xe::gpu::d3d12::wet_preload_pipelines;
+#endif
+            std::snprintf(text, sizeof(text), "Renderer: shader cache in %s loaded in %.1f s%s", s_shaderCacheRoot.c_str(), seconds,
+                          background ? " (pipelines finish building in the background: see xenia_gpu.log)" : "");
             renderer_host::Log(text);
         }
         renderer_host::StartThread(DumpThread, nullptr, "Frame dump");

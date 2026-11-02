@@ -56,6 +56,9 @@ namespace wet::options
     // Skip draws whose shader is still compiling instead of waiting (wet.ini async_shaders).
     bool AsyncShaders();
     void SetAsyncShaders(bool v);
+    // Build every cached shader before the first frame instead of in the
+    // background while the game starts (wet.ini shader_preload; restart).
+    bool ShaderPreload();
     bool MouseAim();
     void SetMouseAim(bool v);
     int MouseSensitivity();

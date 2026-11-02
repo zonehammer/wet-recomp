@@ -107,7 +107,7 @@ namespace
         kFps = 100, kResolution, kFullscreen, kShowFps,
         kFilter, kSharpness, kSharpnessValue, kAntialiasing, kGrain, kGrainValue, kFov, kFovValue, kWidescreen,
         kMouseAim, kSensitivity, kSensitivityValue, kInvertY, kVibration,
-        kShaderCache, kVideoMode, kPopups, kAsyncShaders,
+        kShaderCache, kVideoMode, kPopups, kAsyncShaders, kShaderPreload,
         kStatus, kPlay, kSaves, kClearShaders, kKeyboard,
         kVsync, kHideBorders, kWideHud, kCheckUpdates, kReportBug, kUpdateText, kPrompts,
         kMonitor, kPadTest, kAchievements,
@@ -482,6 +482,7 @@ namespace
         s_ini.Set("video_mode", Checked(kVideoMode));
         s_ini.Set("achievement_popups", Checked(kPopups));
         s_ini.Set("async_shaders", Checked(kAsyncShaders));
+        s_ini.Set("shader_preload", Checked(kShaderPreload));
         s_ini.SetString("monitor", ChosenMonitor(Selected(kMonitor)));
         if (!s_ini.Save(s_iniPath))
             MessageBoxW(s_window, L"Could not save wet.ini.", L"WET Launcher", MB_ICONERROR);
@@ -1015,9 +1016,10 @@ namespace
 
         // Other
         Group(L"Other", 350, 180, 330, 134);
-        Check(kShaderCache, L"Shader cache (less stutter after the first time)", 362, 200, ini.Get("shader_cache", 1) != 0, 310);
-        Check(kAsyncShaders, L"Don't wait for new shaders (objects may pop in)", 362, 224, ini.Get("async_shaders", 1) != 0, 310);
-        Check(kPopups, L"Achievement pop-ups", 362, 248, ini.Get("achievement_popups", 1) != 0, 200);
+        Check(kShaderCache, L"Shader cache (less stutter after the first time)", 362, 196, ini.Get("shader_cache", 1) != 0, 310);
+        Check(kAsyncShaders, L"Don't wait for new shaders (objects may pop in)", 362, 216, ini.Get("async_shaders", 1) != 0, 310);
+        Check(kShaderPreload, L"Build all cached shaders before starting (slower start)", 362, 236, ini.Get("shader_preload", 0) != 0, 310);
+        Check(kPopups, L"Achievement pop-ups", 362, 256, ini.Get("achievement_popups", 1) != 0, 200);
         Make(L"BUTTON", L"Open saves folder", BS_PUSHBUTTON | WS_TABSTOP, 362, 278, 145, 26, kSaves);
         Make(L"BUTTON", L"Clear shader cache", BS_PUSHBUTTON | WS_TABSTOP, 517, 278, 150, 26, kClearShaders);
 
