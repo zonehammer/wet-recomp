@@ -29,6 +29,8 @@ namespace wet::renderer
     uint32_t ReadRegister(uint32_t index);
     // Logs every draw of the next `frames` frames (diagnostics, F9).
     void RequestDrawTrace(int frames);
+    // Ctrl+F9: saves the textures the next frame's draws read to texdump\ (diagnostics).
+    void RequestTextureDump();
     // An achievement pop-up is waiting (achievements.cpp); any thread.
     void AchievementUnlocked();
     // F8: saves the next 48 presented frames to frames/burst_*.png (diagnostics).

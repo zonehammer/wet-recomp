@@ -1815,6 +1815,11 @@ namespace wet::renderer
         xe::gpu::wet_draw_trace_frames = frames;
     }
 
+    void RequestTextureDump()
+    {
+        xe::gpu::wet_texture_dump_frames = 2;
+    }
+
     uint32_t ReadRegister(uint32_t index)
     {
         if (!s_graphics || index >= xe::gpu::RegisterFile::kRegisterCount)

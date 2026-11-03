@@ -574,8 +574,17 @@ namespace wet
             bool f9Now = (GetAsyncKeyState(VK_F9) & 0x8000) != 0;
             if (f9Now && !f9)
             {
-                Log("Input: F9 - tracing the next 2 frames' draws to xenia_gpu.log");
-                renderer::RequestDrawTrace(2);
+                if (GetAsyncKeyState(VK_CONTROL) & 0x8000)
+                {
+                    // Ctrl+F9: the textures this frame's draws read, to texdump\.
+                    Log("Input: Ctrl+F9 - saving this frame's textures to texdump");
+                    renderer::RequestTextureDump();
+                }
+                else
+                {
+                    Log("Input: F9 - tracing the next 2 frames' draws to xenia_gpu.log");
+                    renderer::RequestDrawTrace(2);
+                }
             }
             f9 = f9Now;
             // F6: 30 / 60 / 120 / 144 / 165 / 240 FPS / the monitor rate.

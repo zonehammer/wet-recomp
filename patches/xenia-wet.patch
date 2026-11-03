@@ -107,21 +107,24 @@ index 8f6087b05..47c87eec0 100644
  
  static void set_name(HANDLE thread, const std::string_view name) {
 diff --git a/src/xenia/gpu/command_processor.cc b/src/xenia/gpu/command_processor.cc
-index ce08d19bd..306b55bd1 100644
+index ce08d19bd..1d61a877c 100644
 --- a/src/xenia/gpu/command_processor.cc
 +++ b/src/xenia/gpu/command_processor.cc
-@@ -9,6 +9,10 @@
+@@ -9,6 +9,13 @@
  
  #include "xenia/gpu/command_processor.h"
  
 +#include <chrono>
 +#include <map>
 +#include <tuple>
++#include <cstdio>
++#include <filesystem>
++#include <set>
 +
  #include <algorithm>
  #include <cinttypes>
  #include <cmath>
-@@ -32,6 +36,177 @@
+@@ -32,6 +39,216 @@
  namespace xe {
  namespace gpu {
  
@@ -131,6 +134,7 @@ index ce08d19bd..306b55bd1 100644
 +
 +#if XE_WET_RUNTIME
 +int wet_draw_trace_frames = 0;
++int wet_texture_dump_frames = 0;
 +std::atomic<float> wet_film_grain{1.0f};
 +uint64_t wet_grain_ps_hash = 0xEB5E3543D07E32D1ull;
 +uint32_t wet_grain_const = (256 + 14) * 4;  // pixel shader c14.x
@@ -268,6 +272,44 @@ index ce08d19bd..306b55bd1 100644
 +  }
 +}
 +
++// The base level of each 2D texture a draw reads, once per address, as it is in
++// guest memory (tiled, guest endianness): texdump/<address>_f<format>_<w>x<h>_
++// t<tiled>_e<endian>_p<pitch>.bin. tools/texdump_view.py makes pictures of them.
++void WetDumpTextures(const RegisterFile& regs, const Memory& memory,
++                     const Shader* pixel_shader) {
++  if (!pixel_shader) return;
++  static std::set<uint32_t> s_done;
++  for (const Shader::TextureBinding& tb : pixel_shader->texture_bindings()) {
++    xenos::xe_gpu_texture_fetch_t f = regs.GetTextureFetch(tb.fetch_constant);
++    if (f.type != xenos::FetchConstantType::kTexture ||
++        f.dimension != xenos::DataDimension::k2DOrStacked)
++      continue;
++    uint32_t addr = f.base_address << 12;
++    uint32_t w = f.size_2d.width + 1, h = f.size_2d.height + 1;
++    if (!addr || w > 512 || h > 512 || !s_done.insert(addr).second) continue;
++    const FormatInfo* info = FormatInfo::Get(f.format);
++    uint32_t bw = info->block_width, bh = info->block_height;
++    uint32_t bpb = info->bits_per_pixel * bw * bh / 8;
++    // Storage: 32x32 blocks for tiled textures, the pitch for linear ones.
++    uint32_t wb = (w + bw - 1) / bw, hb = (h + bh - 1) / bh;
++    uint32_t pitch_b = f.tiled ? (wb + 31) & ~31u
++                               : std::max(wb, uint32_t(f.pitch) * 32 / bw);
++    uint32_t height_b = (hb + 31) & ~31u;
++    size_t bytes = size_t(pitch_b) * height_b * bpb;
++    if (bytes > (8u << 20)) continue;
++    const uint8_t* data = memory.TranslatePhysical<const uint8_t*>(addr);
++    std::error_code ec;
++    std::filesystem::create_directories("texdump", ec);
++    std::string name = fmt::format(
++        "texdump/{:08X}_f{}_{}x{}_t{}_e{}_p{}.bin", addr, uint32_t(f.format), w,
++        h, uint32_t(f.tiled), uint32_t(f.endianness), pitch_b);
++    if (FILE* out = std::fopen(name.c_str(), "wb")) {
++      std::fwrite(data, 1, bytes, out);
++      std::fclose(out);
++    }
++  }
++}
++
 +void WetTraceSkip(const Shader& vertex_shader, const char* why,
 +                  uint32_t index_count) {
 +  XELOGW("DRAWTRACE: draw VS {:016X} skipped ({}), count {}",
@@ -299,7 +341,7 @@ index ce08d19bd..306b55bd1 100644
  using namespace xe::gpu::xenos;
  
  CommandProcessor::CommandProcessor(GraphicsSystem* graphics_system,
-@@ -244,6 +419,7 @@ void CommandProcessor::WorkerThreadMain() {
+@@ -244,6 +461,7 @@ void CommandProcessor::WorkerThreadMain() {
        xe::store_and_swap<uint32_t>(
            memory_->TranslatePhysical(read_ptr_writeback_ptr_), read_ptr_index_);
      }
@@ -307,7 +349,7 @@ index ce08d19bd..306b55bd1 100644
  
      // FIXME: We're supposed to process the WAIT_UNTIL register at this point,
      // but no games seem to actually use it.
-@@ -349,6 +525,7 @@ void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
+@@ -349,6 +567,7 @@ void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
        uint32_t scratch_addr = regs.values[XE_GPU_REG_SCRATCH_ADDR];
        uint32_t mem_addr = scratch_addr + (scratch_reg * 4);
        xe::store_and_swap<uint32_t>(memory_->TranslatePhysical(mem_addr), value);
@@ -315,7 +357,7 @@ index ce08d19bd..306b55bd1 100644
      }
    } else {
      switch (index) {
-@@ -633,6 +810,26 @@ bool CommandProcessor::ExecutePacket(RingBuffer* reader) {
+@@ -633,6 +852,26 @@ bool CommandProcessor::ExecutePacket(RingBuffer* reader) {
    }
  }
  
@@ -342,7 +384,7 @@ index ce08d19bd..306b55bd1 100644
  bool CommandProcessor::ExecutePacketType0(RingBuffer* reader, uint32_t packet) {
    // Type-0 packet.
    // Write count registers in sequence to the registers starting at
-@@ -650,6 +847,13 @@ bool CommandProcessor::ExecutePacketType0(RingBuffer* reader, uint32_t packet) {
+@@ -650,6 +889,13 @@ bool CommandProcessor::ExecutePacketType0(RingBuffer* reader, uint32_t packet) {
  
    uint32_t base_index = (packet & 0x7FFF);
    uint32_t write_one_reg = (packet >> 15) & 0x1;
@@ -356,7 +398,7 @@ index ce08d19bd..306b55bd1 100644
    for (uint32_t m = 0; m < count; m++) {
      uint32_t reg_data = reader->ReadAndSwap<uint32_t>();
      uint32_t target_index = write_one_reg ? base_index : base_index + m;
-@@ -743,21 +947,26 @@ bool CommandProcessor::ExecutePacketType3(RingBuffer* reader, uint32_t packet) {
+@@ -743,21 +989,26 @@ bool CommandProcessor::ExecutePacketType3(RingBuffer* reader, uint32_t packet) {
        break;
      case PM4_MEM_WRITE:
        result = ExecutePacketType3_MEM_WRITE(reader, packet, count);
@@ -383,7 +425,7 @@ index ce08d19bd..306b55bd1 100644
        break;
      case PM4_DRAW_INDX:
        result = ExecutePacketType3_DRAW_INDX(reader, packet, count);
-@@ -932,11 +1141,44 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(RingBuffer* reader,
+@@ -932,11 +1183,46 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(RingBuffer* reader,
    uint32_t frontbuffer_ptr = reader->ReadAndSwap<uint32_t>();
    uint32_t frontbuffer_width = reader->ReadAndSwap<uint32_t>();
    uint32_t frontbuffer_height = reader->ReadAndSwap<uint32_t>();
@@ -425,11 +467,13 @@ index ce08d19bd..306b55bd1 100644
 +    XELOGW("DRAWTRACE: ---- swap {} ----", counter_);
 +    --wet_draw_trace_frames;
 +  }
++  if (wet_texture_dump_frames > 0 && --wet_texture_dump_frames == 0)
++    XELOGW("Textures: saved what this frame's draws read to texdump");
 +#endif
    return true;
  }
  
-@@ -974,7 +1216,24 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -974,7 +1260,24 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
                  : register_file_->values[poll_reg_addr];
  
    bool matched = false;
@@ -454,7 +498,7 @@ index ce08d19bd..306b55bd1 100644
      uint32_t value = value_ref;
      if (is_memory) {
        trace_writer_.WriteMemoryRead(CpuToGpu(poll_reg_addr & ~uint32_t(0x3)),
-@@ -1013,16 +1272,31 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -1013,16 +1316,31 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
          matched = true;
          break;
      }
@@ -486,7 +530,7 @@ index ce08d19bd..306b55bd1 100644
          xe::threading::SyncMemory();
          ReturnFromWait();
  
-@@ -1035,6 +1309,17 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -1035,6 +1353,17 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
        }
      }
    } while (!matched);
@@ -504,7 +548,7 @@ index ce08d19bd..306b55bd1 100644
  
    return true;
  }
-@@ -1455,10 +1740,14 @@ bool CommandProcessor::ExecutePacketType3_SET_CONSTANT(RingBuffer* reader,
+@@ -1455,10 +1784,14 @@ bool CommandProcessor::ExecutePacketType3_SET_CONSTANT(RingBuffer* reader,
        reader->AdvanceRead((count - 1) * sizeof(uint32_t));
        return true;
    }
@@ -519,7 +563,7 @@ index ce08d19bd..306b55bd1 100644
    return true;
  }
  
-@@ -1467,10 +1756,14 @@ bool CommandProcessor::ExecutePacketType3_SET_CONSTANT2(RingBuffer* reader,
+@@ -1467,10 +1800,14 @@ bool CommandProcessor::ExecutePacketType3_SET_CONSTANT2(RingBuffer* reader,
                                                          uint32_t count) {
    uint32_t offset_type = reader->ReadAndSwap<uint32_t>();
    uint32_t index = offset_type & 0xFFFF;
@@ -534,7 +578,7 @@ index ce08d19bd..306b55bd1 100644
    return true;
  }
  
-@@ -1506,11 +1799,20 @@ bool CommandProcessor::ExecutePacketType3_LOAD_ALU_CONSTANT(RingBuffer* reader,
+@@ -1506,11 +1843,20 @@ bool CommandProcessor::ExecutePacketType3_LOAD_ALU_CONSTANT(RingBuffer* reader,
        return true;
    }
    trace_writer_.WriteMemoryRead(CpuToGpu(address), size_dwords * 4);
@@ -555,7 +599,7 @@ index ce08d19bd..306b55bd1 100644
    return true;
  }
  
-@@ -1518,10 +1820,14 @@ bool CommandProcessor::ExecutePacketType3_SET_SHADER_CONSTANTS(
+@@ -1518,10 +1864,14 @@ bool CommandProcessor::ExecutePacketType3_SET_SHADER_CONSTANTS(
      RingBuffer* reader, uint32_t packet, uint32_t count) {
    uint32_t offset_type = reader->ReadAndSwap<uint32_t>();
    uint32_t index = offset_type & 0xFFFF;
@@ -571,10 +615,10 @@ index ce08d19bd..306b55bd1 100644
  }
  
 diff --git a/src/xenia/gpu/command_processor.h b/src/xenia/gpu/command_processor.h
-index ffc8eeffa..068436e63 100644
+index ffc8eeffa..eadd50a93 100644
 --- a/src/xenia/gpu/command_processor.h
 +++ b/src/xenia/gpu/command_processor.h
-@@ -35,9 +35,62 @@ class ByteStream;
+@@ -35,9 +35,66 @@ class ByteStream;
  
  namespace gpu {
  
@@ -600,6 +644,10 @@ index ffc8eeffa..068436e63 100644
 +#if XE_WET_RUNTIME
 +// WET: >0 while draws are being traced (diagnostics, F9 / WET_DRAW_TRACE_AT).
 +extern int wet_draw_trace_frames;
++// WET: >0 while the textures draws read are saved to texdump\ (Ctrl+F9).
++extern int wet_texture_dump_frames;
++void WetDumpTextures(const RegisterFile& regs, const Memory& memory,
++                     const Shader* pixel_shader);
 +// WET: film grain strength (1 = the game's own). The final composite pixel
 +// shader (ucode hash wet_grain_ps_hash) adds procedural grain scaled by one of
 +// its float constants (register offset wet_grain_const from constant 0).
@@ -637,7 +685,7 @@ index ffc8eeffa..068436e63 100644
  struct SwapState {
    // Lock must be held when changing data in this structure.
    std::mutex mutex;
-@@ -71,6 +124,10 @@ class CommandProcessor {
+@@ -71,6 +128,10 @@ class CommandProcessor {
      kNone,
      kFxaa,
      kFxaaExtreme,
@@ -648,7 +696,7 @@ index ffc8eeffa..068436e63 100644
    };
  
    CommandProcessor(GraphicsSystem* graphics_system,
-@@ -78,6 +135,10 @@ class CommandProcessor {
+@@ -78,6 +139,10 @@ class CommandProcessor {
    virtual ~CommandProcessor();
  
    uint32_t counter() const { return counter_; }
@@ -659,7 +707,7 @@ index ffc8eeffa..068436e63 100644
    void increment_counter() { counter_++; }
  
    Shader* active_vertex_shader() const { return active_vertex_shader_; }
-@@ -152,6 +213,17 @@ class CommandProcessor {
+@@ -152,6 +217,17 @@ class CommandProcessor {
    virtual void ShutdownContext() = 0;
  
    virtual void WriteRegister(uint32_t index, uint32_t value);
@@ -677,7 +725,7 @@ index ffc8eeffa..068436e63 100644
  
    const reg::DC_LUT_30_COLOR* gamma_ramp_256_entry_table() const {
      return gamma_ramp_256_entry_table_;
-@@ -270,6 +342,9 @@ class CommandProcessor {
+@@ -270,6 +346,9 @@ class CommandProcessor {
    std::vector<uint32_t> me_bin_;
  
    uint32_t counter_ = 0;
@@ -688,7 +736,7 @@ index ffc8eeffa..068436e63 100644
    uint32_t primary_buffer_ptr_ = 0;
    uint32_t primary_buffer_size_ = 0;
 diff --git a/src/xenia/gpu/d3d12/d3d12_command_processor.cc b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
-index 0ec70a7d1..24a59a61a 100644
+index 0ec70a7d1..f5cae5a4f 100644
 --- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
 +++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
 @@ -8,6 +8,7 @@
@@ -1049,7 +1097,7 @@ index 0ec70a7d1..24a59a61a 100644
        return true;
      }
    }
-@@ -2070,8 +2343,82 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+@@ -2070,8 +2343,84 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
    }
    if (!primitive_processing_result.host_draw_vertex_count) {
      // Nothing to draw.
@@ -1064,6 +1112,8 @@ index 0ec70a7d1..24a59a61a 100644
 +    WetTraceDraw(regs, *memory_, *vertex_shader, pixel_shader,
 +                 uint32_t(primitive_type), index_count,
 +                 index_buffer_info != nullptr);
++  if (wet_texture_dump_frames > 0)
++    WetDumpTextures(regs, *memory_, pixel_shader);
 +  // Screen-edge frame (vignette / cinematic borders) switched off.
 +  if (WetIsBorderDraw(pixel_shader, wet_swap_count()) &&
 +      wet_hide_borders.load(std::memory_order_relaxed)) {
@@ -1132,7 +1182,7 @@ index 0ec70a7d1..24a59a61a 100644
  
    reg::RB_DEPTHCONTROL normalized_depth_control =
        draw_util::GetNormalizedDepthControl(regs);
-@@ -2104,6 +2451,41 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+@@ -2104,6 +2453,41 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
                                      normalized_color_mask, *vertex_shader)) {
      return false;
    }
@@ -1174,7 +1224,7 @@ index 0ec70a7d1..24a59a61a 100644
  
    // Create the pipeline (for this, need the actually used render target formats
    // from the render target cache), translating the shaders - doing this now to
-@@ -2169,6 +2551,13 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+@@ -2169,6 +2553,13 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
            render_target_cache_->depth_float24_convert_in_pixel_shader(),
        host_render_targets_used, pixel_shader && pixel_shader->writes_depth(),
        viewport_info);
@@ -1188,7 +1238,7 @@ index 0ec70a7d1..24a59a61a 100644
    draw_util::Scissor scissor;
    draw_util::GetScissor(regs, scissor);
    scissor.offset[0] *= draw_resolution_scale_x;
-@@ -2467,6 +2856,11 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+@@ -2467,6 +2858,11 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
      }
    }
  
@@ -1200,7 +1250,7 @@ index 0ec70a7d1..24a59a61a 100644
    return true;
  }
  
-@@ -2663,6 +3057,21 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
+@@ -2663,6 +3059,21 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
        }
        frame_completed_ = frame;
      }
@@ -1222,7 +1272,7 @@ index 0ec70a7d1..24a59a61a 100644
    }
  
    if (!submission_open_) {
-@@ -2672,6 +3081,12 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
+@@ -2672,6 +3083,12 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
      // end of the submission (when async pipeline creation requests are
      // fulfilled).
      deferred_command_list_.Reset();
@@ -1235,7 +1285,7 @@ index 0ec70a7d1..24a59a61a 100644
  
      // Reset cached state of the command list.
      ff_viewport_update_needed_ = true;
-@@ -2790,6 +3205,23 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
+@@ -2790,6 +3207,23 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
      // destroyed between frames.
      SubmitBarriers();
  
@@ -1259,7 +1309,7 @@ index 0ec70a7d1..24a59a61a 100644
      // TODO(Triang3l): Error checking.
  
      ID3D12CommandQueue* direct_queue = provider.GetDirectQueue();
-@@ -2840,6 +3272,25 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
+@@ -2840,6 +3274,25 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
        pix_capturing_ = false;
      }
      frame_open_ = false;
@@ -1285,7 +1335,7 @@ index 0ec70a7d1..24a59a61a 100644
      // Submission already closed now, so minus 1.
      closed_frame_submissions_[(frame_current_++) % kQueueFrames] =
          GetCurrentSubmission() - 1;
-@@ -2882,6 +3333,145 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
+@@ -2882,6 +3335,145 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
    return true;
  }
  
@@ -1431,7 +1481,7 @@ index 0ec70a7d1..24a59a61a 100644
  bool D3D12CommandProcessor::CanEndSubmissionImmediately() const {
    return !submission_open_ || !pipeline_cache_->IsCreatingPipelines();
  }
-@@ -4359,6 +4949,304 @@ void D3D12CommandProcessor::WriteGammaRampSRV(
+@@ -4359,6 +4951,304 @@ void D3D12CommandProcessor::WriteGammaRampSRV(
    device->CreateShaderResourceView(gamma_ramp_buffer_.Get(), &desc, handle);
  }
  
