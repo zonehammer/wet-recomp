@@ -88,7 +88,10 @@ namespace wet::outfit
             e.colour = 0;
             it = s_entries.insert_or_assign(phys, std::move(e)).first;
             if (colour == 0)
+            {
+                Log("Outfit: Rubi's jacket at %08X (left as it is: Original)", phys);
                 return;
+            }
         }
         Entry& e = it->second;
         std::vector<uint8_t> base = e.base, mips = e.mips;
