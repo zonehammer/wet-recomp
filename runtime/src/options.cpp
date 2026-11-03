@@ -30,7 +30,7 @@ namespace wet::options
         std::atomic<bool> s_inCutscene{ false };
         std::atomic<int> s_videoMode{ 1 };
         int s_scale = 1, s_scaleRunning = 1;
-        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_fov{ 90 }, s_widescreen{ 0 }, s_widescreenHud{ 1 }, s_hideBorders{ 0 }, s_vsync{ 0 }, s_buttonPrompts{ 0 }, s_mouseAim{ 1 }, s_mouseSens{ 50 }, s_mouseInvert{ 0 }, s_mouseDirect{ 1 }, s_mouseNative{ 1 }, s_shaderCache{ 1 }, s_asyncShaders{ 1 }, s_shaderPreload{ 0 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 }, s_motionBlur{ 1 }, s_depthOfField{ 1 }, s_cameraShake{ 1 }, s_language{ 0 };
+        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_fov{ 90 }, s_widescreen{ 0 }, s_widescreenHud{ 1 }, s_hideBorders{ 0 }, s_vsync{ 0 }, s_buttonPrompts{ 0 }, s_mouseAim{ 1 }, s_mouseSens{ 50 }, s_mouseInvert{ 0 }, s_mouseDirect{ 1 }, s_mouseNative{ 1 }, s_skipIntro{ 1 }, s_aniso{ 1 }, s_autoBackup{ 1 }, s_shaderCache{ 1 }, s_asyncShaders{ 1 }, s_shaderPreload{ 0 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 }, s_motionBlur{ 1 }, s_depthOfField{ 1 }, s_cameraShake{ 1 }, s_language{ 0 };
         constexpr const char* kFile = "wet.ini";
         // Mouse button bindings: left, right, middle, back (X1), forward (X2).
         constexpr const char* kMouseKeys[5] = { "mouse_left", "mouse_right", "mouse_middle", "mouse_back", "mouse_forward" };
@@ -136,6 +136,12 @@ namespace wet::options
             std::fprintf(f, "mouse_direct = %d\n", s_mouseDirect.load());
             std::fprintf(f, "# mouse_native: 1 = the mouse turns the third-person camera directly (native mouse look); 0 = through the right stick\n");
             std::fprintf(f, "mouse_native = %d\n", s_mouseNative.load());
+            std::fprintf(f, "# skip_intro: 1 = straight to the title screen (no logo / legal movies at startup)\n");
+            std::fprintf(f, "skip_intro = %d\n", s_skipIntro.load());
+            std::fprintf(f, "# anisotropic_filtering: 1 = 16x (sharper floors and walls at an angle), 0 = as the game sets it\n");
+            std::fprintf(f, "anisotropic_filtering = %d\n", s_aniso.load());
+            std::fprintf(f, "# save_backups: 1 = copy the saves to game\\hdd\\save-backups at each start (the last 10 are kept)\n");
+            std::fprintf(f, "save_backups = %d\n", s_autoBackup.load());
             std::fprintf(f, "# mouse buttons: A B X Y LB RB LT RT LTHUMB RTHUMB START BACK UP DOWN LEFT RIGHT or NONE\n");
             for (int i = 0; i < 5; i++)
                 std::fprintf(f, "%s = %s\n", kMouseKeys[i], s_mouseBind[i].c_str());
@@ -242,6 +248,9 @@ namespace wet::options
                 else if (!std::strcmp(key, "mouse_invert_y")) s_mouseInvert = value != 0;
                 else if (!std::strcmp(key, "mouse_direct")) s_mouseDirect = value != 0;
                 else if (!std::strcmp(key, "mouse_native")) s_mouseNative = value != 0;
+                else if (!std::strcmp(key, "skip_intro")) s_skipIntro = value != 0;
+                else if (!std::strcmp(key, "anisotropic_filtering")) s_aniso = value != 0;
+                else if (!std::strcmp(key, "save_backups")) s_autoBackup = value != 0;
                 else if (!std::strcmp(key, "film_grain")) s_filmGrain = Clamp(value, 0, 100);
                 else if (!std::strcmp(key, "fov")) s_fov = Clamp(value, 60, 130);
                 else if (!std::strcmp(key, "widescreen")) s_widescreen = value != 0;
@@ -352,6 +361,17 @@ namespace wet::options
     bool MouseDirect() { return s_mouseDirect.load(std::memory_order_relaxed) != 0; }
     void SetMouseDirect(bool v) { s_mouseDirect = v; Save(); }
     bool MouseNative() { return s_mouseNative.load(std::memory_order_relaxed) != 0; }
+    bool SkipIntro()
+    {
+        // The soak test's recordings and script expect the movies (WET_NO_SKIP_INTRO).
+        static const bool forcedOff = std::getenv("WET_NO_SKIP_INTRO") != nullptr;
+        return !forcedOff && s_skipIntro.load(std::memory_order_relaxed) != 0;
+    }
+    void SetSkipIntro(bool v) { s_skipIntro = v; Save(); }
+    bool AnisotropicFiltering() { return s_aniso.load(std::memory_order_relaxed) != 0; }
+    void SetAnisotropicFiltering(bool v) { s_aniso = v; Save(); }
+    bool SaveBackups() { return s_autoBackup.load(std::memory_order_relaxed) != 0; }
+    void SetSaveBackups(bool v) { s_autoBackup = v; Save(); }
     void SetMouseNative(bool v) { s_mouseNative = v; Save(); }
     std::string KeyBinding(int action)
     {

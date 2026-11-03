@@ -107,7 +107,7 @@ index 8f6087b05..47c87eec0 100644
  
  static void set_name(HANDLE thread, const std::string_view name) {
 diff --git a/src/xenia/gpu/command_processor.cc b/src/xenia/gpu/command_processor.cc
-index ce08d19bd..2394cd326 100644
+index ce08d19bd..86f8005fb 100644
 --- a/src/xenia/gpu/command_processor.cc
 +++ b/src/xenia/gpu/command_processor.cc
 @@ -9,6 +9,15 @@
@@ -126,7 +126,7 @@ index ce08d19bd..2394cd326 100644
  #include <algorithm>
  #include <cinttypes>
  #include <cmath>
-@@ -32,6 +41,252 @@
+@@ -32,6 +41,253 @@
  namespace xe {
  namespace gpu {
  
@@ -137,6 +137,7 @@ index ce08d19bd..2394cd326 100644
 +#if XE_WET_RUNTIME
 +int wet_draw_trace_frames = 0;
 +int wet_texture_dump_frames = 0;
++std::atomic<bool> wet_force_aniso{false};
 +std::atomic<float> wet_film_grain{1.0f};
 +uint64_t wet_grain_ps_hash = 0xEB5E3543D07E32D1ull;
 +uint32_t wet_grain_const = (256 + 14) * 4;  // pixel shader c14.x
@@ -379,7 +380,7 @@ index ce08d19bd..2394cd326 100644
  using namespace xe::gpu::xenos;
  
  CommandProcessor::CommandProcessor(GraphicsSystem* graphics_system,
-@@ -244,6 +499,7 @@ void CommandProcessor::WorkerThreadMain() {
+@@ -244,6 +500,7 @@ void CommandProcessor::WorkerThreadMain() {
        xe::store_and_swap<uint32_t>(
            memory_->TranslatePhysical(read_ptr_writeback_ptr_), read_ptr_index_);
      }
@@ -387,7 +388,7 @@ index ce08d19bd..2394cd326 100644
  
      // FIXME: We're supposed to process the WAIT_UNTIL register at this point,
      // but no games seem to actually use it.
-@@ -349,6 +605,7 @@ void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
+@@ -349,6 +606,7 @@ void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
        uint32_t scratch_addr = regs.values[XE_GPU_REG_SCRATCH_ADDR];
        uint32_t mem_addr = scratch_addr + (scratch_reg * 4);
        xe::store_and_swap<uint32_t>(memory_->TranslatePhysical(mem_addr), value);
@@ -395,7 +396,7 @@ index ce08d19bd..2394cd326 100644
      }
    } else {
      switch (index) {
-@@ -633,6 +890,26 @@ bool CommandProcessor::ExecutePacket(RingBuffer* reader) {
+@@ -633,6 +891,26 @@ bool CommandProcessor::ExecutePacket(RingBuffer* reader) {
    }
  }
  
@@ -422,7 +423,7 @@ index ce08d19bd..2394cd326 100644
  bool CommandProcessor::ExecutePacketType0(RingBuffer* reader, uint32_t packet) {
    // Type-0 packet.
    // Write count registers in sequence to the registers starting at
-@@ -650,6 +927,13 @@ bool CommandProcessor::ExecutePacketType0(RingBuffer* reader, uint32_t packet) {
+@@ -650,6 +928,13 @@ bool CommandProcessor::ExecutePacketType0(RingBuffer* reader, uint32_t packet) {
  
    uint32_t base_index = (packet & 0x7FFF);
    uint32_t write_one_reg = (packet >> 15) & 0x1;
@@ -436,7 +437,7 @@ index ce08d19bd..2394cd326 100644
    for (uint32_t m = 0; m < count; m++) {
      uint32_t reg_data = reader->ReadAndSwap<uint32_t>();
      uint32_t target_index = write_one_reg ? base_index : base_index + m;
-@@ -743,21 +1027,26 @@ bool CommandProcessor::ExecutePacketType3(RingBuffer* reader, uint32_t packet) {
+@@ -743,21 +1028,26 @@ bool CommandProcessor::ExecutePacketType3(RingBuffer* reader, uint32_t packet) {
        break;
      case PM4_MEM_WRITE:
        result = ExecutePacketType3_MEM_WRITE(reader, packet, count);
@@ -463,7 +464,7 @@ index ce08d19bd..2394cd326 100644
        break;
      case PM4_DRAW_INDX:
        result = ExecutePacketType3_DRAW_INDX(reader, packet, count);
-@@ -932,11 +1221,46 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(RingBuffer* reader,
+@@ -932,11 +1222,46 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(RingBuffer* reader,
    uint32_t frontbuffer_ptr = reader->ReadAndSwap<uint32_t>();
    uint32_t frontbuffer_width = reader->ReadAndSwap<uint32_t>();
    uint32_t frontbuffer_height = reader->ReadAndSwap<uint32_t>();
@@ -511,7 +512,7 @@ index ce08d19bd..2394cd326 100644
    return true;
  }
  
-@@ -974,7 +1298,24 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -974,7 +1299,24 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
                  : register_file_->values[poll_reg_addr];
  
    bool matched = false;
@@ -536,7 +537,7 @@ index ce08d19bd..2394cd326 100644
      uint32_t value = value_ref;
      if (is_memory) {
        trace_writer_.WriteMemoryRead(CpuToGpu(poll_reg_addr & ~uint32_t(0x3)),
-@@ -1013,16 +1354,31 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -1013,16 +1355,31 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
          matched = true;
          break;
      }
@@ -568,7 +569,7 @@ index ce08d19bd..2394cd326 100644
          xe::threading::SyncMemory();
          ReturnFromWait();
  
-@@ -1035,6 +1391,17 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -1035,6 +1392,17 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
        }
      }
    } while (!matched);
@@ -586,7 +587,7 @@ index ce08d19bd..2394cd326 100644
  
    return true;
  }
-@@ -1455,10 +1822,14 @@ bool CommandProcessor::ExecutePacketType3_SET_CONSTANT(RingBuffer* reader,
+@@ -1455,10 +1823,14 @@ bool CommandProcessor::ExecutePacketType3_SET_CONSTANT(RingBuffer* reader,
        reader->AdvanceRead((count - 1) * sizeof(uint32_t));
        return true;
    }
@@ -601,7 +602,7 @@ index ce08d19bd..2394cd326 100644
    return true;
  }
  
-@@ -1467,10 +1838,14 @@ bool CommandProcessor::ExecutePacketType3_SET_CONSTANT2(RingBuffer* reader,
+@@ -1467,10 +1839,14 @@ bool CommandProcessor::ExecutePacketType3_SET_CONSTANT2(RingBuffer* reader,
                                                          uint32_t count) {
    uint32_t offset_type = reader->ReadAndSwap<uint32_t>();
    uint32_t index = offset_type & 0xFFFF;
@@ -616,7 +617,7 @@ index ce08d19bd..2394cd326 100644
    return true;
  }
  
-@@ -1506,11 +1881,20 @@ bool CommandProcessor::ExecutePacketType3_LOAD_ALU_CONSTANT(RingBuffer* reader,
+@@ -1506,11 +1882,20 @@ bool CommandProcessor::ExecutePacketType3_LOAD_ALU_CONSTANT(RingBuffer* reader,
        return true;
    }
    trace_writer_.WriteMemoryRead(CpuToGpu(address), size_dwords * 4);
@@ -637,7 +638,7 @@ index ce08d19bd..2394cd326 100644
    return true;
  }
  
-@@ -1518,10 +1902,14 @@ bool CommandProcessor::ExecutePacketType3_SET_SHADER_CONSTANTS(
+@@ -1518,10 +1903,14 @@ bool CommandProcessor::ExecutePacketType3_SET_SHADER_CONSTANTS(
      RingBuffer* reader, uint32_t packet, uint32_t count) {
    uint32_t offset_type = reader->ReadAndSwap<uint32_t>();
    uint32_t index = offset_type & 0xFFFF;
@@ -653,10 +654,10 @@ index ce08d19bd..2394cd326 100644
  }
  
 diff --git a/src/xenia/gpu/command_processor.h b/src/xenia/gpu/command_processor.h
-index ffc8eeffa..6b019d6e1 100644
+index ffc8eeffa..b2e9ebc98 100644
 --- a/src/xenia/gpu/command_processor.h
 +++ b/src/xenia/gpu/command_processor.h
-@@ -35,9 +35,75 @@ class ByteStream;
+@@ -35,9 +35,87 @@ class ByteStream;
  
  namespace gpu {
  
@@ -684,6 +685,18 @@ index ffc8eeffa..6b019d6e1 100644
 +extern int wet_draw_trace_frames;
 +// WET: >0 while the textures draws read are saved to texdump\ (Ctrl+F9).
 +extern int wet_texture_dump_frames;
++// WET: 16x anisotropic filtering for trilinear-filtered, mipmapped textures
++// (the world's surfaces; UI, render targets and point-sampled lookups stay).
++extern std::atomic<bool> wet_force_aniso;
++inline bool WetForceAniso(const xenos::xe_gpu_texture_fetch_t& fetch,
++                          xenos::TextureFilter min_filter,
++                          xenos::TextureFilter mip_filter) {
++  return wet_force_aniso.load(std::memory_order_relaxed) &&
++         fetch.dimension == xenos::DataDimension::k2DOrStacked &&
++         fetch.mip_max_level > fetch.mip_min_level &&
++         min_filter == xenos::TextureFilter::kLinear &&
++         mip_filter == xenos::TextureFilter::kLinear;
++}
 +void WetDumpTextures(const RegisterFile& regs, const Memory& memory,
 +                     const Shader* pixel_shader);
 +// WET: called (on the GPU thread, before the texture cache loads anything for
@@ -732,7 +745,7 @@ index ffc8eeffa..6b019d6e1 100644
  struct SwapState {
    // Lock must be held when changing data in this structure.
    std::mutex mutex;
-@@ -71,6 +137,10 @@ class CommandProcessor {
+@@ -71,6 +149,10 @@ class CommandProcessor {
      kNone,
      kFxaa,
      kFxaaExtreme,
@@ -743,7 +756,7 @@ index ffc8eeffa..6b019d6e1 100644
    };
  
    CommandProcessor(GraphicsSystem* graphics_system,
-@@ -78,6 +148,10 @@ class CommandProcessor {
+@@ -78,6 +160,10 @@ class CommandProcessor {
    virtual ~CommandProcessor();
  
    uint32_t counter() const { return counter_; }
@@ -754,7 +767,7 @@ index ffc8eeffa..6b019d6e1 100644
    void increment_counter() { counter_++; }
  
    Shader* active_vertex_shader() const { return active_vertex_shader_; }
-@@ -152,6 +226,17 @@ class CommandProcessor {
+@@ -152,6 +238,17 @@ class CommandProcessor {
    virtual void ShutdownContext() = 0;
  
    virtual void WriteRegister(uint32_t index, uint32_t value);
@@ -772,7 +785,7 @@ index ffc8eeffa..6b019d6e1 100644
  
    const reg::DC_LUT_30_COLOR* gamma_ramp_256_entry_table() const {
      return gamma_ramp_256_entry_table_;
-@@ -270,6 +355,9 @@ class CommandProcessor {
+@@ -270,6 +367,9 @@ class CommandProcessor {
    std::vector<uint32_t> me_bin_;
  
    uint32_t counter_ = 0;
@@ -2093,7 +2106,7 @@ index 901d45925..0bc8c33c7 100644
      return true;
    }
 diff --git a/src/xenia/gpu/d3d12/d3d12_texture_cache.cc b/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
-index b96c200b9..c25d26ae2 100644
+index b96c200b9..7c8ced1fb 100644
 --- a/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
 +++ b/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
 @@ -10,6 +10,7 @@
@@ -2104,7 +2117,29 @@ index b96c200b9..c25d26ae2 100644
  #include <array>
  #include <cfloat>
  #include <cstddef>
-@@ -1416,6 +1417,68 @@ ID3D12Resource* D3D12TextureCache::RequestSwapTexture(
+@@ -983,11 +984,20 @@ D3D12TextureCache::SamplerParameters D3D12TextureCache::GetSamplerParameters(
+           ? fetch.aniso_filter
+           : binding.aniso_filter;
+   aniso_filter = std::min(aniso_filter, xenos::AnisoFilter::kMax_16_1);
+-  parameters.aniso_filter = aniso_filter;
+   xenos::TextureFilter mip_filter =
+       binding.mip_filter == xenos::TextureFilter::kUseFetchConst
+           ? fetch.mip_filter
+           : binding.mip_filter;
++#if XE_WET_RUNTIME
++  if (aniso_filter == xenos::AnisoFilter::kDisabled &&
++      WetForceAniso(fetch,
++                    binding.min_filter == xenos::TextureFilter::kUseFetchConst
++                        ? fetch.min_filter
++                        : binding.min_filter,
++                    mip_filter))
++    aniso_filter = xenos::AnisoFilter::kMax_16_1;
++#endif
++  parameters.aniso_filter = aniso_filter;
+   if (aniso_filter != xenos::AnisoFilter::kDisabled) {
+     parameters.mag_linear = 1;
+     parameters.min_linear = 1;
+@@ -1416,6 +1426,68 @@ ID3D12Resource* D3D12TextureCache::RequestSwapTexture(
        key.dimension != xenos::DataDimension::k2DOrStacked) {
      return nullptr;
    }
@@ -2173,7 +2208,7 @@ index b96c200b9..c25d26ae2 100644
    D3D12Texture* texture = static_cast<D3D12Texture*>(FindOrCreateTexture(key));
    if (texture == nullptr || !LoadTextureData(*texture)) {
      return nullptr;
-@@ -1597,6 +1660,10 @@ std::unique_ptr<TextureCache::Texture> D3D12TextureCache::CreateTexture(
+@@ -1597,6 +1669,10 @@ std::unique_ptr<TextureCache::Texture> D3D12TextureCache::CreateTexture(
  bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
                                                                bool load_base,
                                                                bool load_mips) {
@@ -2184,7 +2219,7 @@ index b96c200b9..c25d26ae2 100644
    D3D12Texture& d3d12_texture = static_cast<D3D12Texture&>(texture);
    TextureKey texture_key = d3d12_texture.key();
  
-@@ -1644,6 +1711,59 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+@@ -1644,6 +1720,59 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
    uint32_t texture_resolution_scale_y =
        texture_resolution_scaled ? draw_resolution_scale_y() : 1;
  
@@ -2244,7 +2279,7 @@ index b96c200b9..c25d26ae2 100644
    // The loop counter can mean two things depending on whether the packed mip
    // tail is stored as mip 0, because in this case, it would be ambiguous since
    // both the base and the mips would be on "level 0", but stored in separate
-@@ -1721,6 +1841,11 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+@@ -1721,6 +1850,11 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
      level_host_slice_layout.Footprint.Width = xe::round_up(
          level_host_slice_layout.Footprint.Width * texture_resolution_scale_x,
          UINT(host_block_width));
@@ -2256,7 +2291,7 @@ index b96c200b9..c25d26ae2 100644
      level_host_slice_layout.Footprint.Height = xe::round_up(
          level_host_slice_layout.Footprint.Height * texture_resolution_scale_y,
          UINT(host_block_height));
-@@ -1849,6 +1974,15 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+@@ -1849,6 +1983,15 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
                                      block_height * texture_resolution_scale_y;
      load_constants.size_blocks[2] = level_depth;
      load_constants.height_texels = level_height;
@@ -2272,7 +2307,7 @@ index b96c200b9..c25d26ae2 100644
  
      uint32_t group_count_x =
          (load_constants.size_blocks[0] +
-@@ -1946,8 +2080,14 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+@@ -1946,8 +2089,14 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
      } else {
        source_box_ptr = nullptr;
      }
@@ -2288,7 +2323,7 @@ index b96c200b9..c25d26ae2 100644
                                          &location_source, source_box_ptr);
        location_dest.SubresourceIndex += texture_level_count;
        location_source.PlacedFootprint.Offset += host_slice_size;
-@@ -1956,6 +2096,12 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+@@ -1956,6 +2105,12 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
  
    command_processor_.ReleaseScratchGPUBuffer(copy_buffer, copy_buffer_state);
  
@@ -19164,6 +19199,24 @@ index 7df306c12..c91fe704a 100644
 +
    return true;
  }
+ 
+diff --git a/src/xenia/gpu/vulkan/vulkan_texture_cache.cc b/src/xenia/gpu/vulkan/vulkan_texture_cache.cc
+index c52875ec6..4e0ba9688 100644
+--- a/src/xenia/gpu/vulkan/vulkan_texture_cache.cc
++++ b/src/xenia/gpu/vulkan/vulkan_texture_cache.cc
+@@ -675,6 +675,13 @@ VulkanTextureCache::SamplerParameters VulkanTextureCache::GetSamplerParameters(
+       binding.aniso_filter == xenos::AnisoFilter::kUseFetchConst
+           ? fetch.aniso_filter
+           : binding.aniso_filter;
++#if XE_WET_RUNTIME
++  if (aniso_filter == xenos::AnisoFilter::kDisabled && parameters.min_linear &&
++      parameters.mip_linear &&
++      WetForceAniso(fetch, xenos::TextureFilter::kLinear,
++                    xenos::TextureFilter::kLinear))
++    aniso_filter = xenos::AnisoFilter::kMax_16_1;
++#endif
+   parameters.aniso_filter = std::min(aniso_filter, max_anisotropy_);
+   parameters.mip_base_map = mip_filter == xenos::TextureFilter::kBaseMap;
  
 diff --git a/src/xenia/ui/d3d12/d3d12_api.h b/src/xenia/ui/d3d12/d3d12_api.h
 index 98eb495da..3803cb13d 100644

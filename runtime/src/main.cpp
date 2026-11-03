@@ -26,9 +26,78 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <vector>
+#include <algorithm>
+#include <ctime>
+#include <map>
 
 namespace fs = std::filesystem;
 using namespace wet;
+
+// save_backups: a copy of the saves (and achievements.ini) in
+// <hdd>/save-backups/auto-<date>, unless they're the same as the last copy;
+// the newest 10 are kept.
+static void BackUpSaves(const fs::path& hdd)
+{
+    std::error_code ec;
+    fs::path saves = hdd / "content" / "425307DB";
+    if (!fs::exists(saves, ec) || fs::is_empty(saves, ec))
+        return;
+    auto read = [](const fs::path& p) {
+        std::string s;
+        if (FILE* f = std::fopen(p.string().c_str(), "rb"))
+        {
+            char buf[65536];
+            size_t n;
+            while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0)
+                s.append(buf, n);
+            std::fclose(f);
+        }
+        return s;
+    };
+    // Files relative to the saves folder -> contents.
+    auto collect = [&](const fs::path& dir, const fs::path& ini) {
+        std::map<std::string, std::string> files;
+        for (fs::recursive_directory_iterator it(dir, ec), end; it != end; it.increment(ec))
+            if (it->is_regular_file(ec))
+                files[fs::relative(it->path(), dir, ec).generic_string()] = read(it->path());
+        if (fs::exists(ini, ec))
+            files["achievements.ini"] = read(ini);
+        return files;
+    };
+    fs::path root = hdd / "save-backups";
+    std::vector<fs::path> backups;
+    for (fs::directory_iterator it(root, ec), end; it != end; it.increment(ec))
+        if (it->is_directory(ec) && it->path().filename().string().rfind("auto-", 0) == 0)
+            backups.push_back(it->path());
+    std::sort(backups.begin(), backups.end());
+    auto now = collect(saves, hdd / "achievements.ini");
+    if (!backups.empty() && collect(backups.back() / "425307DB", backups.back() / "achievements.ini") == now)
+    {
+        Log("Saves: unchanged since the last backup (%s)", backups.back().filename().string().c_str());
+        return;
+    }
+    std::time_t t = std::time(nullptr);
+    char name[64];
+    std::strftime(name, sizeof(name), "auto-%Y-%m-%d_%H-%M-%S", std::localtime(&t));
+    fs::path dst = root / name;
+    fs::create_directories(dst, ec);
+    fs::copy(saves, dst / "425307DB", fs::copy_options::recursive, ec);
+    if (fs::exists(hdd / "achievements.ini"))
+        fs::copy_file(hdd / "achievements.ini", dst / "achievements.ini", ec);
+    if (ec)
+    {
+        Log("Saves: couldn't back up to %s (%s)", dst.string().c_str(), ec.message().c_str());
+        return;
+    }
+    backups.push_back(dst);
+    while (backups.size() > 10)
+    {
+        fs::remove_all(backups.front(), ec);
+        backups.erase(backups.begin());
+    }
+    Log("Saves: backed up to %s (%zu kept)", dst.string().c_str(), backups.size());
+}
 
 static fs::path FindGameDirFrom(fs::path start)
 {
@@ -117,6 +186,8 @@ int main(int argc, char** argv)
     options::Load();
     InitKernelVariables();
     InitXma();
+    if (options::SaveBackups())
+        BackUpSaves(hddDir);
     InitFileSystem(gameDir, hddDir);
     achievements::Load(hddDir);
     if (options::ShaderCache())

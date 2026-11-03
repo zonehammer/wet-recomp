@@ -400,6 +400,7 @@ namespace
     void ApplyPostProcessing()
     {
         xe::gpu::wet_film_grain = float(wet::options::FilmGrain()) / 100.0f;
+        xe::gpu::wet_force_aniso = wet::options::AnisotropicFiltering();
 #if WET_HAVE_D3D12
         xe::gpu::d3d12::wet_async_pipelines = wet::options::AsyncShaders();
 #endif
@@ -915,6 +916,13 @@ namespace
             bool showFps = wet::options::ShowFps();
             if (RowCheck("FPS counter", &showFps))
                 wet::options::SetShowFps(showFps);
+            bool skip = wet::options::SkipIntro();
+            if (RowCheck("Skip intro movies", &skip, "Straight to the title screen at startup (no logo and legal movies)."))
+                wet::options::SetSkipIntro(skip);
+            bool backups = wet::options::SaveBackups();
+            if (RowCheck("Back up saves at start", &backups,
+                         "Each start copies the saves and achievements to game\\hdd\\save-backups; the last 10 are kept."))
+                wet::options::SetSaveBackups(backups);
             ImGui::EndTable();
         }
 
@@ -998,6 +1006,12 @@ namespace
                     wet::options::SetFilmGrain(pick);
                     ApplyPostProcessing();
                 }
+            }
+            bool aniso = wet::options::AnisotropicFiltering();
+            if (RowCheck("16x texture filtering", &aniso, "Sharper floors and walls seen at an angle; costs very little."))
+            {
+                wet::options::SetAnisotropicFiltering(aniso);
+                ApplyPostProcessing();
             }
             bool blur = wet::options::MotionBlur(), dof = wet::options::DepthOfField(), shake = wet::options::CameraShake();
             if (RowCheck("Motion blur", &blur, "Off is also a little faster on slower graphics cards."))
@@ -1469,6 +1483,7 @@ namespace wet::renderer
             xe::gpu::wet_grain_const = (256 + c) * 4 + k;
         }
         xe::gpu::wet_film_grain = float(options::FilmGrain()) / 100.0f;
+        xe::gpu::wet_force_aniso = options::AnisotropicFiltering();
 #if WET_HAVE_D3D12
         xe::gpu::d3d12::wet_async_pipelines = options::AsyncShaders();
         xe::gpu::d3d12::wet_preload_pipelines = options::ShaderPreload();

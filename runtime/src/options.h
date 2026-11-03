@@ -71,6 +71,15 @@ namespace wet::options
     void SetMouseDirect(bool v);
     // Native mouse look (mouselook.cpp): the mouse turns the third-person camera directly.
     bool MouseNative();
+    // Straight to the title screen: no logo / legal movies (kernel/fs.cpp).
+    bool SkipIntro();
+    void SetSkipIntro(bool v);
+    // 16x anisotropic filtering for everything the game samples (Xenia's override).
+    bool AnisotropicFiltering();
+    void SetAnisotropicFiltering(bool v);
+    // A copy of the saves at each start (main.cpp), the last 10 kept.
+    bool SaveBackups();
+    void SetSaveBackups(bool v);
     void SetMouseNative(bool v);
     std::string MouseBinding(int button);
     // button 0-4: left, right, middle, back, forward; pad: A B X Y LB RB LT RT LTHUMB RTHUMB START BACK UP DOWN LEFT RIGHT or NONE.

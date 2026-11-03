@@ -167,11 +167,13 @@ namespace
         bool button = wet::prompt_art::ForName(name, orb, flatten) != wet::prompt_art::Symbol::None;
 
         std::lock_guard lock(s_lock);
-        // Every image this loader reads, once each, to textures.txt: finds the
-        // names of prompt images that aren't redrawn yet (e.g. in-world prompts).
+        // WET_TEXTURE_LIST=1: every image this loader reads, once each, to
+        // textures.txt (finding prompt images that aren't redrawn yet).
         {
             static std::unordered_map<std::string, int> s_names;
-            static FILE* s_list = std::fopen("textures.txt", "w");
+            static FILE* s_list = (std::getenv("WET_TEXTURE_LIST") || std::getenv("WET_DUMP_HUD_IMAGES"))
+                                      ? std::fopen("textures.txt", "w")
+                                      : nullptr;
             if (s_list && s_names.size() < 20000 && s_names.emplace(name, 1).second)
             {
                 // WET_DUMP_HUD_IMAGES=<folder>: also the DDS files themselves.

@@ -27,6 +27,8 @@ namespace wet
     // Direct mouse aim: the mouse movement (pixels) since the last call; false while
     // the mouse isn't captured for aiming or direct aim is off.
     bool TakeMouseDelta(double& dx, double& dy);
+    // A startup logo movie is playing (kernel/fs.cpp): with skip_intro, A is tapped to skip it.
+    void SetIntroMoviePlaying(bool playing);
     // Mouse movement (pixels) for the camera's native look hook (mouselook.cpp)
     // since its last call; false if the mouse isn't aiming. Calling it also keeps
     // the mouse away from the right stick for the next 300 ms.

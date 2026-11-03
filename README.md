@@ -33,6 +33,8 @@ nothing derived from the game is ever committed.
 - **Settings picked for your graphics card** on the first start.
 - An in-game settings overlay (**F1**) and a **launcher** with settings and a Play button.
 - **Photo mode** (F5): freeze the game, hide the HUD and fly a free camera; **F12** screenshots.
+- **Skip intro movies**, **16x texture filtering** and an automatic **save backup** at each
+  start (the last 10 are kept in `game\hdd\save-backups`), all on by default.
 - **Quit to desktop** from the pause menu (hold Back / Backspace) or the F1 overlay.
 
 ## Building (Windows 10/11, 64-bit)

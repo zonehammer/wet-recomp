@@ -113,7 +113,7 @@ namespace
         kFps = 100, kResolution, kFullscreen, kShowFps,
         kFilter, kSharpness, kSharpnessValue, kAntialiasing, kGrain, kGrainValue, kFov, kFovValue, kWidescreen,
         kMouseAim, kSensitivity, kSensitivityValue, kInvertY, kVibration,
-        kShaderCache, kVideoMode, kPopups, kAsyncShaders, kShaderPreload, kMotionBlur, kDepthOfField, kCameraShake, kLanguage,
+        kShaderCache, kVideoMode, kPopups, kSkipIntro, kAniso, kSaveBackups, kAsyncShaders, kShaderPreload, kMotionBlur, kDepthOfField, kCameraShake, kLanguage,
         kStatus, kPlay, kSaves, kClearShaders, kKeyboard,
         kVsync, kHideBorders, kWideHud, kCheckUpdates, kReportBug, kUpdateText, kPrompts,
         kMonitor, kPadTest, kAchievements,
@@ -531,6 +531,9 @@ namespace
         s_ini.Set("shader_cache", Checked(kShaderCache));
         s_ini.Set("video_mode", Checked(kVideoMode));
         s_ini.Set("achievement_popups", Checked(kPopups));
+        s_ini.Set("skip_intro", Checked(kSkipIntro));
+        s_ini.Set("anisotropic_filtering", Checked(kAniso));
+        s_ini.Set("save_backups", Checked(kSaveBackups));
         s_ini.Set("async_shaders", Checked(kAsyncShaders));
         s_ini.Set("shader_preload", Checked(kShaderPreload));
         s_ini.Set("motion_blur", Checked(kMotionBlur));
@@ -1365,8 +1368,10 @@ namespace
               std::min(std::max(ini.Get("resolution_scale", 1), 1), 3) - 1);
         Check(kFullscreen, L"Fullscreen", 22, 90, ini.Get("fullscreen", 0) != 0, 140);
         Check(kShowFps, L"Show FPS counter", 170, 90, ini.Get("show_fps", 0) != 0, 160);
-        Check(kVideoMode, L"Videos at 30 FPS (avoids video flicker)", 22, 114, ini.Get("video_mode", 1) != 0, 300);
-        Check(kWidescreen, L"Widescreen / ultrawide (fill 21:9 and 32:9 screens)", 22, 140, ini.Get("widescreen", 0) != 0, 310);
+        Check(kVideoMode, L"Videos at 30 FPS", 22, 114, ini.Get("video_mode", 1) != 0, 140);
+        Check(kSkipIntro, L"Skip intro movies", 170, 114, ini.Get("skip_intro", 1) != 0, 160);
+        Check(kWidescreen, L"Widescreen / ultrawide", 22, 140, ini.Get("widescreen", 0) != 0, 146);
+        Check(kAniso, L"16x texture filtering", 170, 140, ini.Get("anisotropic_filtering", 1) != 0, 160);
 
         // Graphics
         Group(L"Graphics", 350, 8, 330, 164 + kEffectsRow);
@@ -1413,7 +1418,8 @@ namespace
         Check(kShaderCache, L"Shader cache (less stutter after the first time)", 362, 196, ini.Get("shader_cache", 1) != 0, 310);
         Check(kAsyncShaders, L"Don't wait for new shaders (objects may pop in)", 362, 216, ini.Get("async_shaders", 1) != 0, 310);
         Check(kShaderPreload, L"Build all cached shaders before starting (slower start)", 362, 236, ini.Get("shader_preload", 0) != 0, 310);
-        Check(kPopups, L"Achievement pop-ups", 362, 256, ini.Get("achievement_popups", 1) != 0, 200);
+        Check(kPopups, L"Achievement pop-ups", 362, 256, ini.Get("achievement_popups", 1) != 0, 150);
+        Check(kSaveBackups, L"Back up saves at start", 517, 256, ini.Get("save_backups", 1) != 0, 155);
         Make(L"BUTTON", L"Saves \u25BE", BS_PUSHBUTTON | WS_TABSTOP, 362, 278, 145, 26, kSaves);
         Make(L"BUTTON", L"Clean up \u25BE", BS_PUSHBUTTON | WS_TABSTOP, 517, 278, 150, 26, kClearShaders);
 

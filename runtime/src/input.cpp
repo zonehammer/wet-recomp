@@ -902,6 +902,19 @@ namespace wet
 #endif
     }
 
+    namespace
+    {
+        std::atomic<bool> s_introPlaying{ false };
+        std::atomic<double> s_introSince{ 0 };
+    }
+
+    void SetIntroMoviePlaying(bool playing)
+    {
+        if (playing && !s_introPlaying)
+            s_introSince = SinceStart();
+        s_introPlaying = playing;
+    }
+
     bool TakeLookDelta(double& dx, double& dy)
     {
         dx = dy = 0;
@@ -975,6 +988,13 @@ namespace wet
 
         uint16_t extra = 0;
         int16_t klx = 0, kly = 0, krx = 0, kry = 0;
+        // skip_intro: A taps (0.1 s every 0.4 s) while a startup logo movie plays.
+        if (s_introPlaying && options::SkipIntro())
+        {
+            double t = SinceStart() - s_introSince;
+            if (t > 0.3 && std::fmod(t, 0.4) < 0.1)
+                extra |= kA;
+        }
         Auto().Now(extra, out.leftTrigger, out.rightTrigger, klx, kly, krx, kry);
         Replaying().Now(extra, out.leftTrigger, out.rightTrigger, klx, kly, krx, kry);
 #ifdef _WIN32

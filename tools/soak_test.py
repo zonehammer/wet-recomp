@@ -112,7 +112,7 @@ def record(exe, out_dir, keep_saves):
         hdd = tempfile.mkdtemp(prefix="wet-soak-hdd-")
         args += ["--hdd", hdd]
     env = dict(os.environ)
-    env.update({"WET_RECORD_INPUT": path, "WET_NO_DIALOGS": "1"})
+    env.update({"WET_RECORD_INPUT": path, "WET_NO_DIALOGS": "1", "WET_NO_SKIP_INTRO": "1"})
     print("Recording: play from the start (no saves) into the level, then quit -\n"
           "hold Back / Backspace in the pause menu, or close the window.", flush=True)
     try:
@@ -139,6 +139,7 @@ def run_once(exe, inputs, limit, index, out_dir, hang_seconds, keep_saves):
     env = dict(os.environ)
     env.update(inputs)
     env["WET_NO_DIALOGS"] = "1"
+    env["WET_NO_SKIP_INTRO"] = "1"   # the script and recordings expect the startup movies
     print(f"== Run {index}: up to {limit / 60:.1f} minutes", flush=True)
 
     start = time.time()

@@ -8,6 +8,7 @@
 //   \Device\Harddisk0\Cache0        -> game/hdd/cache (read/write)
 #include "fs.h"
 #include "../options.h"
+#include "../input.h"
 #include <atomic>
 #include "kernel.h"
 #include "objects.h"
@@ -167,6 +168,14 @@ namespace
     // avoids it. wet.ini video_mode = 0 turns it off.
     std::atomic<int> s_openVideos{ 0 };
 
+    // Startup logo movies open now (input.cpp presses A through them with skip_intro).
+    void IntroMovie(bool open)
+    {
+        static std::atomic<int> s_open{ 0 };
+        int n = (s_open += open ? 1 : -1);
+        SetIntroMoviePlaying(n > 0);
+    }
+
     void VideoFileOpened(const std::string& name)
     {
         if (!options::VideoMode())
@@ -198,8 +207,11 @@ namespace
                 std::fclose(fp);
             if (video)
                 VideoFileClosed();
+            if (intro)
+                IntroMovie(false);
         }
         bool video = false;     // a .bik movie: video mode while open
+        bool intro = false;     // a startup logo movie (skip_intro)
 
         std::string guestPath;
         fs::path hostPath;
@@ -403,6 +415,20 @@ namespace
             {
                 f->video = true;
                 VideoFileOpened(r.host.filename().string());
+            }
+            // The logo and legal movies at startup: skip_intro presses A
+            // through them (a missing movie is a "dirty disc" to the game).
+            if (ext == ".bik")
+            {
+                std::string file = r.host.filename().string();
+                for (auto& c : file)
+                    c = char(std::tolower((unsigned char)c));
+                if (file == "bethesda_logo.bik" || file == "a2m_logo.bik" || file == "variouslogos.bik" ||
+                    file == "bethsofta2m_legaltext.bik")
+                {
+                    f->intro = true;
+                    IntroMovie(true);
+                }
             }
         }
         St32(handlePtr, CreateHandle(f));
