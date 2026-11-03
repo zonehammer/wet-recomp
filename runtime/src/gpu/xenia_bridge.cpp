@@ -17,6 +17,7 @@
 #include "keybinds.h"
 #include "gpu_info.h"
 #include "photo.h"
+#include "music.h"
 #include <map>
 #include <ctime>
 #define STB_IMAGE_STATIC
@@ -916,6 +917,10 @@ namespace
             bool showFps = wet::options::ShowFps();
             if (RowCheck("FPS counter", &showFps))
                 wet::options::SetShowFps(showFps);
+            ImGui::EndTable();
+            TabMusic();
+            if (!BeginRows("general2"))
+                return;
             bool skip = wet::options::SkipIntro();
             if (RowCheck("Skip intro movies", &skip, "Straight to the title screen at startup (no logo and legal movies)."))
                 wet::options::SetSkipIntro(skip);
@@ -923,6 +928,72 @@ namespace
             if (RowCheck("Back up saves at start", &backups,
                          "Each start copies the saves and achievements to game\\hdd\\save-backups; the last 10 are kept."))
                 wet::options::SetSaveBackups(backups);
+            ImGui::EndTable();
+        }
+
+        // Your music (music.cpp), in the General tab.
+        void TabMusic()
+        {
+            ImGui::Spacing();
+            ImGui::TextDisabled("Your music");
+            if (!BeginRows("music"))
+                return;
+            static const char* kModes[] = { "Off (the game's music)", "When the game plays music", "All the time" };
+            int mode = wet::options::MusicMode();
+            if (RowCombo("Play your songs", &mode, kModes, 3,
+                         "Songs from your music folder instead of the game's: a new one each time the game's music "
+                         "starts (fading out when it stops), or one after another all the time. Turn the game's own "
+                         "music volume down in its Options menu."))
+            {
+                wet::options::SetMusicMode(mode);
+                if (mode)
+                    wet::music::Start();
+            }
+            if (mode)
+            {
+                int volume = wet::options::MusicVolume(), pick = volume;
+                Row("Volume");
+                ImGui::SliderInt("##musicvol", &pick, 0, 100, "%d%%");
+                if (pick != volume)
+                    wet::options::SetMusicVolume(pick);
+                bool shuffle = wet::options::MusicShuffle();
+                if (RowCheck("Shuffle", &shuffle))
+                {
+                    wet::options::SetMusicShuffle(shuffle);
+                    wet::music::Rescan();
+                }
+                auto st = wet::music::GetStatus();
+                Row("Now playing", "Media keys work too: next, previous, play / pause.");
+                if (st.tracks == 0)
+                    ImGui::TextDisabled("No songs yet - add MP3, M4A, FLAC, WAV or WMA files to the folder");
+                else
+                    ImGui::TextUnformatted(st.playing ? (st.paused ? ("(paused) " + st.title).c_str() : st.title.c_str())
+                                                      : "(waiting for the game's music)");
+                Row("");
+                if (ImGui::Button("Previous"))
+                    wet::music::Previous();
+                ImGui::SameLine();
+                if (ImGui::Button(st.paused ? "Play" : "Pause"))
+                    wet::music::TogglePause();
+                ImGui::SameLine();
+                if (ImGui::Button("Next"))
+                    wet::music::Next();
+                Row("Folder", "Change it in the launcher or wet.ini music_folder.");
+                ImGui::TextDisabled("%s (%d songs)", st.folder.c_str(), st.tracks);
+                Row("");
+                if (ImGui::Button("Open the folder"))
+                {
+#if XE_PLATFORM_WIN32
+                    std::error_code ec;
+                    std::filesystem::path folder = std::filesystem::u8path(st.folder);
+                    std::filesystem::create_directories(folder, ec);
+                    ShellExecuteW(nullptr, L"open", folder.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+#endif
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Look for new songs"))
+                    wet::music::Rescan();
+            }
             ImGui::EndTable();
         }
 

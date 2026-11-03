@@ -6,6 +6,7 @@
 #include "camscan.h"
 #include "keybinds.h"
 #include "photo.h"
+#include "music.h"
 
 #include <atomic>
 #include <cmath>
@@ -526,6 +527,18 @@ namespace wet
                 return 0;
             }
             // F1: settings overlay.
+            // Media keys: your music (music.cpp).
+            static bool mNext = false, mPrev = false, mPlay = false;
+            bool nextNow = (GetAsyncKeyState(VK_MEDIA_NEXT_TRACK) & 0x8000) != 0;
+            bool prevNow = (GetAsyncKeyState(VK_MEDIA_PREV_TRACK) & 0x8000) != 0;
+            bool playNow = (GetAsyncKeyState(VK_MEDIA_PLAY_PAUSE) & 0x8000) != 0;
+            if (options::MusicMode() != 0)
+            {
+                if (nextNow && !mNext) music::Next();
+                if (prevNow && !mPrev) music::Previous();
+                if (playNow && !mPlay) music::TogglePause();
+            }
+            mNext = nextNow, mPrev = prevNow, mPlay = playNow;
             // F5: photo mode; F12: screenshot.
             static bool f5 = false, f12 = false;
             bool f5Now = (GetAsyncKeyState(VK_F5) & 0x8000) != 0;

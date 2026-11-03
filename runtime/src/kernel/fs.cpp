@@ -9,6 +9,7 @@
 #include "fs.h"
 #include "../options.h"
 #include "../input.h"
+#include "../music.h"
 #include <atomic>
 #include "kernel.h"
 #include "objects.h"
@@ -209,9 +210,12 @@ namespace
                 VideoFileClosed();
             if (intro)
                 IntroMovie(false);
+            if (!music.empty())
+                music::GameMusicClosed(music);
         }
         bool video = false;     // a .bik movie: video mode while open
         bool intro = false;     // a startup logo movie (skip_intro)
+        std::string music;      // one of the game's music streams (mu_*.xma): its name
 
         std::string guestPath;
         fs::path hostPath;
@@ -415,6 +419,18 @@ namespace
             {
                 f->video = true;
                 VideoFileOpened(r.host.filename().string());
+            }
+            // The game's music (music.cpp plays your songs along with it).
+            if (ext == ".xma")
+            {
+                std::string file = r.host.filename().string();
+                for (auto& c : file)
+                    c = char(std::tolower((unsigned char)c));
+                if (file.rfind("mu_", 0) == 0)
+                {
+                    f->music = file;
+                    music::GameMusicOpened(file);
+                }
             }
             // The logo and legal movies at startup: skip_intro presses A
             // through them (a missing movie is a "dirty disc" to the game).

@@ -113,7 +113,7 @@ namespace
         kFps = 100, kResolution, kFullscreen, kShowFps,
         kFilter, kSharpness, kSharpnessValue, kAntialiasing, kGrain, kGrainValue, kFov, kFovValue, kWidescreen,
         kMouseAim, kSensitivity, kSensitivityValue, kInvertY, kVibration,
-        kShaderCache, kVideoMode, kPopups, kSkipIntro, kAniso, kSaveBackups, kAsyncShaders, kShaderPreload, kMotionBlur, kDepthOfField, kCameraShake, kLanguage,
+        kShaderCache, kVideoMode, kPopups, kSkipIntro, kAniso, kSaveBackups, kMusicMode, kMusicVolume, kMusicVolumeValue, kMusicShuffle, kMusicFolder, kMusicFolderText, kMusicOpen, kAsyncShaders, kShaderPreload, kMotionBlur, kDepthOfField, kCameraShake, kLanguage,
         kStatus, kPlay, kSaves, kClearShaders, kKeyboard,
         kVsync, kHideBorders, kWideHud, kCheckUpdates, kReportBug, kUpdateText, kPrompts,
         kMonitor, kPadTest, kAchievements,
@@ -306,6 +306,62 @@ namespace
     }
 
     void Label(const wchar_t* text, int x, int y, int w = 110) { Make(L"STATIC", text, SS_LEFT, x, y + 3, w, 18, 0); }
+
+    // ---- Your music: the folder (empty = "music" next to the game) ----
+    std::string s_musicFolder;
+
+    fs::path MusicFolder()
+    {
+        if (!s_musicFolder.empty())
+            return fs::path(std::u8string(s_musicFolder.begin(), s_musicFolder.end()));
+        return s_dir / L"music";
+    }
+
+    void UpdateMusicFolder()
+    {
+        fs::path folder = MusicFolder();
+        int songs = 0;
+        std::error_code ec;
+        for (fs::recursive_directory_iterator it(folder, fs::directory_options::skip_permission_denied, ec), end;
+             it != end && songs < 100000; it.increment(ec))
+        {
+            std::wstring ext = it->path().extension().wstring();
+            for (auto& c : ext)
+                c = wchar_t(towlower(c));
+            if (ext == L".mp3" || ext == L".m4a" || ext == L".aac" || ext == L".flac" || ext == L".wav" || ext == L".wma")
+                songs++;
+        }
+        std::wstring text = folder.wstring() + L"  (" + std::to_wstring(songs) + L" songs)";
+        SetWindowTextW(Item(kMusicFolderText), text.c_str());
+    }
+
+    void ChooseMusicFolder()
+    {
+        IFileOpenDialog* dlg = nullptr;
+        if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_IFileOpenDialog,
+                                    reinterpret_cast<void**>(&dlg))))
+            return;
+        DWORD opts = 0;
+        dlg->GetOptions(&opts);
+        dlg->SetOptions(opts | FOS_PICKFOLDERS);
+        dlg->SetTitle(L"The folder with your songs (MP3, M4A, FLAC, WAV, WMA; subfolders too)");
+        IShellItem* item = nullptr;
+        if (SUCCEEDED(dlg->Show(s_window)) && SUCCEEDED(dlg->GetResult(&item)))
+        {
+            PWSTR path = nullptr;
+            if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)))
+            {
+                int n = WideCharToMultiByte(CP_UTF8, 0, path, -1, nullptr, 0, nullptr, nullptr);
+                std::string utf8(size_t(std::max(n, 1)) - 1, '\0');
+                WideCharToMultiByte(CP_UTF8, 0, path, -1, utf8.data(), n, nullptr, nullptr);
+                s_musicFolder = utf8;
+                CoTaskMemFree(path);
+                UpdateMusicFolder();
+            }
+            item->Release();
+        }
+        dlg->Release();
+    }
 
     HWND Combo(int id, int x, int y, int w, std::initializer_list<const wchar_t*> items, int selected)
     {
@@ -526,6 +582,10 @@ namespace
         s_ini.Set("widescreen_hud", Checked(kWideHud));
         s_ini.Set("mouse_aim", Checked(kMouseAim));
         s_ini.Set("mouse_sensitivity", Pos(kSensitivity));
+        s_ini.Set("music_mode", int(SendMessageW(Item(kMusicMode), CB_GETCURSEL, 0, 0)));
+        s_ini.Set("music_volume", Pos(kMusicVolume));
+        s_ini.Set("music_shuffle", Checked(kMusicShuffle));
+        s_ini.SetString("music_folder", s_musicFolder);
         s_ini.Set("mouse_invert_y", Checked(kInvertY));
         s_ini.Set("vibration", Checked(kVibration));
         s_ini.Set("shader_cache", Checked(kShaderCache));
@@ -1440,8 +1500,22 @@ namespace
         Make(L"BUTTON", L"Achievements...", BS_PUSHBUTTON | WS_TABSTOP, 517, 372, 150, 26, kAchievements);
         Make(L"STATIC", L"", SS_LEFT, 362, 406, 305, 32, kUpdateText);
 
-        Make(L"STATIC", L"", SS_LEFT | SS_PATHELLIPSIS, 12, 458, 540, 18, kStatus);
-        Make(L"BUTTON", L"Play", BS_DEFPUSHBUTTON | WS_TABSTOP, 570, 452, 110, 32, kPlay);
+        // Your music (the runtime's music.cpp)
+        Group(L"Your music", 10, 452, 670, 64);
+        Label(L"Play your songs", 22, 472, 100);
+        Combo(kMusicMode, 124, 470, 196, { L"Off (the game's music)", L"When the game plays music", L"All the time" },
+              std::min(std::max(ini.Get("music_mode", 0), 0), 2));
+        Label(L"Volume", 22, 496, 60);
+        Slider(kMusicVolume, kMusicVolumeValue, 80, 494, 150, 0, 100, ini.Get("music_volume", 80), L"%");
+        Check(kMusicShuffle, L"Shuffle", 270, 496, ini.Get("music_shuffle", 1) != 0, 70);
+        s_musicFolder = ini.GetString("music_folder", "");
+        Make(L"STATIC", L"", SS_LEFT | SS_PATHELLIPSIS, 362, 474, 305, 18, kMusicFolderText);
+        Make(L"BUTTON", L"Choose folder...", BS_PUSHBUTTON | WS_TABSTOP, 362, 492, 145, 24, kMusicFolder);
+        Make(L"BUTTON", L"Open folder", BS_PUSHBUTTON | WS_TABSTOP, 517, 492, 150, 24, kMusicOpen);
+        UpdateMusicFolder();
+
+        Make(L"STATIC", L"", SS_LEFT | SS_PATHELLIPSIS, 12, 530, 540, 18, kStatus);
+        Make(L"BUTTON", L"Play", BS_DEFPUSHBUTTON | WS_TABSTOP, 570, 524, 110, 32, kPlay);
         UpdateStatus();
     }
 
@@ -1454,11 +1528,21 @@ namespace
             else if (HWND(lp) == Item(kGrain)) UpdateValueLabel(kGrain, kGrainValue, L"%");
             else if (HWND(lp) == Item(kFov)) UpdateValueLabel(kFov, kFovValue, L"\u00B0");
             else if (HWND(lp) == Item(kSensitivity)) UpdateValueLabel(kSensitivity, kSensitivityValue, L"");
+            else if (HWND(lp) == Item(kMusicVolume)) UpdateValueLabel(kMusicVolume, kMusicVolumeValue, L"%");
             return 0;
         case WM_COMMAND:
             switch (LOWORD(wp))
             {
             case kPlay: Play(); return 0;
+            case kMusicFolder: ChooseMusicFolder(); return 0;
+            case kMusicOpen:
+            {
+                std::error_code ec;
+                fs::create_directories(MusicFolder(), ec);
+                ShellExecuteW(s_window, L"open", MusicFolder().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                UpdateMusicFolder();
+                return 0;
+            }
             case kSaves:
                 switch (ButtonMenu(kSaves, { { kMenuOpenSaves, L"Open the saves folder" },
                                              { 0, nullptr },
@@ -1569,7 +1653,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show)
 
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     LoadBanner();
-    RECT rc{ 0, 0, S(690), S(494 + kEffectsRow + s_bannerHeight) };
+    RECT rc{ 0, 0, S(690), S(566 + kEffectsRow + s_bannerHeight) };
     DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
     AdjustWindowRect(&rc, style, FALSE);
     int w = rc.right - rc.left, h = rc.bottom - rc.top;

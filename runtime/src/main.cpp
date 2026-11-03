@@ -15,6 +15,7 @@
 #include "log.h"
 #include "profiler.h"
 #include "options.h"
+#include "music.h"
 #include "achievements.h"
 #include "gpu/renderer.h"
 #include "kernel/xma.h"
@@ -188,6 +189,8 @@ int main(int argc, char** argv)
     InitXma();
     if (options::SaveBackups())
         BackUpSaves(hddDir);
+    if (options::MusicMode() != 0)
+        music::Start();
     InitFileSystem(gameDir, hddDir);
     achievements::Load(hddDir);
     if (options::ShaderCache())

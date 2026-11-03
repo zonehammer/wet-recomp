@@ -30,13 +30,14 @@ namespace wet::options
         std::atomic<bool> s_inCutscene{ false };
         std::atomic<int> s_videoMode{ 1 };
         int s_scale = 1, s_scaleRunning = 1;
-        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_fov{ 90 }, s_widescreen{ 0 }, s_widescreenHud{ 1 }, s_hideBorders{ 0 }, s_vsync{ 0 }, s_buttonPrompts{ 0 }, s_mouseAim{ 1 }, s_mouseSens{ 50 }, s_mouseInvert{ 0 }, s_mouseDirect{ 1 }, s_mouseNative{ 1 }, s_skipIntro{ 1 }, s_aniso{ 1 }, s_autoBackup{ 1 }, s_shaderCache{ 1 }, s_asyncShaders{ 1 }, s_shaderPreload{ 0 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 }, s_motionBlur{ 1 }, s_depthOfField{ 1 }, s_cameraShake{ 1 }, s_language{ 0 };
+        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_fov{ 90 }, s_widescreen{ 0 }, s_widescreenHud{ 1 }, s_hideBorders{ 0 }, s_vsync{ 0 }, s_buttonPrompts{ 0 }, s_mouseAim{ 1 }, s_mouseSens{ 50 }, s_mouseInvert{ 0 }, s_mouseDirect{ 1 }, s_mouseNative{ 1 }, s_skipIntro{ 1 }, s_musicMode{ 0 }, s_musicVolume{ 80 }, s_musicShuffle{ 1 }, s_aniso{ 1 }, s_autoBackup{ 1 }, s_shaderCache{ 1 }, s_asyncShaders{ 1 }, s_shaderPreload{ 0 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 }, s_motionBlur{ 1 }, s_depthOfField{ 1 }, s_cameraShake{ 1 }, s_language{ 0 };
         constexpr const char* kFile = "wet.ini";
         // Mouse button bindings: left, right, middle, back (X1), forward (X2).
         constexpr const char* kMouseKeys[5] = { "mouse_left", "mouse_right", "mouse_middle", "mouse_back", "mouse_forward" };
         std::string s_mouseBind[5] = { "RT", "LT", "RTHUMB", "LB", "RB" };
         std::mutex s_monitorLock;
         std::string s_monitor;   // display device name (\\.\DISPLAY2), empty = the main display
+        std::string s_musicFolder;   // your music (empty = "music" next to the game)
 
         // Keyboard bindings (keybinds.h), key_<action> = KEY[, KEY].
         std::mutex s_keyLock;
@@ -169,6 +170,14 @@ namespace wet::options
                 std::fprintf(f, "# monitor: the display the game opens on (as the launcher lists it, e.g. \\\\.\\DISPLAY2); empty = the main display\n");
                 std::fprintf(f, "monitor = %s\n", s_monitor.c_str());
             }
+            {
+                std::lock_guard lock(s_monitorLock);
+                std::fprintf(f, "# music_mode: your own music instead of the game's - 0 = off, 1 = a song when the game's music plays, 2 = all the time\n");
+                std::fprintf(f, "music_mode = %d\n", s_musicMode.load());
+                std::fprintf(f, "# music_folder: where your songs are (MP3, M4A/AAC, FLAC, WAV, WMA); empty = the music folder next to the game\n");
+                std::fprintf(f, "music_folder = %s\n", s_musicFolder.c_str());
+                std::fprintf(f, "music_volume = %d\nmusic_shuffle = %d\n", s_musicVolume.load(), s_musicShuffle.load());
+            }
             std::fprintf(f, "fullscreen = %d\n", s_fullscreen.load());
             std::fprintf(f, "show_fps = %d\n", s_showFps.load());
             std::fclose(f);
@@ -193,7 +202,7 @@ namespace wet::options
         }
         if (f)
         {
-            char line[256];
+            char line[1024];
             while (std::fgets(line, sizeof(line), f))
             {
                 char key[64], text[64], rest[192];
@@ -207,6 +216,16 @@ namespace wet::options
                             s_keyBind[i] = Upper(rest);
                         }
                     s_keyVersion++;
+                    continue;
+                }
+                if (const char* m = std::strstr(line, "music_folder"); m && std::strspn(line, " \t") == size_t(m - line))
+                {
+                    const char* eq = std::strchr(m, '=');
+                    std::string v = eq ? eq + 1 : "";
+                    size_t x = v.find_first_not_of(" \t"), y = v.find_last_not_of(" \t\r\n");
+                    v = x == std::string::npos ? std::string() : v.substr(x, y - x + 1);
+                    std::lock_guard lock(s_monitorLock);
+                    s_musicFolder = v;
                     continue;
                 }
                 if (const char* m = std::strstr(line, "monitor"); m && std::strspn(line, " \t") == size_t(m - line) && (m[7] == ' ' || m[7] == '='))
@@ -249,6 +268,9 @@ namespace wet::options
                 else if (!std::strcmp(key, "mouse_direct")) s_mouseDirect = value != 0;
                 else if (!std::strcmp(key, "mouse_native")) s_mouseNative = value != 0;
                 else if (!std::strcmp(key, "skip_intro")) s_skipIntro = value != 0;
+                else if (!std::strcmp(key, "music_mode")) s_musicMode = Clamp(value, 0, 2);
+                else if (!std::strcmp(key, "music_volume")) s_musicVolume = Clamp(value, 0, 100);
+                else if (!std::strcmp(key, "music_shuffle")) s_musicShuffle = value != 0;
                 else if (!std::strcmp(key, "anisotropic_filtering")) s_aniso = value != 0;
                 else if (!std::strcmp(key, "save_backups")) s_autoBackup = value != 0;
                 else if (!std::strcmp(key, "film_grain")) s_filmGrain = Clamp(value, 0, 100);
@@ -368,6 +390,25 @@ namespace wet::options
         return !forcedOff && s_skipIntro.load(std::memory_order_relaxed) != 0;
     }
     void SetSkipIntro(bool v) { s_skipIntro = v; Save(); }
+    int MusicMode() { return s_musicMode.load(std::memory_order_relaxed); }
+    void SetMusicMode(int v) { s_musicMode = Clamp(v, 0, 2); Save(); }
+    int MusicVolume() { return s_musicVolume.load(std::memory_order_relaxed); }
+    void SetMusicVolume(int v) { s_musicVolume = Clamp(v, 0, 100); Save(); }
+    bool MusicShuffle() { return s_musicShuffle.load(std::memory_order_relaxed) != 0; }
+    void SetMusicShuffle(bool v) { s_musicShuffle = v; Save(); }
+    std::string MusicFolder()
+    {
+        std::lock_guard lock(s_monitorLock);
+        return s_musicFolder;
+    }
+    void SetMusicFolder(const std::string& v)
+    {
+        {
+            std::lock_guard lock(s_monitorLock);
+            s_musicFolder = v;
+        }
+        Save();
+    }
     bool AnisotropicFiltering() { return s_aniso.load(std::memory_order_relaxed) != 0; }
     void SetAnisotropicFiltering(bool v) { s_aniso = v; Save(); }
     bool SaveBackups() { return s_autoBackup.load(std::memory_order_relaxed) != 0; }

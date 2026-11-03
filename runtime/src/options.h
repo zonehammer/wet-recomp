@@ -71,6 +71,15 @@ namespace wet::options
     void SetMouseDirect(bool v);
     // Native mouse look (mouselook.cpp): the mouse turns the third-person camera directly.
     bool MouseNative();
+    // Your own music (music.cpp): mode 0 off, 1 following the game's music, 2 always.
+    int MusicMode();
+    void SetMusicMode(int v);
+    int MusicVolume();          // 0-100
+    void SetMusicVolume(int v);
+    bool MusicShuffle();
+    void SetMusicShuffle(bool v);
+    std::string MusicFolder();  // empty = "music" next to the game
+    void SetMusicFolder(const std::string& v);
     // Straight to the title screen: no logo / legal movies (kernel/fs.cpp).
     bool SkipIntro();
     void SetSkipIntro(bool v);

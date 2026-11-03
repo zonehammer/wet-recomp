@@ -83,14 +83,14 @@ endif()
 if(WIN32)
     target_compile_definitions(WetRecomp PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
     if(MINGW)
-        target_link_libraries(WetRecomp PRIVATE xinput1_4 winmm dxgi)
+        target_link_libraries(WetRecomp PRIVATE xinput1_4 winmm dxgi mfplat mfreadwrite mfuuid ole32)
         # Guest code recurses deeply; give the main thread a big stack too.
         # The map file lets tools/resolve_profile.py name profiled addresses.
         target_link_options(WetRecomp PRIVATE -Wl,--stack,16777216 -Wl,-Map=$<TARGET_FILE_DIR:WetRecomp>/WetRecomp.map)
         # A windowed app (no console window); main() stays the entry point.
         target_link_options(WetRecomp PRIVATE -Wl,--subsystem,windows)
     else()
-        target_link_libraries(WetRecomp PRIVATE xinput winmm dxgi)
+        target_link_libraries(WetRecomp PRIVATE xinput winmm dxgi mfplat mfreadwrite mfuuid ole32)
         target_link_options(WetRecomp PRIVATE /MAP:$<TARGET_FILE_DIR:WetRecomp>/WetRecomp.map /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup)
     endif()
 endif()
