@@ -2111,7 +2111,7 @@ index 88bdcb438..f871f151e 100644
    std::vector<D3D12_RESOURCE_BARRIER> barriers_;
  
 diff --git a/src/xenia/gpu/d3d12/d3d12_render_target_cache.cc b/src/xenia/gpu/d3d12/d3d12_render_target_cache.cc
-index 342d282cf..972fff6cd 100644
+index 342d282cf..922dd917e 100644
 --- a/src/xenia/gpu/d3d12/d3d12_render_target_cache.cc
 +++ b/src/xenia/gpu/d3d12/d3d12_render_target_cache.cc
 @@ -1298,6 +1298,10 @@ bool D3D12RenderTargetCache::Resolve(const Memory& memory,
@@ -2162,7 +2162,7 @@ index 342d282cf..972fff6cd 100644
        } else {
          XELOGE(
              "D3D12RenderTargetCache: Failed to obtain the resolve destination "
-@@ -1511,6 +1538,76 @@ bool D3D12RenderTargetCache::Resolve(const Memory& memory,
+@@ -1511,6 +1538,110 @@ bool D3D12RenderTargetCache::Resolve(const Memory& memory,
    return copied && cleared;
  }
  
@@ -2170,11 +2170,34 @@ index 342d282cf..972fff6cd 100644
 +void D3D12RenderTargetCache::WetCaptureResolveForTexture(
 +    const draw_util::ResolveInfo& resolve_info,
 +    D3D12TextureCache& texture_cache) {
++  // The first few resolves that can't use the shortcut, and why
++  // (xenia_gpu.log).
++  static int wet_logged = 0;
++  auto reject = [&](const char* why) {
++    if (wet_logged < 24 && !resolve_info.IsCopyingDepth()) {
++      ++wet_logged;
++      const reg::RB_COPY_DEST_INFO& d = resolve_info.copy_dest_info;
++      XELOGW(
++          "WET resolve shortcut: not for {:08X} {}x{} ({}): rt format {}{}, "
++          "msaa {}, dest format {}, swap {}, endian {}, exp bias {}, "
++          "{} dump rectangles",
++          resolve_info.copy_dest_base,
++          resolve_info.coordinate_info.width_div_8 * 8,
++          resolve_info.height_div_8 * 8, why,
++          resolve_info.color_edram_info.format,
++          resolve_info.IsCopyingDepth() ? " (depth)" : "",
++          uint32_t(resolve_info.color_edram_info.msaa_samples),
++          uint32_t(d.copy_dest_format), uint32_t(d.copy_dest_swap),
++          uint32_t(d.copy_dest_endian), int32_t(d.copy_dest_exp_bias),
++          dump_rectangles_.size());
++    }
++  };
 +  // Only plain copies the texture would read back unchanged: one 32bpp
 +  // 8:8:8:8 render target without MSAA to a whole k_8_8_8_8 texture, no
 +  // scaling, exponent bias or red / blue swap.
 +  if (GetPath() != Path::kHostRenderTargets || IsDrawResolutionScaled() ||
 +      resolve_info.IsCopyingDepth() || dump_rectangles_.size() != 1) {
++    reject("path, scaling, depth or not one render target");
 +    return;
 +  }
 +  const draw_util::ResolveEdramInfo& edram = resolve_info.color_edram_info;
@@ -2188,6 +2211,7 @@ index 342d282cf..972fff6cd 100644
 +      dest.copy_dest_exp_bias != 0 || dest.copy_dest_swap ||
 +      dest.copy_dest_array || uint32_t(dest.copy_dest_endian) > 3 ||
 +      dest_coords.offset_x_div_8 || dest_coords.offset_y_div_8) {
++    reject("format, MSAA, swap, endian or offset");
 +    return;
 +  }
 +  // The one render target must hold the whole resolved area.
@@ -2197,6 +2221,7 @@ index 342d282cf..972fff6cd 100644
 +  const ResolveCopyDumpRectangle& rect = dump_rectangles_[0];
 +  if (rect.row_first != 0 || rect.rows != span_rows ||
 +      rect.row_first_start != 0 || rect.row_last_end != span_row_length) {
++    reject("render target doesn't hold the whole area");
 +    return;
 +  }
 +  auto& rt = *static_cast<D3D12RenderTarget*>(rect.render_target);
@@ -2207,6 +2232,7 @@ index 342d282cf..972fff6cd 100644
 +      rt_key.pitch_tiles_at_32bpp != edram.pitch_tiles ||
 +      GetColorResourceDXGIFormat(rt_key.GetColorFormat()) !=
 +          DXGI_FORMAT_R8G8B8A8_UNORM) {
++    reject("render target key");
 +    return;
 +  }
 +  uint32_t pitch_tiles = rt_key.pitch_tiles_at_32bpp;
@@ -2222,12 +2248,20 @@ index 342d282cf..972fff6cd 100644
 +  if (!width || !height ||
 +      x0 + width > pitch_tiles * xenos::kEdramTileWidthSamples ||
 +      x0 + width > desc.Width || y0 + height > desc.Height) {
++    reject("outside the render target");
 +    return;
 +  }
 +  command_processor_.PushTransitionBarrier(
 +      rt.resource(), rt.SetResourceState(D3D12_RESOURCE_STATE_COPY_SOURCE),
 +      D3D12_RESOURCE_STATE_COPY_SOURCE);
 +  D3D12_BOX box = {x0, y0, 0, x0 + width, y0 + height, 1};
++  static int wet_logged_ok = 0;
++  if (wet_logged_ok < 6) {
++    ++wet_logged_ok;
++    XELOGW("WET resolve shortcut: {:08X} {}x{} from render target {} at {},{}",
++           resolve_info.copy_dest_base, width, height, rt_key.base_tiles, x0,
++           y0);
++  }
 +  texture_cache.WetCaptureResolve(
 +      resolve_info.copy_dest_base, resolve_info.copy_dest_extent_start,
 +      resolve_info.copy_dest_extent_length, width, height,
@@ -2239,7 +2273,7 @@ index 342d282cf..972fff6cd 100644
  bool D3D12RenderTargetCache::InitializeTraceSubmitDownloads() {
    if (IsDrawResolutionScaled()) {
      // No 1:1 mapping.
-@@ -4400,6 +4497,52 @@ void D3D12RenderTargetCache::PerformTransfersAndResolveClears(
+@@ -4400,6 +4531,52 @@ void D3D12RenderTargetCache::PerformTransfersAndResolveClears(
      const std::vector<Transfer>* render_target_transfers,
      const uint64_t* render_target_resolve_clear_values,
      const Transfer::Rectangle* resolve_clear_rectangle) {
@@ -2292,7 +2326,7 @@ index 342d282cf..972fff6cd 100644
    assert_true(GetPath() == Path::kHostRenderTargets);
  
    const ui::d3d12::D3D12Provider& provider =
-@@ -6332,6 +6475,10 @@ void D3D12RenderTargetCache::DumpRenderTargets(uint32_t dump_base,
+@@ -6332,6 +6509,10 @@ void D3D12RenderTargetCache::DumpRenderTargets(uint32_t dump_base,
                                                 uint32_t dump_rows,
                                                 uint32_t dump_pitch) {
    assert_true(GetPath() == Path::kHostRenderTargets);
