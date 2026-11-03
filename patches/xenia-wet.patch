@@ -158,7 +158,7 @@ index 8f6087b05..47c87eec0 100644
  
  static void set_name(HANDLE thread, const std::string_view name) {
 diff --git a/src/xenia/gpu/command_processor.cc b/src/xenia/gpu/command_processor.cc
-index ce08d19bd..53d370b5a 100644
+index ce08d19bd..271a887e9 100644
 --- a/src/xenia/gpu/command_processor.cc
 +++ b/src/xenia/gpu/command_processor.cc
 @@ -9,6 +9,15 @@
@@ -348,7 +348,7 @@ index ce08d19bd..53d370b5a 100644
 +      continue;
 +    uint32_t addr = f.base_address << 12;
 +    uint32_t w = f.size_2d.width + 1, h = f.size_2d.height + 1;
-+    if (!addr || w > 512 || h > 512 || !s_done.insert(addr).second) continue;
++    if (!addr || w > 2048 || h > 2048 || !s_done.insert(addr).second) continue;
 +    const FormatInfo* info = FormatInfo::Get(f.format);
 +    uint32_t bw = info->block_width, bh = info->block_height;
 +    uint32_t bpb = info->bits_per_pixel * bw * bh / 8;
@@ -395,8 +395,8 @@ index ce08d19bd..53d370b5a 100644
 +        f.dimension != xenos::DataDimension::k2DOrStacked)
 +      continue;
 +    uint32_t w = f.size_2d.width + 1, h = f.size_2d.height + 1;
-+    // Button prompts (up to 128) and character textures (up to 1024).
-+    if (w > 1024 || h > 1024 || w < 16 || h < 16) continue;
++    // Button prompts (up to 128) and character textures (up to 2048).
++    if (w > 2048 || h > 2048 || w < 16 || h < 16) continue;
 +    if (f.format != xenos::TextureFormat::k_DXT1 &&
 +        f.format != xenos::TextureFormat::k_DXT4_5)
 +      continue;
