@@ -23,10 +23,14 @@ namespace wet::outfit
             uint32_t format;   // 18 DXT1, 20 DXT5
             uint32_t size;
             Pick pick;
+            bool hair = false;
         };
         const Target kTargets[] = {
             { "top", 0x7e3ef1552e320708ull, 18, 524288, Pick::kRed },        // with her skin and tattoos
             { "trousers", 0xe10a6dbb59e40b74ull, 20, 1048576, Pick::kAll },  // brown leather
+            { "hair", 0x58ed45b539ddd485ull, 20, 524288, Pick::kAll, true },  // 512x1024
+            { "hair", 0xe8afa70779f8fdf7ull, 20, 131072, Pick::kAll, true },  // 256x512 copies
+            { "hair", 0x2fdc366b00beac1aull, 20, 131072, Pick::kAll, true },
         };
 
         struct Entry
@@ -52,7 +56,7 @@ namespace wet::outfit
             // 8-in-16 byte order in memory.
             for (size_t i = 0; i + 1 < data.size(); i += 2)
                 std::swap(data[i], data[i + 1]);
-            RecolourDxt(data.data(), data.size(), t.format == 20, Colour(colour), t.pick);
+            RecolourDxt(data.data(), data.size(), t.format == 20, colour, t.pick, t.hair);
             for (size_t i = 0; i + 1 < data.size(); i += 2)
                 std::swap(data[i], data[i + 1]);
         }
@@ -84,10 +88,12 @@ namespace wet::outfit
                 s_entries.erase(it);
             return;
         }
-        int colour = options::OutfitColour();
         uint64_t now = Hash(data, baseSize);
+        auto wanted = [](const Target* t) { return t->hair ? options::HairColour() : options::OutfitColour(); };
+        int colour = 0;
         if (it != s_entries.end() && it->second.written == now)
         {
+            colour = wanted(it->second.target);
             if (it->second.colour == colour)
                 return;   // already as wanted
         }
@@ -110,6 +116,7 @@ namespace wet::outfit
                 e.mips.assign(mipData, mipData + mipSize);
             e.written = now;
             e.colour = 0;
+            colour = wanted(target);
             it = s_entries.insert_or_assign(phys, std::move(e)).first;
             if (colour == 0)
             {
@@ -129,6 +136,7 @@ namespace wet::outfit
             Write(mipPhys, mipData, mips);
         e.written = Hash(data, baseSize);
         e.colour = colour;
-        Log("Outfit: Rubi's %s at %08X now %s", e.target->what, phys, kNames[std::clamp(colour, 0, int(kCount) - 1)]);
+        Log("Outfit: Rubi's %s at %08X now %s", e.target->what, phys,
+            e.target->hair ? kHairNames[std::clamp(colour, 0, int(kHairCount) - 1)] : kNames[std::clamp(colour, 0, int(kCount) - 1)]);
     }
 }

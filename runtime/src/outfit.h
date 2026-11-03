@@ -99,6 +99,27 @@ namespace wet::outfit
         FromHsv(c, r, g, b);
     }
 
+    // Her hair is near black (brightness up to about 0.25): a new colour is
+    // the colour scaled by its brightness, lifted so the strands still show.
+    enum Hair { kHairOriginal, kBlonde, kPlatinum, kRedHair, kPinkHair, kBlueHair, kPurpleHair, kGreenHair, kBrownHair, kHairCount };
+    inline const char* const kHairNames[kHairCount] = { "Original", "Blonde", "Platinum", "Red", "Pink", "Blue", "Purple", "Green", "Brown" };
+
+    inline void RecolourHair(float& r, float& g, float& b, int to)
+    {
+        static const float kTint[kHairCount][3] = {
+            { 1, 1, 1 }, { 0.95f, 0.78f, 0.42f }, { 0.93f, 0.91f, 0.86f }, { 0.78f, 0.14f, 0.08f }, { 0.96f, 0.42f, 0.68f },
+            { 0.16f, 0.36f, 0.92f }, { 0.55f, 0.24f, 0.86f }, { 0.16f, 0.66f, 0.30f }, { 0.48f, 0.30f, 0.16f },
+        };
+        float v = std::max({ r, g, b });
+        float f = std::clamp(0.22f + v * 4.5f, 0.0f, 1.2f);
+        const float* t = kTint[std::clamp(to, 0, int(kHairCount) - 1)];
+        // Past full brightness, towards white (highlights).
+        float w = std::max(0.0f, f - 1.0f);
+        r = std::min(1.0f, t[0] * f + w);
+        g = std::min(1.0f, t[1] * f + w);
+        b = std::min(1.0f, t[2] * f + w);
+    }
+
     // Which blocks to recolour.
     enum class Pick { kNotSkin, kRed, kAll };
 
@@ -121,7 +142,7 @@ namespace wet::outfit
 
     // Recolours one DXT colour block (8 bytes, little-endian colours) in place.
     // `alwaysFour`: DXT3/5 colour blocks, always 4 colours whatever their order.
-    inline void RecolourColourBlock(uint8_t* p, Colour to, Pick pick, bool alwaysFour)
+    inline void RecolourColourBlock(uint8_t* p, int to, Pick pick, bool alwaysFour, bool hair = false)
     {
         uint16_t c0 = uint16_t(p[0] | p[1] << 8), c1 = uint16_t(p[2] | p[3] << 8);
         float r0, g0, b0, r1, g1, b1;
@@ -129,8 +150,16 @@ namespace wet::outfit
         From565(c1, r1, g1, b1);
         if (!Picked(pick, (r0 + r1) / 2, (g0 + g1) / 2, (b0 + b1) / 2))
             return;
-        Recolour(r0, g0, b0, to);
-        Recolour(r1, g1, b1, to);
+        if (hair)
+        {
+            RecolourHair(r0, g0, b0, to);
+            RecolourHair(r1, g1, b1, to);
+        }
+        else
+        {
+            Recolour(r0, g0, b0, Colour(to));
+            Recolour(r1, g1, b1, Colour(to));
+        }
         uint16_t n0 = To565(r0, g0, b0), n1 = To565(r1, g1, b1);
         uint32_t bits = uint32_t(p[4] | p[5] << 8 | p[6] << 16 | uint32_t(p[7]) << 24);
         if (!alwaysFour)
@@ -171,11 +200,11 @@ namespace wet::outfit
     }
 
     // Recolours DXT1 (8-byte blocks) or DXT5 (16-byte blocks: alpha, then colour) data.
-    inline void RecolourDxt(uint8_t* blocks, size_t bytes, bool dxt5, Colour to, Pick pick)
+    inline void RecolourDxt(uint8_t* blocks, size_t bytes, bool dxt5, int to, Pick pick, bool hair = false)
     {
         size_t stride = dxt5 ? 16 : 8;
         for (size_t i = 0; i + stride <= bytes; i += stride)
-            RecolourColourBlock(blocks + i + (dxt5 ? 8 : 0), to, pick, dxt5);
+            RecolourColourBlock(blocks + i + (dxt5 ? 8 : 0), to, pick, dxt5, hair);
     }
 
     inline void RecolourDxt1(uint8_t* blocks, size_t count, Colour to)

@@ -74,6 +74,9 @@ namespace wet::options
     // Rubi's outfit colour, her top and trousers (outfit.h): 0 original, 1 red, 2 blue, 3 black, 4 white, 5 green, 6 purple, 7 pink.
     int OutfitColour();
     void SetOutfitColour(int v);
+    // Rubi's hair colour (outfit.h): 0 original, 1 blonde, 2 platinum, 3 red, 4 pink, 5 blue, 6 purple, 7 green, 8 brown.
+    int HairColour();
+    void SetHairColour(int v);
     // Your own music (music.cpp): mode 0 off, 1 following the game's music, 2 always.
     int MusicMode();
     void SetMusicMode(int v);

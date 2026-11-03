@@ -30,7 +30,7 @@ namespace wet::options
         std::atomic<bool> s_inCutscene{ false };
         std::atomic<int> s_videoMode{ 1 };
         int s_scale = 1, s_scaleRunning = 1;
-        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_fov{ 90 }, s_widescreen{ 0 }, s_widescreenHud{ 1 }, s_hideBorders{ 0 }, s_vsync{ 0 }, s_buttonPrompts{ 0 }, s_mouseAim{ 1 }, s_mouseSens{ 50 }, s_mouseInvert{ 0 }, s_mouseDirect{ 1 }, s_mouseNative{ 1 }, s_skipIntro{ 1 }, s_musicMode{ 0 }, s_musicVolume{ 80 }, s_musicShuffle{ 1 }, s_outfit{ 0 }, s_aniso{ 1 }, s_autoBackup{ 1 }, s_shaderCache{ 1 }, s_asyncShaders{ 1 }, s_shaderPreload{ 0 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 }, s_motionBlur{ 1 }, s_depthOfField{ 1 }, s_cameraShake{ 1 }, s_language{ 0 };
+        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_fov{ 90 }, s_widescreen{ 0 }, s_widescreenHud{ 1 }, s_hideBorders{ 0 }, s_vsync{ 0 }, s_buttonPrompts{ 0 }, s_mouseAim{ 1 }, s_mouseSens{ 50 }, s_mouseInvert{ 0 }, s_mouseDirect{ 1 }, s_mouseNative{ 1 }, s_skipIntro{ 1 }, s_musicMode{ 0 }, s_musicVolume{ 80 }, s_musicShuffle{ 1 }, s_outfit{ 0 }, s_hair{ 0 }, s_aniso{ 1 }, s_autoBackup{ 1 }, s_shaderCache{ 1 }, s_asyncShaders{ 1 }, s_shaderPreload{ 0 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 }, s_motionBlur{ 1 }, s_depthOfField{ 1 }, s_cameraShake{ 1 }, s_language{ 0 };
         constexpr const char* kFile = "wet.ini";
         // Mouse button bindings: left, right, middle, back (X1), forward (X2).
         constexpr const char* kMouseKeys[5] = { "mouse_left", "mouse_right", "mouse_middle", "mouse_back", "mouse_forward" };
@@ -139,6 +139,8 @@ namespace wet::options
             std::fprintf(f, "mouse_native = %d\n", s_mouseNative.load());
             std::fprintf(f, "# outfit_colour: Rubi's top and trousers - 0 original, 1 red, 2 blue, 3 black, 4 white, 5 green, 6 purple, 7 pink\n");
             std::fprintf(f, "outfit_colour = %d\n", s_outfit.load());
+            std::fprintf(f, "# hair_colour: Rubi's hair - 0 original, 1 blonde, 2 platinum, 3 red, 4 pink, 5 blue, 6 purple, 7 green, 8 brown\n");
+            std::fprintf(f, "hair_colour = %d\n", s_hair.load());
             std::fprintf(f, "# skip_intro: 1 = straight to the title screen (no logo / legal movies at startup)\n");
             std::fprintf(f, "skip_intro = %d\n", s_skipIntro.load());
             std::fprintf(f, "# anisotropic_filtering: 1 = 16x (sharper floors and walls at an angle), 0 = as the game sets it\n");
@@ -272,6 +274,7 @@ namespace wet::options
                 else if (!std::strcmp(key, "skip_intro")) s_skipIntro = value != 0;
                 else if (!std::strcmp(key, "music_mode")) s_musicMode = Clamp(value, 0, 2);
                 else if (!std::strcmp(key, "outfit_colour")) s_outfit = Clamp(value, 0, 7);
+                else if (!std::strcmp(key, "hair_colour")) s_hair = Clamp(value, 0, 8);
                 else if (!std::strcmp(key, "music_volume")) s_musicVolume = Clamp(value, 0, 100);
                 else if (!std::strcmp(key, "music_shuffle")) s_musicShuffle = value != 0;
                 else if (!std::strcmp(key, "anisotropic_filtering")) s_aniso = value != 0;
@@ -395,6 +398,8 @@ namespace wet::options
     void SetSkipIntro(bool v) { s_skipIntro = v; Save(); }
     int OutfitColour() { return s_outfit.load(std::memory_order_relaxed); }
     void SetOutfitColour(int v) { s_outfit = Clamp(v, 0, 7); Save(); }
+    int HairColour() { return s_hair.load(std::memory_order_relaxed); }
+    void SetHairColour(int v) { s_hair = Clamp(v, 0, 8); Save(); }
     int MusicMode() { return s_musicMode.load(std::memory_order_relaxed); }
     void SetMusicMode(int v) { s_musicMode = Clamp(v, 0, 2); Save(); }
     int MusicVolume() { return s_musicVolume.load(std::memory_order_relaxed); }

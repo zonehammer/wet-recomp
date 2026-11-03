@@ -1086,6 +1086,13 @@ namespace
                     wet::options::SetOutfitColour(outfit);
                     wet::renderer::RecheckTextures();
                 }
+                int hair = wet::options::HairColour();
+                static const char* kHair[] = { "Original", "Blonde", "Platinum", "Red", "Pink", "Blue", "Purple", "Green", "Brown" };
+                if (RowCombo("Rubi's hair", &hair, kHair, 9, "Recolours her hair."))
+                {
+                    wet::options::SetHairColour(hair);
+                    wet::renderer::RecheckTextures();
+                }
             }
             bool aniso = wet::options::AnisotropicFiltering();
             if (RowCheck("16x texture filtering", &aniso, "Sharper floors and walls seen at an angle; costs very little."))
