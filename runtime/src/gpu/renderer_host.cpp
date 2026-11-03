@@ -7,6 +7,12 @@
 #include "memory.h"
 #include "os.h"
 
+namespace wet::prompts
+{
+    void WorldTextureSeen(uint32_t phys, uint8_t* data, uint32_t format, uint32_t w, uint32_t h, bool tiled,
+                          uint32_t endian, uint32_t pitch);
+}
+
 namespace wet::renderer_host
 {
     void StartWatchTrace() { wet::StartWatchTrace(); }
@@ -57,4 +63,9 @@ namespace wet::renderer_host
     void WatchPhysical(uint32_t physStart, uint32_t length) { wet::WatchPhysical(physStart, length); }
     void SetPhysicalWriteCallback(void (*callback)(uint32_t, uint32_t)) { wet::SetPhysicalWriteCallback(callback); }
     void UnwatchPhysical(uint32_t start, uint32_t length) { wet::UnwatchPhysical(start, length); }
+    void WorldTextureSeen(uint32_t phys, uint8_t* data, uint32_t format, uint32_t w, uint32_t h, bool tiled,
+                          uint32_t endian, uint32_t pitch)
+    {
+        wet::prompts::WorldTextureSeen(phys, data, format, w, h, tiled, endian, pitch);
+    }
 }

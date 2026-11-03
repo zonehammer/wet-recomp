@@ -1390,6 +1390,11 @@ namespace wet::renderer
 
     bool Start(uint8_t* membase, uint32_t titleId)
     {
+        // In-world button prompts (prompts.cpp) are redrawn as draws first read them.
+        xe::gpu::wet_texture_seen = [](uint32_t phys, uint8_t* data, uint32_t format, uint32_t w, uint32_t h,
+                                       bool tiled, uint32_t endian, uint32_t pitch) {
+            wet::renderer_host::WorldTextureSeen(phys, data, format, w, h, tiled, endian, pitch);
+        };
         if (s_running)
             return true;
         cvars::log_to_stdout = false;

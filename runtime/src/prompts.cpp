@@ -227,6 +227,91 @@ namespace
     }
 }
 
+// ---- In-world prompts ----
+// The button over an enemy to finish (and on usable objects) is a texture in the
+// level's data, not the HUD's: an opaque 64x64 DXT1 disc in the button's colour
+// (prompt_art::FindWorldOrb). The GPU emulation shows the runtime each small
+// texture a draw reads, before it loads it (Xenia's WetCheckTextures); the disc
+// is redrawn there, in guest memory (tiled, 8-in-16 byte order).
+namespace
+{
+    // texture_address::Tiled2D: byte offset of block (x, y), pitch in blocks.
+    uint32_t Tiled2D(uint32_t x, uint32_t y, uint32_t pitch, unsigned bpbLog2)
+    {
+        uint32_t outer = ((y >> 5) * (pitch >> 5) + (x >> 5)) << 6;
+        uint32_t inner = (((y >> 1) & 7) << 3) | (x & 7);
+        uint32_t oib = (outer | inner) << bpbLog2;
+        uint32_t bank = (y >> 4) & 1, pipe = ((x >> 3) & 3) ^ (((y >> 3) & 1) << 1);
+        return ((y & 1) << 4) | (pipe << 6) | (bank << 11) | (oib & 15) | (((oib >> 4) & 1) << 5) |
+               (((oib >> 5) & 7) << 8) | (oib >> 8 << 12);
+    }
+
+    std::mutex s_worldLock;
+    int s_worldRedrawn = 0;
+}
+
+namespace wet::prompts
+{
+    void WorldTextureSeen(uint32_t phys, uint8_t* data, uint32_t format, uint32_t w, uint32_t h, bool tiled,
+                          uint32_t endian, uint32_t pitch)
+    {
+        using namespace wet::prompt_art;
+        constexpr uint32_t kDxt1 = 18;
+        if (format != kDxt1 || w != 64 || h != 64 || !tiled || endian != 1 || wet::options::ButtonPrompts() == 1)
+            return;
+        // Untile and byte-swap the 16x16 blocks.
+        constexpr uint32_t kBlocks = 16;
+        std::vector<uint8_t> linear(kBlocks * kBlocks * 8);
+        for (uint32_t y = 0; y < kBlocks; y++)
+            for (uint32_t x = 0; x < kBlocks; x++)
+            {
+                const uint8_t* src = data + Tiled2D(x, y, pitch, 3);
+                uint8_t* dst = &linear[(y * kBlocks + x) * 8];
+                for (int i = 0; i < 8; i += 2)
+                {
+                    dst[i] = src[i + 1];
+                    dst[i + 1] = src[i];
+                }
+            }
+        std::vector<Rgba> px(64 * 64);
+        DecodeDxt1(linear.data(), 64, 64, px.data());
+        float cx, cy, radius;
+        Symbol sym = FindWorldOrb(px.data(), 64, 64, cx, cy, radius);
+        if (sym == Symbol::None)
+            return;
+        Art art = WantedArt();
+        Label label;
+        if (art == Art::Keyboard && !KeyboardLabel(sym, label))
+            art = Art::Xbox;
+        static const char* kNames[] = { "", "A", "B", "X", "Y" };
+        const char* pad = kNames[sym == Symbol::Cross ? 1 : sym == Symbol::Circle ? 2 : sym == Symbol::Square ? 3 : 4];
+        std::lock_guard lock(s_worldLock);
+        if (art == Art::Xbox)
+        {
+            wet::Log("Prompts: in-world %s button at %08X (left as it is)", pad, phys);
+            return;
+        }
+        RedrawWorldOrb(px.data(), 64, 64, cx, cy, radius, sym, art == Art::Keyboard ? &label : nullptr);
+        EncodeDxt1(px.data(), 64, 64, linear.data());
+        // The GPU emulation's copy of the old texture goes (the write-watch).
+        wet::PrepareHostWrite(0xA0000000u + phys, pitch * 32 * 8);
+        for (uint32_t y = 0; y < kBlocks; y++)
+            for (uint32_t x = 0; x < kBlocks; x++)
+            {
+                uint8_t* dst = data + Tiled2D(x, y, pitch, 3);
+                const uint8_t* src = &linear[(y * kBlocks + x) * 8];
+                for (int i = 0; i < 8; i += 2)
+                {
+                    dst[i] = src[i + 1];
+                    dst[i + 1] = src[i];
+                }
+            }
+        ++s_worldRedrawn;
+        wet::Log("Prompts: in-world %s button at %08X redrawn with %s art (%d so far)", pad, phys,
+                 art == Art::Keyboard ? "keyboard / mouse" : "PlayStation", s_worldRedrawn);
+    }
+}
+
 // The HUD's DDS loader: reads the texture from the stream (r3).
 extern "C" void __imp__sub_82B9AC80(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_82B9AC80)

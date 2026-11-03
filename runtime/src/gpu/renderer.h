@@ -92,4 +92,7 @@ namespace wet::renderer_host
     void UnwatchPhysical(uint32_t physStart, uint32_t length);
     // Asks the GPU thread to mirror the title's register writes into the renderer now.
     void RequestRegisterSync();
+    // A small texture a draw is about to read (prompts.cpp may redraw an in-world button).
+    void WorldTextureSeen(uint32_t phys, uint8_t* data, uint32_t format, uint32_t w, uint32_t h, bool tiled,
+                          uint32_t endian, uint32_t pitch);
 }

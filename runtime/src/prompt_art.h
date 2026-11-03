@@ -662,6 +662,147 @@ namespace wet::prompt_art
         return true;
     }
 
+    // ---- DXT1 (the in-world prompts) ----
+
+    inline void DecodeDxt1(const uint8_t* src, int w, int h, Rgba* out)
+    {
+        for (int by = 0; by < (h + 3) / 4; by++)
+            for (int bx = 0; bx < (w + 3) / 4; bx++, src += 8)
+            {
+                uint16_t c0 = uint16_t(src[0] | src[1] << 8), c1 = uint16_t(src[2] | src[3] << 8);
+                int col[4][4];
+                Rgb565(c0, col[0][0], col[0][1], col[0][2]);
+                Rgb565(c1, col[1][0], col[1][1], col[1][2]);
+                col[0][3] = col[1][3] = col[2][3] = col[3][3] = 255;
+                for (int k = 0; k < 3; k++)
+                    if (c0 > c1)
+                    {
+                        col[2][k] = (2 * col[0][k] + col[1][k]) / 3;
+                        col[3][k] = (col[0][k] + 2 * col[1][k]) / 3;
+                    }
+                    else
+                    {
+                        col[2][k] = (col[0][k] + col[1][k]) / 2;
+                        col[3][k] = 0;
+                    }
+                if (c0 <= c1)
+                    col[3][3] = 0;
+                uint32_t bits = uint32_t(src[4] | src[5] << 8 | src[6] << 16 | uint32_t(src[7]) << 24);
+                for (int i = 0; i < 16; i++)
+                {
+                    int x = bx * 4 + (i & 3), y = by * 4 + (i >> 2);
+                    if (x >= w || y >= h)
+                        continue;
+                    int ci = (bits >> (2 * i)) & 3;
+                    out[y * w + x] = { uint8_t(col[ci][0]), uint8_t(col[ci][1]), uint8_t(col[ci][2]), uint8_t(col[ci][3]) };
+                }
+            }
+    }
+
+    // Opaque DXT1: the colour half of the DXT5 encoder's blocks.
+    inline void EncodeDxt1(const Rgba* px, int w, int h, uint8_t* dst)
+    {
+        int blocks = ((w + 3) / 4) * ((h + 3) / 4);
+        std::vector<uint8_t> dxt5(size_t(blocks) * 16);
+        std::vector<Rgba> opaque(px, px + size_t(w) * h);
+        for (auto& p : opaque)
+            p.a = 255;
+        EncodeDxt5(opaque.data(), w, h, dxt5.data());
+        for (int b = 0; b < blocks; b++)
+            std::memcpy(dst + b * 8, dxt5.data() + b * 16 + 8, 8);
+    }
+
+    // The in-world prompt (over an enemy to finish, on usable objects): an
+    // opaque disc in the button's colour with a black letter, a dark grungy ring
+    // round it and white outside (drawn multiplied, so white shows the scene).
+    // Finds it and says which button it is (None if it isn't one).
+    inline Symbol FindWorldOrb(const Rgba* px, int w, int h, float& cx, float& cy, float& radius)
+    {
+        auto at = [&](int x, int y) { return px[y * w + x]; };
+        // White corners.
+        for (auto [x, y] : { std::pair{ 1, 1 }, { w - 2, 1 }, { 1, h - 2 }, { w - 2, h - 2 } })
+        {
+            Rgba p = at(x, y);
+            if (p.r < 215 || p.g < 215 || p.b < 215)
+                return Symbol::None;
+        }
+        // A saturated disc in the middle: its colour picks the button.
+        double sx = 0, sy = 0, sr = 0, sg = 0, sb = 0;
+        int n = 0, dark = 0;
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                Rgba p = at(x, y);
+                int mx = std::max({ p.r, p.g, p.b }), mn = std::min({ p.r, p.g, p.b });
+                float dx = x + 0.5f - w / 2.0f, dy = y + 0.5f - h / 2.0f;
+                if (dx * dx + dy * dy < (w * 0.4f) * (w * 0.4f))
+                {
+                    if (mx - mn > 50 && mx > 70)
+                    {
+                        sx += x + 0.5; sy += y + 0.5; n++;
+                        sr += p.r; sg += p.g; sb += p.b;
+                    }
+                    else if (mx < 40)
+                        dark++;
+                }
+            }
+        if (n < w * h / 20 || dark < w * h / 60)
+            return Symbol::None;
+        cx = float(sx / n);
+        cy = float(sy / n);
+        // The disc's area includes the letter cut into it.
+        radius = float(std::sqrt((n + dark * 0.5) / 3.14159265));
+        if (std::fabs(cx - w / 2.0f) > w * 0.12f || std::fabs(cy - h / 2.0f) > h * 0.12f || radius > w * 0.45f)
+            return Symbol::None;
+        double r = sr / n, g = sg / n, b = sb / n;
+        if (b > r * 1.3 && b > g * 1.1) return Symbol::Square;              // blue X
+        if (g > r * 1.3 && g > b * 1.2) return Symbol::Cross;               // green A
+        if (r > g * 1.5 && r > b * 1.5) return Symbol::Circle;              // red B
+        if (r > b * 1.6 && g > b * 1.4) return Symbol::Triangle;            // yellow Y
+        return Symbol::None;
+    }
+
+    // Repaints the disc: PlayStation symbol, or the key / mouse button.
+    inline void RedrawWorldOrb(Rgba* px, int w, int h, float cx, float cy, float radius, Symbol sym, const Label* label)
+    {
+        float inner = radius * 1.02f;
+        float width, ringR = 0;
+        std::vector<Seg> segs;
+        std::vector<Box> fills;
+        int sr, sg, sb;
+        if (label)
+        {
+            LabelStrokes(*label, cx, cy, inner * 1.5f, inner * 1.3f, segs, fills, width);
+            sr = sg = sb = 245;
+        }
+        else
+        {
+            segs = SymbolStrokes(sym, cx, cy, inner * 0.95f, width, ringR);
+            width *= 0.85f;
+            SymbolColour(sym, sr, sg, sb);
+        }
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                float dx = x + 0.5f - cx, dy = y + 0.5f - cy, d = std::sqrt(dx * dx + dy * dy);
+                if (d >= inner + 1)
+                    continue;
+                Rgba& p = px[y * w + x];
+                // Dark glossy disc, lighter towards the top left (as the HUD's).
+                float t = std::clamp((dx + dy) / (2 * inner) * 0.5f + 0.5f, 0.0f, 1.0f);
+                float base = 62 - 42 * t;
+                float hl = std::max(0.0f, 1 - std::sqrt((dx + inner * 0.3f) * (dx + inner * 0.3f) +
+                                                       (dy + inner * 0.45f) * (dy + inner * 0.45f)) / (inner * 0.6f));
+                base += 36 * hl * hl;
+                float edge = std::clamp(inner + 1 - d, 0.0f, 1.0f);
+                float c = Coverage(float(x), float(y), segs, width, cx, cy, ringR, &fills);
+                float r = base + (sr - base) * c, g = base + (sg - base) * c, b = base + (sb - base) * c;
+                p.r = uint8_t(std::clamp(p.r + (r - p.r) * edge, 0.0f, 255.0f));
+                p.g = uint8_t(std::clamp(p.g + (g - p.g) * edge, 0.0f, 255.0f));
+                p.b = uint8_t(std::clamp(p.b + (b - p.b) * edge, 0.0f, 255.0f));
+            }
+    }
+
     // Which symbol a button texture gets ("button_A_b.dds", "button_3", ...).
     inline Symbol ForName(std::string_view name, bool& orb, bool& flatten)
     {
