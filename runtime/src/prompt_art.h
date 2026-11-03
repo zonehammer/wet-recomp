@@ -710,7 +710,7 @@ namespace wet::prompt_art
             { "start_", Symbol::Start }, { "lpress_", Symbol::LPress }, { "rpress_", Symbol::RPress },
             { "up_", Symbol::Up }, { "down_", Symbol::Down }, { "left_", Symbol::Left }, { "right_", Symbol::Right },
             { "lthumb_", Symbol::LStick }, { "rthumb_", Symbol::RStick },
-            { "select_", Symbol::Back }, { "updown_", Symbol::Up },
+            { "select_", Symbol::Back }, { "updown_", Symbol::Up }, { "leftright_", Symbol::Left },
         };
         for (auto& e : keyboardOnly)
             if (k.compare(0, std::strlen(e.prefix), e.prefix) == 0)

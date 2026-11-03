@@ -927,6 +927,25 @@ GUEST_IMPORT(VdSwap)
     renderer::DisplayAspect();
     if (renderer::Enabled())
         UpdatePauseQuit(ctx);
+    // WET_DUMP_MEMORY_AT=<seconds>:<file>: the 512 MB of physical memory once
+    // (diagnostics: finding resource names in what the game has loaded).
+    if (static const char* dump = std::getenv("WET_DUMP_MEMORY_AT"); dump && *dump)
+    {
+        static bool done = false;
+        static const auto start = std::chrono::steady_clock::now();
+        double at = std::atof(dump);
+        const char* file = std::strchr(dump, ':');
+        if (!done && file && std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() > at)
+        {
+            done = true;
+            if (FILE* f = std::fopen(file + 1, "wb"))
+            {
+                std::fwrite(PhysicalHostView(), 1, 512u << 20, f);
+                std::fclose(f);
+                Log("Memory dumped to %s", file + 1);
+            }
+        }
+    }
     if (n <= 3 || (n & (n - 1)) == 0)
     {
         uint64_t faults, protects, checks, inval, cooled;
