@@ -2,6 +2,7 @@
 // apu.h). Xenia is BSD-licensed; its XMA decoding uses FFmpeg (LGPL).
 #include "apu/apu.h"
 #include "gpu/renderer.h"
+#include "music.h"
 
 #include <atomic>
 #include <condition_variable>
@@ -48,6 +49,7 @@ namespace wet::apu
     {
         if (!s_memory)
             s_memory = std::make_unique<xe::Memory>(membase, physicalView);
+        xe::apu::wet_xma_gain = [](uint32_t phys) { return music::GameMusicGain(phys); };
         s_contexts.resize(count);
         for (uint32_t i = 0; i < count; i++)
         {

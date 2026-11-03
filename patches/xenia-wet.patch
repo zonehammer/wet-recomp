@@ -17,6 +17,57 @@ index 00c42349d..307389334 100644
 +#endif
 +
  #endif  // XENIA_APU_XAUDIO2_XAUDIO2_API_H_
+diff --git a/src/xenia/apu/xma_context.cc b/src/xenia/apu/xma_context.cc
+index 27b07ba28..5bad0580d 100644
+--- a/src/xenia/apu/xma_context.cc
++++ b/src/xenia/apu/xma_context.cc
+@@ -37,6 +37,8 @@ extern "C" {
+ namespace xe {
+ namespace apu {
+ 
++float (*wet_xma_gain)(uint32_t input_phys) = nullptr;
++
+ XmaContext::XmaContext() = default;
+ 
+ XmaContext::~XmaContext() {
+@@ -617,6 +619,21 @@ void XmaContext::Decode(XMA_CONTEXT_DATA* data) {
+       //			dump_raw(av_frame_, id());
+       ConvertFrame((const uint8_t**)av_frame_->data, bool(data->is_stereo),
+                    raw_frame_.data());
++      if (wet_xma_gain) {
++        float gain = wet_xma_gain(data->current_buffer
++                                      ? data->input_buffer_1_ptr
++                                      : data->input_buffer_0_ptr);
++        size_t samples = (kBytesPerFrameChannel << data->is_stereo) / 2;
++        if (gain <= 0.0f) {
++          std::memset(raw_frame_.data(), 0, samples * 2);
++        } else if (gain < 1.0f) {
++          auto s16 = reinterpret_cast<uint16_t*>(raw_frame_.data());
++          for (size_t i = 0; i < samples; i++) {
++            int16_t v = int16_t(xe::byte_swap(s16[i]));
++            s16[i] = xe::byte_swap(uint16_t(int16_t(v * gain)));
++          }
++        }
++      }
+       // decoded_consumed_samples_ += kSamplesPerFrame;
+ 
+       auto byte_count = kBytesPerFrameChannel << data->is_stereo;
+diff --git a/src/xenia/apu/xma_context.h b/src/xenia/apu/xma_context.h
+index 52e97ee47..1b98c55eb 100644
+--- a/src/xenia/apu/xma_context.h
++++ b/src/xenia/apu/xma_context.h
+@@ -130,6 +130,11 @@ struct Xma2ExtraData {
+ static_assert_size(Xma2ExtraData, 34);
+ #pragma pack(pop)
+ 
++// WET recomp: the gain for a context's output, by the physical address of the
++// input buffer it's decoding (1 = as is, 0 = silent); used to mute the game's
++// music while your own plays. Null: always 1.
++extern float (*wet_xma_gain)(uint32_t input_phys);
++
+ class XmaContext {
+  public:
+   static const uint32_t kBytesPerPacket = 2048;
 diff --git a/src/xenia/base/clock_x64.cc b/src/xenia/base/clock_x64.cc
 index 14155303a..538db134b 100644
 --- a/src/xenia/base/clock_x64.cc

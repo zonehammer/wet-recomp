@@ -2,6 +2,7 @@
 // the game's music, either following it (a song starts when the game starts a
 // music track, fades out when the game's music stops) or all the time.
 #pragma once
+#include <cstdint>
 #include <string>
 
 namespace wet::music
@@ -12,6 +13,14 @@ namespace wet::music
     // kernel/fs.cpp: the game opened / closed one of its music streams (mu_*.xma).
     void GameMusicOpened(const std::string& name);
     void GameMusicClosed(const std::string& name);
+
+    // kernel/fs.cpp: a file read into guest memory; `music` if it was one of
+    // the game's music streams. Where the game's music lands, so its XMA
+    // decoding can be silenced while your songs play.
+    void GameRead(uint32_t guest, uint32_t length, bool music);
+    // The XMA decoder (apu bridge): the gain for a context decoding the input
+    // buffer at this physical address (0 while your songs replace the game's).
+    float GameMusicGain(uint32_t inputPhys);
 
     // Controls (F1, media keys).
     void Next();

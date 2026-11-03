@@ -14,8 +14,10 @@
 #include "log.h"
 #include "options.h"
 #include "photo.h"
+#include "memory.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -49,6 +51,21 @@ namespace wet::music
         std::atomic<int> s_skip{ 0 };      // +1 next, -1 previous (the player thread acts on it)
         std::atomic<bool> s_rescan{ false };
         std::atomic<int> s_gameOpen{ 0 };
+        std::atomic<int> s_trackCount{ 0 };
+
+        // Where the game's music streams were last read to (physical
+        // addresses): its XMA voices decode from there.
+        struct Range { uint32_t begin = 0, end = 0; };
+        std::mutex s_rangeLock;
+        std::array<Range, 32> s_ranges{};
+        size_t s_rangeNext = 0;
+        std::atomic<bool> s_anyRange{ false };
+        std::atomic<bool> s_loggedVirtual{ false }, s_loggedMute{ false };
+
+        // The game's music volume (fades over about half a second).
+        std::mutex s_gainLock;
+        float s_gameGain = 1.0f;
+        int64_t s_gainAt = 0;
         std::atomic<int64_t> s_gameClosedAt{ -1000000 };   // ms since start (never yet)
         const Clock::time_point s_start = Clock::now();
 
@@ -102,6 +119,7 @@ namespace wet::music
                 std::shuffle(tracks.begin(), tracks.end(), std::mt19937{ std::random_device{}() });
             std::lock_guard lock(s_lock);
             s_tracks = std::move(tracks);
+            s_trackCount = int(s_tracks.size());
             s_pos = -1;
             s_folder = Utf8(folder);
             Log("Music: %zu songs in %s%s", s_tracks.size(), s_folder.c_str(), options::MusicShuffle() ? " (shuffled)" : "");
@@ -414,6 +432,65 @@ namespace wet::music
             if (options::MusicMode() == 1)
                 Log("Music: the game's music stopped");
         }
+    }
+
+    void GameRead(uint32_t guest, uint32_t length, bool music)
+    {
+        if (!length)
+            return;
+        if (music && !IsPhysicalView(guest))
+        {
+            if (!s_loggedVirtual.exchange(true))
+                Log("Music: the game reads its music to 0x%08X (not physical memory); it can't be muted", guest);
+            return;
+        }
+        if (!music && !s_anyRange.load(std::memory_order_relaxed))
+            return;
+        uint32_t begin = IsPhysicalView(guest) ? ViewToPhysical(guest) : 0xFFFFFFFFu, end = begin + length;
+        std::lock_guard lock(s_rangeLock);
+        // Anything read over a music buffer isn't music any more.
+        for (auto& r : s_ranges)
+            if (r.begin < end && begin < r.end)
+            {
+                if (music && r.begin == begin && r.end == end)
+                    return;
+                r = {};
+            }
+        if (music)
+        {
+            s_ranges[s_rangeNext] = { begin, end };
+            s_rangeNext = (s_rangeNext + 1) % s_ranges.size();
+            s_anyRange = true;
+        }
+    }
+
+    float GameMusicGain(uint32_t inputPhys)
+    {
+        if (!s_anyRange.load(std::memory_order_relaxed))
+            return 1.0f;
+        bool music = false;
+        {
+            std::lock_guard lock(s_rangeLock);
+            for (auto& r : s_ranges)
+                if (inputPhys >= r.begin && inputPhys < r.end)
+                {
+                    music = true;
+                    break;
+                }
+        }
+        if (!music)
+            return 1.0f;
+        // Silent while your songs replace it: the player is on with songs to
+        // play and isn't paused (pausing brings the game's music back).
+        bool mute = options::MusicMode() != 0 && s_running.load() && s_trackCount.load() > 0 && !s_paused.load();
+        std::lock_guard lock(s_gainLock);
+        int64_t now = NowMs();
+        float step = std::min(1.0f, (now - s_gainAt) / 500.0f);
+        s_gainAt = now;
+        s_gameGain = mute ? std::max(0.0f, s_gameGain - step) : std::min(1.0f, s_gameGain + step);
+        if (mute && !s_loggedMute.exchange(true))
+            Log("Music: muting the game's music (XMA input at physical 0x%08X)", inputPhys);
+        return s_gameGain;
     }
 
     void Next() { s_skip = 1; s_paused = false; }

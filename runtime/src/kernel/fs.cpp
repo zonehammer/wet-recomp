@@ -576,6 +576,7 @@ GUEST_IMPORT(NtReadFile)
         PrepareHostWrite(buffer, length);
         got = ReadToGuest(f->fp, buffer, length);
         f->position += got;
+        music::GameRead(buffer, uint32_t(got), !f->music.empty());
     }
     uint32_t status = (got == 0 && length > 0) ? STATUS_END_OF_FILE : STATUS_SUCCESS;
     CompleteIo(ctx, Arg(ctx, 4), Arg(ctx, 1), Arg(ctx, 2), status, uint32_t(got));
@@ -602,6 +603,7 @@ GUEST_IMPORT(NtReadFileScatter)
             size_t want = std::min<size_t>(0x1000, length - total);
             PrepareHostWrite(page, want);
             size_t got = ReadToGuest(f->fp, page, want);
+            music::GameRead(page, uint32_t(got), !f->music.empty());
             total += got;
             if (got < want)
                 break;
