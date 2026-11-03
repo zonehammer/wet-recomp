@@ -820,28 +820,9 @@ static void NotePerformance()
     {
         static uint32_t earlyBefore = 0;
         uint32_t early = wet::renderer::EarlyVblanks();
-        static uint64_t splitsBefore = 0;
-        uint64_t splits = wet::renderer::SubmitSplits();
-        char splitText[128] = "";
-        if (splits != splitsBefore)
-            std::snprintf(splitText, sizeof(splitText), ", %.1f extra submissions per frame",
-                          double(splits - splitsBefore) / std::max(1u, frames - 1));
-        static uint64_t capturesBefore = 0, hitsBefore = 0;
-        uint64_t captures, hits;
-        wet::renderer::ResolveShortcutStats(captures, hits);
-        if (captures != capturesBefore)
-        {
-            size_t used = std::strlen(splitText);
-            std::snprintf(splitText + used, sizeof(splitText) - used, ", %.1f/%.1f resolves to textures",
-                          double(hits - hitsBefore) / std::max(1u, frames - 1),
-                          double(captures - capturesBefore) / std::max(1u, frames - 1));
-        }
-        capturesBefore = captures;
-        hitsBefore = hits;
-        Log("Performance: %.0f fps average (target %d), slowest frame %.1f ms, %u of %u frames late, %u sent early%s",
-            (frames - 1) / span, fps, worst, over, frames - 1, early - earlyBefore, splitText);
+        Log("Performance: %.0f fps average (target %d), slowest frame %.1f ms, %u of %u frames late, %u sent early",
+            (frames - 1) / span, fps, worst, over, frames - 1, early - earlyBefore);
         earlyBefore = early;
-        splitsBefore = splits;
         // Where the GPU's time went in those frames (Direct3D 12).
         static uint64_t gpuBefore[8] = {}, gpuFramesBefore = 0;
         uint64_t gpu[8], gpuFrames;

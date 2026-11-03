@@ -158,7 +158,7 @@ index 8f6087b05..47c87eec0 100644
  
  static void set_name(HANDLE thread, const std::string_view name) {
 diff --git a/src/xenia/gpu/command_processor.cc b/src/xenia/gpu/command_processor.cc
-index ce08d19bd..872d179ea 100644
+index ce08d19bd..271a887e9 100644
 --- a/src/xenia/gpu/command_processor.cc
 +++ b/src/xenia/gpu/command_processor.cc
 @@ -9,6 +9,15 @@
@@ -185,14 +185,12 @@ index ce08d19bd..872d179ea 100644
  #include "xenia/gpu/xenos.h"
  #include "xenia/kernel/kernel_state.h"
  #include "xenia/kernel/user_module.h"
-@@ -32,6 +42,279 @@
+@@ -32,6 +42,277 @@
  namespace xe {
  namespace gpu {
  
 +#if XE_WET_RUNTIME
 +void (*wet_gpu_progress)() = nullptr;
-+std::atomic<uint32_t> wet_submit_split_us{0};
-+std::atomic<uint64_t> wet_submit_splits{0};
 +#endif
 +
 +#if XE_WET_RUNTIME
@@ -465,7 +463,7 @@ index ce08d19bd..872d179ea 100644
  using namespace xe::gpu::xenos;
  
  CommandProcessor::CommandProcessor(GraphicsSystem* graphics_system,
-@@ -244,6 +527,7 @@ void CommandProcessor::WorkerThreadMain() {
+@@ -244,6 +525,7 @@ void CommandProcessor::WorkerThreadMain() {
        xe::store_and_swap<uint32_t>(
            memory_->TranslatePhysical(read_ptr_writeback_ptr_), read_ptr_index_);
      }
@@ -473,7 +471,7 @@ index ce08d19bd..872d179ea 100644
  
      // FIXME: We're supposed to process the WAIT_UNTIL register at this point,
      // but no games seem to actually use it.
-@@ -349,6 +633,7 @@ void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
+@@ -349,6 +631,7 @@ void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
        uint32_t scratch_addr = regs.values[XE_GPU_REG_SCRATCH_ADDR];
        uint32_t mem_addr = scratch_addr + (scratch_reg * 4);
        xe::store_and_swap<uint32_t>(memory_->TranslatePhysical(mem_addr), value);
@@ -481,7 +479,7 @@ index ce08d19bd..872d179ea 100644
      }
    } else {
      switch (index) {
-@@ -633,6 +918,26 @@ bool CommandProcessor::ExecutePacket(RingBuffer* reader) {
+@@ -633,6 +916,26 @@ bool CommandProcessor::ExecutePacket(RingBuffer* reader) {
    }
  }
  
@@ -508,7 +506,7 @@ index ce08d19bd..872d179ea 100644
  bool CommandProcessor::ExecutePacketType0(RingBuffer* reader, uint32_t packet) {
    // Type-0 packet.
    // Write count registers in sequence to the registers starting at
-@@ -650,6 +955,13 @@ bool CommandProcessor::ExecutePacketType0(RingBuffer* reader, uint32_t packet) {
+@@ -650,6 +953,13 @@ bool CommandProcessor::ExecutePacketType0(RingBuffer* reader, uint32_t packet) {
  
    uint32_t base_index = (packet & 0x7FFF);
    uint32_t write_one_reg = (packet >> 15) & 0x1;
@@ -522,7 +520,7 @@ index ce08d19bd..872d179ea 100644
    for (uint32_t m = 0; m < count; m++) {
      uint32_t reg_data = reader->ReadAndSwap<uint32_t>();
      uint32_t target_index = write_one_reg ? base_index : base_index + m;
-@@ -743,21 +1055,26 @@ bool CommandProcessor::ExecutePacketType3(RingBuffer* reader, uint32_t packet) {
+@@ -743,21 +1053,26 @@ bool CommandProcessor::ExecutePacketType3(RingBuffer* reader, uint32_t packet) {
        break;
      case PM4_MEM_WRITE:
        result = ExecutePacketType3_MEM_WRITE(reader, packet, count);
@@ -549,7 +547,7 @@ index ce08d19bd..872d179ea 100644
        break;
      case PM4_DRAW_INDX:
        result = ExecutePacketType3_DRAW_INDX(reader, packet, count);
-@@ -932,11 +1249,46 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(RingBuffer* reader,
+@@ -932,11 +1247,46 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(RingBuffer* reader,
    uint32_t frontbuffer_ptr = reader->ReadAndSwap<uint32_t>();
    uint32_t frontbuffer_width = reader->ReadAndSwap<uint32_t>();
    uint32_t frontbuffer_height = reader->ReadAndSwap<uint32_t>();
@@ -597,7 +595,7 @@ index ce08d19bd..872d179ea 100644
    return true;
  }
  
-@@ -974,7 +1326,24 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -974,7 +1324,24 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
                  : register_file_->values[poll_reg_addr];
  
    bool matched = false;
@@ -622,7 +620,7 @@ index ce08d19bd..872d179ea 100644
      uint32_t value = value_ref;
      if (is_memory) {
        trace_writer_.WriteMemoryRead(CpuToGpu(poll_reg_addr & ~uint32_t(0x3)),
-@@ -1013,16 +1382,31 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -1013,16 +1380,31 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
          matched = true;
          break;
      }
@@ -654,7 +652,7 @@ index ce08d19bd..872d179ea 100644
          xe::threading::SyncMemory();
          ReturnFromWait();
  
-@@ -1035,6 +1419,17 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -1035,6 +1417,17 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
        }
      }
    } while (!matched);
@@ -672,7 +670,7 @@ index ce08d19bd..872d179ea 100644
  
    return true;
  }
-@@ -1455,10 +1850,14 @@ bool CommandProcessor::ExecutePacketType3_SET_CONSTANT(RingBuffer* reader,
+@@ -1455,10 +1848,14 @@ bool CommandProcessor::ExecutePacketType3_SET_CONSTANT(RingBuffer* reader,
        reader->AdvanceRead((count - 1) * sizeof(uint32_t));
        return true;
    }
@@ -687,7 +685,7 @@ index ce08d19bd..872d179ea 100644
    return true;
  }
  
-@@ -1467,10 +1866,14 @@ bool CommandProcessor::ExecutePacketType3_SET_CONSTANT2(RingBuffer* reader,
+@@ -1467,10 +1864,14 @@ bool CommandProcessor::ExecutePacketType3_SET_CONSTANT2(RingBuffer* reader,
                                                          uint32_t count) {
    uint32_t offset_type = reader->ReadAndSwap<uint32_t>();
    uint32_t index = offset_type & 0xFFFF;
@@ -702,7 +700,7 @@ index ce08d19bd..872d179ea 100644
    return true;
  }
  
-@@ -1506,11 +1909,20 @@ bool CommandProcessor::ExecutePacketType3_LOAD_ALU_CONSTANT(RingBuffer* reader,
+@@ -1506,11 +1907,20 @@ bool CommandProcessor::ExecutePacketType3_LOAD_ALU_CONSTANT(RingBuffer* reader,
        return true;
    }
    trace_writer_.WriteMemoryRead(CpuToGpu(address), size_dwords * 4);
@@ -723,7 +721,7 @@ index ce08d19bd..872d179ea 100644
    return true;
  }
  
-@@ -1518,10 +1930,14 @@ bool CommandProcessor::ExecutePacketType3_SET_SHADER_CONSTANTS(
+@@ -1518,10 +1928,14 @@ bool CommandProcessor::ExecutePacketType3_SET_SHADER_CONSTANTS(
      RingBuffer* reader, uint32_t packet, uint32_t count) {
    uint32_t offset_type = reader->ReadAndSwap<uint32_t>();
    uint32_t index = offset_type & 0xFFFF;
@@ -739,10 +737,10 @@ index ce08d19bd..872d179ea 100644
  }
  
 diff --git a/src/xenia/gpu/command_processor.h b/src/xenia/gpu/command_processor.h
-index ffc8eeffa..b2e8ff866 100644
+index ffc8eeffa..e63747e04 100644
 --- a/src/xenia/gpu/command_processor.h
 +++ b/src/xenia/gpu/command_processor.h
-@@ -35,9 +35,97 @@ class ByteStream;
+@@ -35,9 +35,92 @@ class ByteStream;
  
  namespace gpu {
  
@@ -773,11 +771,6 @@ index ffc8eeffa..b2e8ff866 100644
 +// WET: 16x anisotropic filtering for trilinear-filtered, mipmapped textures
 +// (the world's surfaces; UI, render targets and point-sampled lookups stay).
 +extern std::atomic<bool> wet_force_aniso;
-+// Split a frame's GPU work into submissions after this many microseconds of
-+// command processing (0 = only at the frame's end / when caught up), so the
-+// GPU starts on a frame while the command processor is still translating it.
-+extern std::atomic<uint32_t> wet_submit_split_us;
-+extern std::atomic<uint64_t> wet_submit_splits;
 +inline bool WetForceAniso(const xenos::xe_gpu_texture_fetch_t& fetch,
 +                          xenos::TextureFilter min_filter,
 +                          xenos::TextureFilter mip_filter) {
@@ -840,7 +833,7 @@ index ffc8eeffa..b2e8ff866 100644
  struct SwapState {
    // Lock must be held when changing data in this structure.
    std::mutex mutex;
-@@ -71,6 +159,10 @@ class CommandProcessor {
+@@ -71,6 +154,10 @@ class CommandProcessor {
      kNone,
      kFxaa,
      kFxaaExtreme,
@@ -851,7 +844,7 @@ index ffc8eeffa..b2e8ff866 100644
    };
  
    CommandProcessor(GraphicsSystem* graphics_system,
-@@ -78,6 +170,10 @@ class CommandProcessor {
+@@ -78,6 +165,10 @@ class CommandProcessor {
    virtual ~CommandProcessor();
  
    uint32_t counter() const { return counter_; }
@@ -862,7 +855,7 @@ index ffc8eeffa..b2e8ff866 100644
    void increment_counter() { counter_++; }
  
    Shader* active_vertex_shader() const { return active_vertex_shader_; }
-@@ -152,6 +248,17 @@ class CommandProcessor {
+@@ -152,6 +243,17 @@ class CommandProcessor {
    virtual void ShutdownContext() = 0;
  
    virtual void WriteRegister(uint32_t index, uint32_t value);
@@ -880,7 +873,7 @@ index ffc8eeffa..b2e8ff866 100644
  
    const reg::DC_LUT_30_COLOR* gamma_ramp_256_entry_table() const {
      return gamma_ramp_256_entry_table_;
-@@ -270,6 +377,9 @@ class CommandProcessor {
+@@ -270,6 +372,9 @@ class CommandProcessor {
    std::vector<uint32_t> me_bin_;
  
    uint32_t counter_ = 0;
@@ -891,7 +884,7 @@ index ffc8eeffa..b2e8ff866 100644
    uint32_t primary_buffer_ptr_ = 0;
    uint32_t primary_buffer_size_ = 0;
 diff --git a/src/xenia/gpu/d3d12/d3d12_command_processor.cc b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
-index 0ec70a7d1..7f4e5f6ee 100644
+index 0ec70a7d1..cdfc2be4d 100644
 --- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
 +++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
 @@ -8,6 +8,7 @@
@@ -1394,32 +1387,19 @@ index 0ec70a7d1..7f4e5f6ee 100644
    draw_util::Scissor scissor;
    draw_util::GetScissor(regs, scissor);
    scissor.offset[0] *= draw_resolution_scale_x;
-@@ -2467,6 +2859,24 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+@@ -2467,6 +2859,11 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
      }
    }
  
 +#if XE_WET_RUNTIME
 +  if (wet_draw_trace_frames > 0)
 +    WetTraceState(regs, primitive_processing_result.host_draw_vertex_count);
-+  // Hand the GPU what's recorded so far once the submission has been open a
-+  // while, so it works on the start of the frame while the rest is translated
-+  // (on slower CPUs the command processor is the bottleneck and the GPU
-+  // otherwise idles until the frame's end).
-+  if (uint32_t split_us = wet_submit_split_us.load(std::memory_order_relaxed)) {
-+    if (submission_open_ && ++wet_submission_draws_ >= 32 &&
-+        std::chrono::steady_clock::now() - wet_submission_opened_ >=
-+            std::chrono::microseconds(split_us) &&
-+        CanEndSubmissionImmediately()) {
-+      EndSubmission(false);
-+      wet_submit_splits.fetch_add(1, std::memory_order_relaxed);
-+    }
-+  }
 +#endif
 +
    return true;
  }
  
-@@ -2663,15 +3073,40 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
+@@ -2663,6 +3060,21 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
        }
        frame_completed_ = frame;
      }
@@ -1441,13 +1421,7 @@ index 0ec70a7d1..7f4e5f6ee 100644
    }
  
    if (!submission_open_) {
-     submission_open_ = true;
-+#if XE_WET_RUNTIME
-+    wet_submission_opened_ = std::chrono::steady_clock::now();
-+    wet_submission_draws_ = 0;
-+#endif
- 
-     // Start a new deferred command list - will submit it to the real one in the
+@@ -2672,6 +3084,12 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
      // end of the submission (when async pipeline creation requests are
      // fulfilled).
      deferred_command_list_.Reset();
@@ -1460,7 +1434,7 @@ index 0ec70a7d1..7f4e5f6ee 100644
  
      // Reset cached state of the command list.
      ff_viewport_update_needed_ = true;
-@@ -2790,6 +3225,23 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
+@@ -2790,6 +3208,23 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
      // destroyed between frames.
      SubmitBarriers();
  
@@ -1484,7 +1458,7 @@ index 0ec70a7d1..7f4e5f6ee 100644
      // TODO(Triang3l): Error checking.
  
      ID3D12CommandQueue* direct_queue = provider.GetDirectQueue();
-@@ -2840,6 +3292,25 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
+@@ -2840,6 +3275,25 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
        pix_capturing_ = false;
      }
      frame_open_ = false;
@@ -1510,7 +1484,7 @@ index 0ec70a7d1..7f4e5f6ee 100644
      // Submission already closed now, so minus 1.
      closed_frame_submissions_[(frame_current_++) % kQueueFrames] =
          GetCurrentSubmission() - 1;
-@@ -2882,6 +3353,145 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
+@@ -2882,6 +3336,145 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
    return true;
  }
  
@@ -1656,7 +1630,7 @@ index 0ec70a7d1..7f4e5f6ee 100644
  bool D3D12CommandProcessor::CanEndSubmissionImmediately() const {
    return !submission_open_ || !pipeline_cache_->IsCreatingPipelines();
  }
-@@ -4359,6 +4969,304 @@ void D3D12CommandProcessor::WriteGammaRampSRV(
+@@ -4359,6 +4952,304 @@ void D3D12CommandProcessor::WriteGammaRampSRV(
    device->CreateShaderResourceView(gamma_ramp_buffer_.Get(), &desc, handle);
  }
  
@@ -1962,18 +1936,10 @@ index 0ec70a7d1..7f4e5f6ee 100644
  }  // namespace gpu
  }  // namespace xe
 diff --git a/src/xenia/gpu/d3d12/d3d12_command_processor.h b/src/xenia/gpu/d3d12/d3d12_command_processor.h
-index 88bdcb438..f871f151e 100644
+index 88bdcb438..1db8e3fa8 100644
 --- a/src/xenia/gpu/d3d12/d3d12_command_processor.h
 +++ b/src/xenia/gpu/d3d12/d3d12_command_processor.h
-@@ -10,6 +10,7 @@
- #ifndef XENIA_GPU_D3D12_D3D12_COMMAND_PROCESSOR_H_
- #define XENIA_GPU_D3D12_D3D12_COMMAND_PROCESSOR_H_
- 
-+#include <chrono>
- #include <algorithm>
- #include <atomic>
- #include <deque>
-@@ -74,6 +75,47 @@ class D3D12CommandProcessor : public CommandProcessor {
+@@ -74,6 +74,47 @@ class D3D12CommandProcessor : public CommandProcessor {
      return deferred_command_list_;
    }
  
@@ -2021,7 +1987,7 @@ index 88bdcb438..f871f151e 100644
    uint64_t GetCurrentSubmission() const {
      return completion_timeline_->GetUpcomingSubmission();
    }
-@@ -207,6 +249,10 @@ class D3D12CommandProcessor : public CommandProcessor {
+@@ -207,6 +248,10 @@ class D3D12CommandProcessor : public CommandProcessor {
    void ShutdownContext() override;
  
    void WriteRegister(uint32_t index, uint32_t value) override;
@@ -2032,7 +1998,7 @@ index 88bdcb438..f871f151e 100644
  
    void OnGammaRamp256EntryTableValueWritten() override;
    void OnGammaRampPWLValueWritten() override;
-@@ -400,6 +446,45 @@ class D3D12CommandProcessor : public CommandProcessor {
+@@ -400,6 +445,42 @@ class D3D12CommandProcessor : public CommandProcessor {
    // Submission indices of frames that have already been submitted.
    uint64_t closed_frame_submissions_[kQueueFrames] = {};
  
@@ -2047,9 +2013,6 @@ index 88bdcb438..f871f151e 100644
 +  uint32_t wet_ts_slot_ = 0;
 +  uint32_t wet_ts_submission_first_ = 0;
 +  bool wet_ts_frame_ = false;
-+  // When the open submission was opened, and its draws (wet_submit_split_us).
-+  std::chrono::steady_clock::time_point wet_submission_opened_{};
-+  uint32_t wet_submission_draws_ = 0;
 +  uint8_t wet_gpu_cat_ = kWetGpuDraw;
 +  struct WetWork {
 +    uint64_t count = 0;
@@ -2078,7 +2041,7 @@ index 88bdcb438..f871f151e 100644
    struct CommandAllocator {
      ID3D12CommandAllocator* command_allocator;
      uint64_t last_usage_submission;
-@@ -554,6 +639,31 @@ class D3D12CommandProcessor : public CommandProcessor {
+@@ -554,6 +635,31 @@ class D3D12CommandProcessor : public CommandProcessor {
    Microsoft::WRL::ComPtr<ID3D12Resource> fxaa_source_texture_;
    uint64_t fxaa_source_texture_submission_ = 0;
  
@@ -2111,7 +2074,7 @@ index 88bdcb438..f871f151e 100644
    std::vector<D3D12_RESOURCE_BARRIER> barriers_;
  
 diff --git a/src/xenia/gpu/d3d12/d3d12_render_target_cache.cc b/src/xenia/gpu/d3d12/d3d12_render_target_cache.cc
-index 342d282cf..61019ae40 100644
+index 342d282cf..486792560 100644
 --- a/src/xenia/gpu/d3d12/d3d12_render_target_cache.cc
 +++ b/src/xenia/gpu/d3d12/d3d12_render_target_cache.cc
 @@ -1298,6 +1298,10 @@ bool D3D12RenderTargetCache::Resolve(const Memory& memory,
@@ -2150,131 +2113,7 @@ index 342d282cf..61019ae40 100644
  
    DeferredCommandList& command_list =
        command_processor_.GetDeferredCommandList();
-@@ -1413,6 +1435,11 @@ bool D3D12RenderTargetCache::Resolve(const Memory& memory,
-         written_address_out = resolve_info.copy_dest_extent_start;
-         written_length_out = resolve_info.copy_dest_extent_length;
-         copied = true;
-+#if XE_WET_RUNTIME
-+        if (wet_resolve_shortcut.load(std::memory_order_relaxed)) {
-+          WetCaptureResolveForTexture(resolve_info, texture_cache);
-+        }
-+#endif
-       } else {
-         XELOGE(
-             "D3D12RenderTargetCache: Failed to obtain the resolve destination "
-@@ -1511,6 +1538,111 @@ bool D3D12RenderTargetCache::Resolve(const Memory& memory,
-   return copied && cleared;
- }
- 
-+#if XE_WET_RUNTIME
-+void D3D12RenderTargetCache::WetCaptureResolveForTexture(
-+    const draw_util::ResolveInfo& resolve_info,
-+    D3D12TextureCache& texture_cache) {
-+  // The first few resolves that can't use the shortcut, and why
-+  // (xenia_gpu.log).
-+  static int wet_logged = 0;
-+  auto reject = [&](const char* why) {
-+    if (wet_logged < 24 && !resolve_info.IsCopyingDepth()) {
-+      ++wet_logged;
-+      const reg::RB_COPY_DEST_INFO& d = resolve_info.copy_dest_info;
-+      XELOGW(
-+          "WET resolve shortcut: not for {:08X} {}x{} ({}): rt format {}{}, "
-+          "msaa {}, dest format {}, swap {}, endian {}, exp bias {}, "
-+          "{} dump rectangles",
-+          resolve_info.copy_dest_base,
-+          resolve_info.coordinate_info.width_div_8 * 8,
-+          resolve_info.height_div_8 * 8, why,
-+          resolve_info.color_edram_info.format,
-+          resolve_info.IsCopyingDepth() ? " (depth)" : "",
-+          uint32_t(resolve_info.color_edram_info.msaa_samples),
-+          uint32_t(d.copy_dest_format), uint32_t(d.copy_dest_swap),
-+          uint32_t(d.copy_dest_endian), int32_t(d.copy_dest_exp_bias),
-+          dump_rectangles_.size());
-+    }
-+  };
-+  // Only plain copies the texture would read back unchanged: one 32bpp
-+  // 8:8:8:8 render target without MSAA to a whole k_8_8_8_8 texture, no
-+  // scaling or exponent bias (a red / blue swap is undone by the texture's
-+  // view, Texture::wet_rb_swapped_).
-+  if (GetPath() != Path::kHostRenderTargets || IsDrawResolutionScaled() ||
-+      resolve_info.IsCopyingDepth() || dump_rectangles_.size() != 1) {
-+    reject("path, scaling, depth or not one render target");
-+    return;
-+  }
-+  const draw_util::ResolveEdramInfo& edram = resolve_info.color_edram_info;
-+  const reg::RB_COPY_DEST_INFO& dest = resolve_info.copy_dest_info;
-+  const draw_util::ResolveCopyDestCoordinateInfo& dest_coords =
-+      resolve_info.copy_dest_coordinate_info;
-+  if (edram.format_is_64bpp || edram.msaa_samples != xenos::MsaaSamples::k1X ||
-+      GetColorResourceDXGIFormat(xenos::ColorRenderTargetFormat(
-+          edram.format)) != DXGI_FORMAT_R8G8B8A8_UNORM ||
-+      dest.copy_dest_format != xenos::ColorFormat::k_8_8_8_8 ||
-+      dest.copy_dest_exp_bias != 0 ||
-+      dest.copy_dest_array || uint32_t(dest.copy_dest_endian) > 3 ||
-+      dest_coords.offset_x_div_8 || dest_coords.offset_y_div_8) {
-+    reject("format, MSAA, swap, endian or offset");
-+    return;
-+  }
-+  // The one render target must hold the whole resolved area.
-+  uint32_t span_base, span_row_length, span_rows, span_pitch;
-+  resolve_info.GetCopyEdramTileSpan(span_base, span_row_length, span_rows,
-+                                    span_pitch);
-+  const ResolveCopyDumpRectangle& rect = dump_rectangles_[0];
-+  if (rect.row_first != 0 || rect.rows != span_rows ||
-+      rect.row_first_start != 0 || rect.row_last_end != span_row_length) {
-+    reject("render target doesn't hold the whole area");
-+    return;
-+  }
-+  auto& rt = *static_cast<D3D12RenderTarget*>(rect.render_target);
-+  RenderTargetKey rt_key = rt.key();
-+  if (rt_key.is_depth || rt_key.Is64bpp() ||
-+      rt_key.msaa_samples != xenos::MsaaSamples::k1X ||
-+      !rt_key.pitch_tiles_at_32bpp ||
-+      rt_key.pitch_tiles_at_32bpp != edram.pitch_tiles ||
-+      GetColorResourceDXGIFormat(rt_key.GetColorFormat()) !=
-+          DXGI_FORMAT_R8G8B8A8_UNORM) {
-+    reject("render target key");
-+    return;
-+  }
-+  uint32_t pitch_tiles = rt_key.pitch_tiles_at_32bpp;
-+  uint32_t rel_tiles =
-+      (edram.base_tiles - rt_key.base_tiles) & (xenos::kEdramTileCount - 1);
-+  uint32_t x0 = (rel_tiles % pitch_tiles) * xenos::kEdramTileWidthSamples +
-+                resolve_info.coordinate_info.edram_offset_x_div_8 * 8;
-+  uint32_t y0 = (rel_tiles / pitch_tiles) * xenos::kEdramTileHeightSamples +
-+                resolve_info.coordinate_info.edram_offset_y_div_8 * 8;
-+  uint32_t width = resolve_info.coordinate_info.width_div_8 * 8;
-+  uint32_t height = resolve_info.height_div_8 * 8;
-+  D3D12_RESOURCE_DESC desc = rt.resource()->GetDesc();
-+  if (!width || !height ||
-+      x0 + width > pitch_tiles * xenos::kEdramTileWidthSamples ||
-+      x0 + width > desc.Width || y0 + height > desc.Height) {
-+    reject("outside the render target");
-+    return;
-+  }
-+  command_processor_.PushTransitionBarrier(
-+      rt.resource(), rt.SetResourceState(D3D12_RESOURCE_STATE_COPY_SOURCE),
-+      D3D12_RESOURCE_STATE_COPY_SOURCE);
-+  D3D12_BOX box = {x0, y0, 0, x0 + width, y0 + height, 1};
-+  static int wet_logged_ok = 0;
-+  if (wet_logged_ok < 6) {
-+    ++wet_logged_ok;
-+    XELOGW("WET resolve shortcut: {:08X} {}x{} from render target {} at {},{}",
-+           resolve_info.copy_dest_base, width, height, rt_key.base_tiles, x0,
-+           y0);
-+  }
-+  texture_cache.WetCaptureResolve(
-+      resolve_info.copy_dest_base, resolve_info.copy_dest_extent_start,
-+      resolve_info.copy_dest_extent_length, width, height,
-+      dest_coords.pitch_aligned_div_32, xenos::Endian(dest.copy_dest_endian),
-+      dest.copy_dest_swap != 0, rt.resource(), box);
-+}
-+#endif
-+
- bool D3D12RenderTargetCache::InitializeTraceSubmitDownloads() {
-   if (IsDrawResolutionScaled()) {
-     // No 1:1 mapping.
-@@ -4400,6 +4532,52 @@ void D3D12RenderTargetCache::PerformTransfersAndResolveClears(
+@@ -4400,6 +4422,52 @@ void D3D12RenderTargetCache::PerformTransfersAndResolveClears(
      const std::vector<Transfer>* render_target_transfers,
      const uint64_t* render_target_resolve_clear_values,
      const Transfer::Rectangle* resolve_clear_rectangle) {
@@ -2327,7 +2166,7 @@ index 342d282cf..61019ae40 100644
    assert_true(GetPath() == Path::kHostRenderTargets);
  
    const ui::d3d12::D3D12Provider& provider =
-@@ -6332,6 +6510,10 @@ void D3D12RenderTargetCache::DumpRenderTargets(uint32_t dump_base,
+@@ -6332,6 +6400,10 @@ void D3D12RenderTargetCache::DumpRenderTargets(uint32_t dump_base,
                                                 uint32_t dump_rows,
                                                 uint32_t dump_pitch) {
    assert_true(GetPath() == Path::kHostRenderTargets);
@@ -2338,22 +2177,6 @@ index 342d282cf..61019ae40 100644
  
    GetResolveCopyRectanglesToDump(dump_base, dump_row_length_used, dump_rows,
                                   dump_pitch, dump_rectangles_);
-diff --git a/src/xenia/gpu/d3d12/d3d12_render_target_cache.h b/src/xenia/gpu/d3d12/d3d12_render_target_cache.h
-index c0bb7420a..8be1c223d 100644
---- a/src/xenia/gpu/d3d12/d3d12_render_target_cache.h
-+++ b/src/xenia/gpu/d3d12/d3d12_render_target_cache.h
-@@ -776,6 +776,11 @@ class D3D12RenderTargetCache final : public RenderTargetCache {
- 
-   // Temporary storage for DumpRenderTargets.
-   std::vector<ResolveCopyDumpRectangle> dump_rectangles_;
-+#if XE_WET_RUNTIME
-+  // Resolve-to-texture shortcut (wet_resolve_shortcut, d3d12_texture_cache.h).
-+  void WetCaptureResolveForTexture(const draw_util::ResolveInfo& resolve_info,
-+                                   D3D12TextureCache& texture_cache);
-+#endif
-   std::vector<DumpInvocation> dump_invocations_;
- 
-   ID3D12RootSignature* dump_root_signature_color_ = nullptr;
 diff --git a/src/xenia/gpu/d3d12/d3d12_shared_memory.cc b/src/xenia/gpu/d3d12/d3d12_shared_memory.cc
 index 901d45925..0bc8c33c7 100644
 --- a/src/xenia/gpu/d3d12/d3d12_shared_memory.cc
@@ -2371,7 +2194,7 @@ index 901d45925..0bc8c33c7 100644
      return true;
    }
 diff --git a/src/xenia/gpu/d3d12/d3d12_texture_cache.cc b/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
-index b96c200b9..c6912f984 100644
+index b96c200b9..7c8ced1fb 100644
 --- a/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
 +++ b/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
 @@ -10,6 +10,7 @@
@@ -2382,178 +2205,7 @@ index b96c200b9..c6912f984 100644
  #include <array>
  #include <cfloat>
  #include <cstddef>
-@@ -400,7 +401,170 @@ D3D12TextureCache::D3D12TextureCache(const RegisterFile& register_file,
-       command_processor_(command_processor),
-       bindless_resources_used_(bindless_resources_used) {}
- 
-+#if XE_WET_RUNTIME
-+std::atomic<bool> wet_resolve_shortcut{false};
-+std::atomic<uint64_t> wet_resolve_shortcut_captures{0},
-+    wet_resolve_shortcut_hits{0};
-+
-+void D3D12TextureCache::WetResolveCopiesWatchThunk(
-+    const std::unique_lock<std::recursive_mutex>& global_lock, void* context,
-+    uint32_t address_first, uint32_t address_last, bool invalidated_by_gpu) {
-+  // Anything written over a resolve's range (the CPU, or the GPU again)
-+  // makes its copy out of date. A resolve's own write comes before its copy
-+  // is recorded.
-+  auto* cache = reinterpret_cast<D3D12TextureCache*>(context);
-+  std::lock_guard<std::mutex> lock(cache->wet_resolve_copies_mutex_);
-+  for (auto& entry : cache->wet_resolve_copies_) {
-+    WetResolveCopy& copy = entry.second;
-+    if (copy.valid && address_first < copy.extent_end &&
-+        address_last >= copy.extent_start) {
-+      copy.valid = false;
-+    }
-+  }
-+}
-+
-+void D3D12TextureCache::WetCaptureResolve(uint32_t dest_base,
-+                                          uint32_t extent_start,
-+                                          uint32_t extent_length,
-+                                          uint32_t width, uint32_t height,
-+                                          uint32_t pitch_div_32,
-+                                          xenos::Endian endian,
-+                                          bool rb_swapped,
-+                                          ID3D12Resource* source,
-+                                          const D3D12_BOX& box) {
-+  dest_base &= 0x1FFFFFFF;
-+  extent_start &= 0x1FFFFFFF;
-+  if (!wet_resolve_copies_watch_) {
-+    wet_resolve_copies_watch_ =
-+        shared_memory().RegisterGlobalWatch(WetResolveCopiesWatchThunk, this);
-+  }
-+  uint64_t completed = command_processor_.GetCompletedSubmission();
-+  std::lock_guard<std::mutex> lock(wet_resolve_copies_mutex_);
-+  for (size_t i = 0; i < wet_resolve_copies_released_.size();) {
-+    if (wet_resolve_copies_released_[i].first <= completed) {
-+      wet_resolve_copies_released_[i] =
-+          std::move(wet_resolve_copies_released_.back());
-+      wet_resolve_copies_released_.pop_back();
-+    } else {
-+      ++i;
-+    }
-+  }
-+  WetResolveCopy& copy = wet_resolve_copies_[dest_base];
-+  if (copy.resource && (copy.width != width || copy.height != height)) {
-+    wet_resolve_copies_released_.emplace_back(
-+        command_processor_.GetCurrentSubmission(), std::move(copy.resource));
-+    copy.resource.Reset();
-+  }
-+  if (!copy.resource) {
-+    const ui::d3d12::D3D12Provider& provider =
-+        command_processor_.GetD3D12Provider();
-+    D3D12_RESOURCE_DESC desc = {};
-+    desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-+    desc.Width = width;
-+    desc.Height = height;
-+    desc.DepthOrArraySize = 1;
-+    desc.MipLevels = 1;
-+    desc.Format = DXGI_FORMAT_R8G8B8A8_TYPELESS;
-+    desc.SampleDesc.Count = 1;
-+    desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-+    if (FAILED(provider.GetDevice()->CreateCommittedResource(
-+            &ui::d3d12::util::kHeapPropertiesDefault,
-+            provider.GetHeapFlagCreateNotZeroed(), &desc,
-+            D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
-+            IID_PPV_ARGS(&copy.resource)))) {
-+      copy.valid = false;
-+      return;
-+    }
-+    copy.state = D3D12_RESOURCE_STATE_COPY_DEST;
-+  }
-+  copy.extent_start = extent_start;
-+  copy.extent_end = extent_start + extent_length;
-+  copy.width = width;
-+  copy.height = height;
-+  copy.pitch_div_32 = pitch_div_32;
-+  copy.endian = endian;
-+  copy.rb_swapped = rb_swapped;
-+  if (copy.state != D3D12_RESOURCE_STATE_COPY_DEST) {
-+    command_processor_.PushTransitionBarrier(copy.resource.Get(), copy.state,
-+                                             D3D12_RESOURCE_STATE_COPY_DEST);
-+    copy.state = D3D12_RESOURCE_STATE_COPY_DEST;
-+  }
-+  command_processor_.SubmitBarriers();
-+  D3D12_TEXTURE_COPY_LOCATION dest_location, source_location;
-+  dest_location.pResource = copy.resource.Get();
-+  dest_location.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-+  dest_location.SubresourceIndex = 0;
-+  source_location.pResource = source;
-+  source_location.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-+  source_location.SubresourceIndex = 0;
-+  command_processor_.GetDeferredCommandList().D3DCopyTextureRegion(
-+      &dest_location, 0, 0, 0, &source_location, &box);
-+  copy.valid = true;
-+  wet_resolve_shortcut_captures.fetch_add(1, std::memory_order_relaxed);
-+}
-+
-+bool D3D12TextureCache::WetLoadFromResolveCopy(Texture& texture,
-+                                               bool load_mips) {
-+  if (!wet_resolve_shortcut.load(std::memory_order_relaxed)) {
-+    return false;
-+  }
-+  D3D12Texture& d3d12_texture = static_cast<D3D12Texture&>(texture);
-+  const TextureKey& key = d3d12_texture.key();
-+  if (key.format != xenos::TextureFormat::k_8_8_8_8 || !key.tiled ||
-+      key.scaled_resolve || key.signed_separate ||
-+      key.dimension != xenos::DataDimension::k2DOrStacked ||
-+      key.depth_or_array_size_minus_1 != 0 ||
-+      (load_mips && key.mip_max_level != 0) ||
-+      d3d12_texture.guest_layout().packed_level == 0 ||
-+      host_formats_[uint32_t(key.format)].dxgi_format_resource !=
-+          DXGI_FORMAT_R8G8B8A8_TYPELESS) {
-+    return false;
-+  }
-+  std::lock_guard<std::mutex> lock(wet_resolve_copies_mutex_);
-+  auto it = wet_resolve_copies_.find(key.base_page << 12);
-+  if (it == wet_resolve_copies_.end()) {
-+    return false;
-+  }
-+  WetResolveCopy& copy = it->second;
-+  if (!copy.valid || copy.width != key.GetWidth() ||
-+      copy.height != key.GetHeight() || copy.pitch_div_32 != key.pitch ||
-+      copy.endian != key.endianness) {
-+    return false;
-+  }
-+  ID3D12Resource* texture_resource = d3d12_texture.resource();
-+  command_processor_.PushTransitionBarrier(
-+      texture_resource,
-+      d3d12_texture.SetResourceState(D3D12_RESOURCE_STATE_COPY_DEST),
-+      D3D12_RESOURCE_STATE_COPY_DEST);
-+  if (copy.state != D3D12_RESOURCE_STATE_COPY_SOURCE) {
-+    command_processor_.PushTransitionBarrier(copy.resource.Get(), copy.state,
-+                                             D3D12_RESOURCE_STATE_COPY_SOURCE);
-+    copy.state = D3D12_RESOURCE_STATE_COPY_SOURCE;
-+  }
-+  command_processor_.SubmitBarriers();
-+  D3D12_TEXTURE_COPY_LOCATION dest_location, source_location;
-+  dest_location.pResource = texture_resource;
-+  dest_location.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-+  dest_location.SubresourceIndex = 0;
-+  source_location.pResource = copy.resource.Get();
-+  source_location.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-+  source_location.SubresourceIndex = 0;
-+  D3D12_BOX box = {0, 0, 0, copy.width, copy.height, 1};
-+  command_processor_.GetDeferredCommandList().D3DCopyTextureRegion(
-+      &dest_location, 0, 0, 0, &source_location, &box);
-+  d3d12_texture.MarkAsUsed();
-+  d3d12_texture.wet_rb_swapped_ = copy.rb_swapped;
-+  wet_resolve_shortcut_hits.fetch_add(1, std::memory_order_relaxed);
-+  return true;
-+}
-+#endif
-+
- D3D12TextureCache::~D3D12TextureCache() {
-+#if XE_WET_RUNTIME
-+  if (wet_resolve_copies_watch_) {
-+    shared_memory().UnregisterGlobalWatch(wet_resolve_copies_watch_);
-+  }
-+#endif
-   // While the texture descriptor cache still exists (referenced by
-   // ~D3D12Texture), destroy all textures.
-   DestroyAllTextures(true);
-@@ -983,11 +1147,20 @@ D3D12TextureCache::SamplerParameters D3D12TextureCache::GetSamplerParameters(
+@@ -983,11 +984,20 @@ D3D12TextureCache::SamplerParameters D3D12TextureCache::GetSamplerParameters(
            ? fetch.aniso_filter
            : binding.aniso_filter;
    aniso_filter = std::min(aniso_filter, xenos::AnisoFilter::kMax_16_1);
@@ -2575,7 +2227,7 @@ index b96c200b9..c6912f984 100644
    if (aniso_filter != xenos::AnisoFilter::kDisabled) {
      parameters.mag_linear = 1;
      parameters.min_linear = 1;
-@@ -1416,6 +1589,68 @@ ID3D12Resource* D3D12TextureCache::RequestSwapTexture(
+@@ -1416,6 +1426,68 @@ ID3D12Resource* D3D12TextureCache::RequestSwapTexture(
        key.dimension != xenos::DataDimension::k2DOrStacked) {
      return nullptr;
    }
@@ -2644,7 +2296,7 @@ index b96c200b9..c6912f984 100644
    D3D12Texture* texture = static_cast<D3D12Texture*>(FindOrCreateTexture(key));
    if (texture == nullptr || !LoadTextureData(*texture)) {
      return nullptr;
-@@ -1597,8 +1832,17 @@ std::unique_ptr<TextureCache::Texture> D3D12TextureCache::CreateTexture(
+@@ -1597,6 +1669,10 @@ std::unique_ptr<TextureCache::Texture> D3D12TextureCache::CreateTexture(
  bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
                                                                bool load_base,
                                                                bool load_mips) {
@@ -2654,15 +2306,8 @@ index b96c200b9..c6912f984 100644
 +#endif
    D3D12Texture& d3d12_texture = static_cast<D3D12Texture&>(texture);
    TextureKey texture_key = d3d12_texture.key();
-+#if XE_WET_RUNTIME
-+  if (load_base && WetLoadFromResolveCopy(texture, load_mips)) {
-+    return true;
-+  }
-+#endif
  
-   DeferredCommandList& command_list =
-       command_processor_.GetDeferredCommandList();
-@@ -1644,6 +1888,59 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+@@ -1644,6 +1720,59 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
    uint32_t texture_resolution_scale_y =
        texture_resolution_scaled ? draw_resolution_scale_y() : 1;
  
@@ -2722,7 +2367,7 @@ index b96c200b9..c6912f984 100644
    // The loop counter can mean two things depending on whether the packed mip
    // tail is stored as mip 0, because in this case, it would be ambiguous since
    // both the base and the mips would be on "level 0", but stored in separate
-@@ -1721,6 +2018,11 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+@@ -1721,6 +1850,11 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
      level_host_slice_layout.Footprint.Width = xe::round_up(
          level_host_slice_layout.Footprint.Width * texture_resolution_scale_x,
          UINT(host_block_width));
@@ -2734,7 +2379,7 @@ index b96c200b9..c6912f984 100644
      level_host_slice_layout.Footprint.Height = xe::round_up(
          level_host_slice_layout.Footprint.Height * texture_resolution_scale_y,
          UINT(host_block_height));
-@@ -1849,6 +2151,15 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+@@ -1849,6 +1983,15 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
                                      block_height * texture_resolution_scale_y;
      load_constants.size_blocks[2] = level_depth;
      load_constants.height_texels = level_height;
@@ -2750,7 +2395,7 @@ index b96c200b9..c6912f984 100644
  
      uint32_t group_count_x =
          (load_constants.size_blocks[0] +
-@@ -1946,8 +2257,14 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+@@ -1946,8 +2089,14 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
      } else {
        source_box_ptr = nullptr;
      }
@@ -2766,7 +2411,7 @@ index b96c200b9..c6912f984 100644
                                          &location_source, source_box_ptr);
        location_dest.SubresourceIndex += texture_level_count;
        location_source.PlacedFootprint.Offset += host_slice_size;
-@@ -1956,6 +2273,13 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+@@ -1956,6 +2105,12 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
  
    command_processor_.ReleaseScratchGPUBuffer(copy_buffer, copy_buffer_state);
  
@@ -2774,85 +2419,10 @@ index b96c200b9..c6912f984 100644
 +  if (load_base) {
 +    d3d12_texture.wet_loaded_resolve_seq_ = wet_resolve_seq_at_load;
 +    d3d12_texture.wet_base_loaded_ = true;
-+    d3d12_texture.wet_rb_swapped_ = false;
 +  }
 +#endif
    return true;
  }
- 
-diff --git a/src/xenia/gpu/d3d12/d3d12_texture_cache.h b/src/xenia/gpu/d3d12/d3d12_texture_cache.h
-index 0f9ffa650..f5b3a2214 100644
---- a/src/xenia/gpu/d3d12/d3d12_texture_cache.h
-+++ b/src/xenia/gpu/d3d12/d3d12_texture_cache.h
-@@ -11,8 +11,10 @@
- #define XENIA_GPU_D3D12_D3D12_TEXTURE_CACHE_H_
- 
- #include <array>
-+#include <atomic>
- #include <functional>
- #include <memory>
-+#include <mutex>
- #include <unordered_map>
- #include <utility>
- #include <vector>
-@@ -33,8 +35,28 @@ namespace d3d12 {
- 
- class D3D12CommandProcessor;
- 
-+#if XE_WET_RUNTIME
-+// Resolve-to-texture shortcut (WET_RESOLVE_SHORTCUT=1): a plain 32bpp color
-+// resolve also keeps a host copy of what it resolved, and a texture of exactly
-+// that resolve is filled from the copy rather than loaded back from (and
-+// untiled out of) the guest memory the resolve wrote.
-+extern std::atomic<bool> wet_resolve_shortcut;
-+extern std::atomic<uint64_t> wet_resolve_shortcut_captures,
-+    wet_resolve_shortcut_hits;
-+#endif
-+
- class D3D12TextureCache final : public TextureCache {
-  public:
-+#if XE_WET_RUNTIME
-+  // From a resolve (D3D12RenderTargetCache::Resolve): `source` (in the
-+  // COPY_SOURCE state) holds the resolved pixels at `box`, written to
-+  // dest_base as a width x height k_8_8_8_8 tiled texture.
-+  void WetCaptureResolve(uint32_t dest_base, uint32_t extent_start,
-+                         uint32_t extent_length, uint32_t width,
-+                         uint32_t height, uint32_t pitch_div_32,
-+                         xenos::Endian endian, bool rb_swapped,
-+                         ID3D12Resource* source, const D3D12_BOX& box);
-+#endif
-   // Keys that can be stored for checking validity whether descriptors for host
-   // shader bindings are up to date.
-   struct TextureSRVKey {
-@@ -176,6 +198,29 @@ class D3D12TextureCache final : public TextureCache {
-   void UpdateTextureBindingsImpl(uint32_t fetch_constant_mask) override;
- 
-  private:
-+#if XE_WET_RUNTIME
-+  struct WetResolveCopy {
-+    uint32_t extent_start = 0, extent_end = 0;
-+    uint32_t width = 0, height = 0, pitch_div_32 = 0;
-+    xenos::Endian endian = xenos::Endian::kNone;
-+    bool rb_swapped = false;
-+    bool valid = false;
-+    D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COPY_DEST;
-+    Microsoft::WRL::ComPtr<ID3D12Resource> resource;
-+  };
-+  // Fills the base level of `texture` from a resolve copy if there's one for
-+  // exactly it; false to load it normally.
-+  bool WetLoadFromResolveCopy(Texture& texture, bool load_mips);
-+  static void WetResolveCopiesWatchThunk(
-+      const std::unique_lock<std::recursive_mutex>& global_lock, void* context,
-+      uint32_t address_first, uint32_t address_last, bool invalidated_by_gpu);
-+  std::mutex wet_resolve_copies_mutex_;
-+  std::unordered_map<uint32_t, WetResolveCopy> wet_resolve_copies_;
-+  // Replaced copies, released once the GPU is past their last use.
-+  std::vector<std::pair<uint64_t, Microsoft::WRL::ComPtr<ID3D12Resource>>>
-+      wet_resolve_copies_released_;
-+  SharedMemory::GlobalWatchHandle wet_resolve_copies_watch_ = nullptr;
-+#endif
-   static constexpr uint32_t kLoadGuestXThreadsPerGroupLog2 = 2;
-   static constexpr uint32_t kLoadGuestYBlocksPerGroupLog2 = 5;
  
 diff --git a/src/xenia/gpu/d3d12/deferred_command_list.cc b/src/xenia/gpu/d3d12/deferred_command_list.cc
 index adaefcd4c..1d48aa7f4 100644
@@ -19397,7 +18967,7 @@ index e0fd8440d..15115f823 100644
                                    builder_->makeUintConstant(6)));
          {
 diff --git a/src/xenia/gpu/texture_cache.cc b/src/xenia/gpu/texture_cache.cc
-index 46820e2bb..e76d177bb 100644
+index 46820e2bb..2f36c027d 100644
 --- a/src/xenia/gpu/texture_cache.cc
 +++ b/src/xenia/gpu/texture_cache.cc
 @@ -73,6 +73,11 @@ DEFINE_uint32(
@@ -19412,7 +18982,7 @@ index 46820e2bb..e76d177bb 100644
  const TextureCache::LoadShaderInfo
      TextureCache::load_shader_info_[kLoadShaderCount] = {
          {1, 4},   // k8bpb
-@@ -236,8 +241,41 @@ void TextureCache::MarkRangeAsResolved(uint32_t start_unscaled,
+@@ -236,8 +241,33 @@ void TextureCache::MarkRangeAsResolved(uint32_t start_unscaled,
    }
    start_unscaled &= 0x1FFFFFFF;
    length_unscaled = std::min(length_unscaled, 0x20000000 - start_unscaled);
@@ -19437,14 +19007,6 @@ index 46820e2bb..e76d177bb 100644
 +  }
 +#endif
  
-+#if XE_WET_RUNTIME
-+  {
-+    // Diagnostics (WetReloadStats): recent resolve ranges, scaled or not.
-+    std::lock_guard<std::mutex> lock(wet_reload_mutex_);
-+    wet_recent_resolves_[wet_recent_resolve_next_++ % kWetRecentResolves] = {
-+        start_unscaled, start_unscaled + length_unscaled};
-+  }
-+#endif
    if (IsDrawResolutionScaled()) {
 +#if XE_WET_RUNTIME
 +    ++wet_resolve_seq_;
@@ -19454,66 +19016,11 @@ index 46820e2bb..e76d177bb 100644
      uint32_t page_first = start_unscaled >> 12;
      uint32_t page_last = (start_unscaled + length_unscaled - 1) >> 12;
      uint32_t block_first = page_first >> 5;
-@@ -261,6 +299,83 @@ void TextureCache::MarkRangeAsResolved(uint32_t start_unscaled,
+@@ -261,6 +291,28 @@ void TextureCache::MarkRangeAsResolved(uint32_t start_unscaled,
    shared_memory().RangeWrittenByGpu(start_unscaled, length_unscaled);
  }
  
 +#if XE_WET_RUNTIME
-+// Texture reloads per 10 s in xenia_gpu.log: how many and how much, how many
-+// were of memory a resolve (render to texture) wrote, and the textures
-+// reloaded most often - to see which reloads are avoidable.
-+void TextureCache::WetCountReload(const TextureKey& key, uint32_t base_bytes,
-+                                  uint32_t mip_bytes) {
-+  std::lock_guard<std::mutex> lock(wet_reload_mutex_);
-+  uint32_t base = key.base_page << 12;
-+  uint32_t end = base + std::max(base_bytes, UINT32_C(1));
-+  bool resolved = false;
-+  for (const auto& r : wet_recent_resolves_) {
-+    if (r.second > base && r.first < end) {
-+      resolved = true;
-+      break;
-+    }
-+  }
-+  ++wet_reloads_;
-+  wet_reload_bytes_ += uint64_t(base_bytes) + mip_bytes;
-+  if (resolved) {
-+    ++wet_reloads_resolved_;
-+  }
-+  auto& e = wet_reload_by_texture_[base];
-+  ++e.count;
-+  e.width = key.width_minus_1 + 1;
-+  e.height = key.height_minus_1 + 1;
-+  e.format = uint32_t(key.format);
-+  e.resolved = e.resolved || resolved;
-+  e.bytes = base_bytes + mip_bytes;
-+  auto now = std::chrono::steady_clock::now();
-+  if (wet_reload_period_start_ == std::chrono::steady_clock::time_point()) {
-+    wet_reload_period_start_ = now;
-+  }
-+  if (now - wet_reload_period_start_ < std::chrono::seconds(10)) {
-+    return;
-+  }
-+  double secs = std::chrono::duration<double>(now - wet_reload_period_start_).count();
-+  XELOGW("WET texture reloads: {:.0f}/s, {:.1f} MB/s; {:.0f}/s of memory a resolve wrote; {} textures",
-+         wet_reloads_ / secs, wet_reload_bytes_ / secs / 1048576.0,
-+         wet_reloads_resolved_ / secs, wet_reload_by_texture_.size());
-+  std::vector<std::pair<uint32_t, WetReloadEntry>> top(
-+      wet_reload_by_texture_.begin(), wet_reload_by_texture_.end());
-+  std::sort(top.begin(), top.end(), [](const auto& a, const auto& b) {
-+    return a.second.count > b.second.count;
-+  });
-+  for (size_t i = 0; i < top.size() && i < 12; ++i) {
-+    const auto& t = top[i];
-+    XELOGW("  {:08X} {}x{} format {} {} KB: {:.1f}/s{}", t.first, t.second.width,
-+           t.second.height, t.second.format, t.second.bytes / 1024,
-+           t.second.count / secs, t.second.resolved ? " (resolved into)" : "");
-+  }
-+  wet_reloads_ = wet_reloads_resolved_ = 0;
-+  wet_reload_bytes_ = 0;
-+  wet_reload_by_texture_.clear();
-+  wet_reload_period_start_ = now;
-+}
-+
 +bool TextureCache::WetResolvedSince(uint64_t since_seq, uint32_t base,
 +                                    uint32_t size, uint32_t& lo,
 +                                    uint32_t& hi) const {
@@ -19538,32 +19045,7 @@ index 46820e2bb..e76d177bb 100644
  uint32_t TextureCache::GuestToHostSwizzle(uint32_t guest_swizzle,
                                            uint32_t host_format_swizzle) {
    uint32_t host_swizzle = 0;
-@@ -372,6 +487,24 @@ void TextureCache::RequestTextures(uint32_t used_texture_mask) {
-     if (load_signed_data && binding.texture_signed != nullptr) {
-       LoadTextureData(*binding.texture_signed);
-     }
-+#if XE_WET_RUNTIME
-+    // A texture filled with red and blue swapped is viewed with them swapped
-+    // back (host channels 0 and 2 of the swizzle).
-+    if (binding.texture != nullptr && binding.texture->wet_rb_swapped_) {
-+      uint32_t swizzle = binding.host_swizzle, swapped = 0;
-+      for (uint32_t i = 0; i < 4; ++i) {
-+        uint32_t c = (swizzle >> (3 * i)) & 0b111;
-+        if (c == 0 || c == 2) {
-+          c ^= 2;
-+        }
-+        swapped |= c << (3 * i);
-+      }
-+      binding.host_swizzle = swapped;
-+    }
-+    if (binding.host_swizzle != old_host_swizzle) {
-+      bindings_changed |= index_bit;
-+    }
-+#endif
-   }
-   if (bindings_changed) {
-     UpdateTextureBindingsImpl(bindings_changed);
-@@ -558,6 +691,28 @@ TextureCache::Texture* TextureCache::FindOrCreateTexture(TextureKey key) {
+@@ -558,6 +610,28 @@ TextureCache::Texture* TextureCache::FindOrCreateTexture(TextureKey key) {
               scaled_resolve_guest_layout.mips_total_extent_bytes))) {
        key.scaled_resolve = 1;
      }
@@ -19592,18 +19074,7 @@ index 46820e2bb..e76d177bb 100644
    }
  
    uint32_t host_width = key.GetWidth();
-@@ -674,6 +829,10 @@ bool TextureCache::LoadTextureData(Texture& texture) {
-   texture.MakeUpToDateAndWatch(global_critical_region_.Acquire());
- 
-   texture.LogAction("Loaded");
-+#if XE_WET_RUNTIME
-+  WetCountReload(texture_key, base_outdated ? texture.GetGuestBaseSize() : 0,
-+                 mips_outdated ? texture.GetGuestMipsSize() : 0);
-+#endif
- 
-   return true;
- }
-@@ -867,6 +1026,34 @@ void TextureCache::ScaledResolveGlobalWatchCallback(
+@@ -867,6 +941,34 @@ void TextureCache::ScaledResolveGlobalWatchCallback(
      // Resolves themselves do exactly the opposite of what this should do.
      return;
    }
@@ -19639,21 +19110,10 @@ index 46820e2bb..e76d177bb 100644
    // invalidated by their shared memory watches.
    uint32_t resolve_page_first = address_first >> 12;
 diff --git a/src/xenia/gpu/texture_cache.h b/src/xenia/gpu/texture_cache.h
-index c892eee32..be6fa1bd5 100644
+index c892eee32..7e5d9e0a8 100644
 --- a/src/xenia/gpu/texture_cache.h
 +++ b/src/xenia/gpu/texture_cache.h
-@@ -10,6 +10,10 @@
- #ifndef XENIA_GPU_TEXTURE_CACHE_H_
- #define XENIA_GPU_TEXTURE_CACHE_H_
- 
-+#include <algorithm>
-+#include <vector>
-+#include <mutex>
-+#include <chrono>
- #include <array>
- #include <atomic>
- #include <cstdint>
-@@ -53,6 +57,13 @@ namespace gpu {
+@@ -53,6 +53,13 @@ namespace gpu {
  // TODO(Triang3l): Attach the largest LOD to existing textures with a valid
  // mip_address but no base ever used yet (no base_address) to save memory
  // because textures are streamed this way anyway.
@@ -19667,7 +19127,7 @@ index c892eee32..be6fa1bd5 100644
  class TextureCache {
   public:
    // Hard limit, originating from the half-pixel offset filling hack in the
-@@ -81,6 +92,18 @@ class TextureCache {
+@@ -81,6 +88,18 @@ class TextureCache {
    virtual void BeginFrame();
  
    void MarkRangeAsResolved(uint32_t start_unscaled, uint32_t length_unscaled);
@@ -19686,7 +19146,7 @@ index c892eee32..be6fa1bd5 100644
    // Ensures the memory backing the range in the scaled resolve address space is
    // allocated and returns whether it is.
    virtual bool EnsureScaledResolveMemoryCommitted(
-@@ -122,6 +145,13 @@ class TextureCache {
+@@ -122,6 +141,13 @@ class TextureCache {
    }
  
   protected:
@@ -19700,7 +19160,7 @@ index c892eee32..be6fa1bd5 100644
    struct TextureKey {
      // Dimensions minus 1 are stored similarly to how they're stored in fetch
      // constants so fewer bits can be used, while the maximum size (8192 for 2D)
-@@ -241,6 +271,16 @@ class TextureCache {
+@@ -241,6 +267,13 @@ class TextureCache {
  
      void LogAction(const char* action) const;
  
@@ -19709,15 +19169,12 @@ index c892eee32..be6fa1bd5 100644
 +    // WetResolvedSince), and whether it has been loaded at all.
 +    uint64_t wet_loaded_resolve_seq_ = 0;
 +    bool wet_base_loaded_ = false;
-+    // The host data has red and blue swapped relative to a normal load (filled
-+    // from a resolve copy, d3d12_texture_cache.h): the view swaps them back.
-+    bool wet_rb_swapped_ = false;
 +#endif
 +
     protected:
      explicit Texture(TextureCache& texture_cache, const TextureKey& key);
  
-@@ -551,6 +591,32 @@ class TextureCache {
+@@ -551,6 +584,17 @@ class TextureCache {
    // implementation to update the internal dependencies of the binding.
    virtual void UpdateTextureBindingsImpl(uint32_t fetch_constant_mask) {}
  
@@ -19730,27 +19187,12 @@ index c892eee32..be6fa1bd5 100644
 +  static constexpr uint32_t kWetResolveLogSize = 256;
 +  WetResolveRange wet_resolve_log_[kWetResolveLogSize] = {};
 +  uint64_t wet_resolve_seq_ = 0;
-+  // WetCountReload's statistics.
-+  void WetCountReload(const TextureKey& key, uint32_t base_bytes,
-+                      uint32_t mip_bytes);
-+  struct WetReloadEntry {
-+    uint32_t count = 0, width = 0, height = 0, format = 0, bytes = 0;
-+    bool resolved = false;
-+  };
-+  static constexpr size_t kWetRecentResolves = 256;
-+  std::mutex wet_reload_mutex_;
-+  std::array<std::pair<uint32_t, uint32_t>, kWetRecentResolves>
-+      wet_recent_resolves_{};
-+  uint64_t wet_recent_resolve_next_ = 0;
-+  uint64_t wet_reloads_ = 0, wet_reloads_resolved_ = 0, wet_reload_bytes_ = 0;
-+  std::unordered_map<uint32_t, WetReloadEntry> wet_reload_by_texture_;
-+  std::chrono::steady_clock::time_point wet_reload_period_start_{};
 +#endif
 +
   private:
    void UpdateTexturesTotalHostMemoryUsage(uint64_t add, uint64_t subtract);
  
-@@ -594,6 +660,15 @@ class TextureCache {
+@@ -594,6 +638,15 @@ class TextureCache {
    uint64_t current_submission_index_ = 0;
    uint64_t current_submission_time_ = 0;
  
