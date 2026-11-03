@@ -18,6 +18,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cstring>
+#include <deque>
+#include <functional>
+#include <unordered_map>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -60,7 +64,13 @@ namespace wet::music
         std::array<Range, 32> s_ranges{};
         size_t s_rangeNext = 0;
         std::atomic<bool> s_anyRange{ false };
-        std::atomic<bool> s_loggedVirtual{ false }, s_loggedMute{ false };
+        std::atomic<bool> s_loggedMute{ false };
+        std::atomic<int> s_musicReads{ 0 };
+        std::deque<std::vector<uint8_t>> s_copies;
+        size_t s_copyBytes = 0;
+        struct Known { uint64_t sig; bool music; };
+        std::unordered_map<uint32_t, Known> s_known;   // XMA input buffers already checked
+        int s_checked = 0;
 
         // The game's music volume (fades over about half a second).
         std::mutex s_gainLock;
@@ -438,45 +448,86 @@ namespace wet::music
     {
         if (!length)
             return;
-        if (music && !IsPhysicalView(guest))
-        {
-            if (!s_loggedVirtual.exchange(true))
-                Log("Music: the game reads its music to 0x%08X (not physical memory); it can't be muted", guest);
-            return;
-        }
-        if (!music && !s_anyRange.load(std::memory_order_relaxed))
-            return;
-        uint32_t begin = IsPhysicalView(guest) ? ViewToPhysical(guest) : 0xFFFFFFFFu, end = begin + length;
-        std::lock_guard lock(s_rangeLock);
-        // Anything read over a music buffer isn't music any more.
-        for (auto& r : s_ranges)
-            if (r.begin < end && begin < r.end)
-            {
-                if (music && r.begin == begin && r.end == end)
-                    return;
-                r = {};
-            }
+        uint32_t begin = IsPhysicalView(guest) ? ViewToPhysical(guest) : 0xFFFFFFF0u, end = begin + length;
         if (music)
         {
-            s_ranges[s_rangeNext] = { begin, end };
-            s_rangeNext = (s_rangeNext + 1) % s_ranges.size();
+            int n = s_musicReads.fetch_add(1);
+            if (n < 3)
+                Log("Music: the game read %u bytes of its music to 0x%08X", length, guest);
+            // A copy of what was read, to recognise it if the game copies it
+            // somewhere else for its XMA voices (the newest 4 MB).
+            std::lock_guard lock(s_rangeLock);
+            const uint8_t* p = g_mem.base + guest;
+            s_copies.emplace_back(p, p + length);
+            s_copyBytes += length;
+            while (s_copies.size() > 1 && s_copyBytes > (4u << 20))
+            {
+                s_copyBytes -= s_copies.front().size();
+                s_copies.pop_front();
+            }
+            if (IsPhysicalView(guest))
+            {
+                for (auto& r : s_ranges)
+                    if (r.begin < end && begin < r.end)
+                        r = {};
+                s_ranges[s_rangeNext] = { begin, end };
+                s_rangeNext = (s_rangeNext + 1) % s_ranges.size();
+            }
             s_anyRange = true;
+            return;
         }
+        if (!s_anyRange.load(std::memory_order_relaxed) || !IsPhysicalView(guest))
+            return;
+        // Anything else read over a music buffer isn't music any more.
+        std::lock_guard lock(s_rangeLock);
+        for (auto& r : s_ranges)
+            if (r.begin < end && begin < r.end)
+                r = {};
     }
 
     float GameMusicGain(uint32_t inputPhys)
     {
-        if (!s_anyRange.load(std::memory_order_relaxed))
+        if (!s_anyRange.load(std::memory_order_relaxed) || !inputPhys)
             return 1.0f;
+        constexpr size_t kSig = 128;
+        const uint8_t* in = PhysicalHostView() + inputPhys;
+        uint64_t sig;
+        std::memcpy(&sig, in + 64, 8);
         bool music = false;
         {
             std::lock_guard lock(s_rangeLock);
-            for (auto& r : s_ranges)
-                if (inputPhys >= r.begin && inputPhys < r.end)
+            auto it = s_known.find(inputPhys);
+            if (it != s_known.end() && it->second.sig == sig)
+                music = it->second.music;
+            else
+            {
+                const char* how = nullptr;
+                for (auto& r : s_ranges)
+                    if (inputPhys >= r.begin && inputPhys < r.end)
+                    {
+                        music = true;
+                        how = "read there";
+                        break;
+                    }
+                // Not where it was read: look for its first bytes in what was read.
+                bool flat = std::all_of(in, in + kSig, [&](uint8_t c) { return c == in[0]; });
+                if (!music && !flat)
                 {
-                    music = true;
-                    break;
+                    std::boyer_moore_horspool_searcher search(in, in + kSig);
+                    for (auto c = s_copies.rbegin(); c != s_copies.rend() && !music; ++c)
+                        if (std::search(c->begin(), c->end(), search) != c->end())
+                        {
+                            music = true;
+                            how = "copied from what was read";
+                        }
                 }
+                if (s_known.size() > 1024)
+                    s_known.clear();
+                s_known[inputPhys] = { sig, music };
+                if (s_checked++ < 12)
+                    Log("Music: XMA voice input at physical 0x%08X: %s", inputPhys,
+                        music ? how : "not the game's music");
+            }
         }
         if (!music)
             return 1.0f;
