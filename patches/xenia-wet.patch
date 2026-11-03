@@ -19004,7 +19004,7 @@ index e0fd8440d..15115f823 100644
                                    builder_->makeUintConstant(6)));
          {
 diff --git a/src/xenia/gpu/texture_cache.cc b/src/xenia/gpu/texture_cache.cc
-index 46820e2bb..2f36c027d 100644
+index 46820e2bb..44e1e25af 100644
 --- a/src/xenia/gpu/texture_cache.cc
 +++ b/src/xenia/gpu/texture_cache.cc
 @@ -73,6 +73,11 @@ DEFINE_uint32(
@@ -19019,7 +19019,7 @@ index 46820e2bb..2f36c027d 100644
  const TextureCache::LoadShaderInfo
      TextureCache::load_shader_info_[kLoadShaderCount] = {
          {1, 4},   // k8bpb
-@@ -236,8 +241,33 @@ void TextureCache::MarkRangeAsResolved(uint32_t start_unscaled,
+@@ -236,8 +241,41 @@ void TextureCache::MarkRangeAsResolved(uint32_t start_unscaled,
    }
    start_unscaled &= 0x1FFFFFFF;
    length_unscaled = std::min(length_unscaled, 0x20000000 - start_unscaled);
@@ -19044,6 +19044,14 @@ index 46820e2bb..2f36c027d 100644
 +  }
 +#endif
  
++#if XE_WET_RUNTIME
++  {
++    // Diagnostics (WetReloadStats): recent resolve ranges, scaled or not.
++    std::lock_guard<std::mutex> lock(wet_reload_mutex_);
++    wet_recent_resolves_[wet_recent_resolve_next_++ % kWetRecentResolves] = {
++        start_unscaled, start_unscaled + length_unscaled};
++  }
++#endif
    if (IsDrawResolutionScaled()) {
 +#if XE_WET_RUNTIME
 +    ++wet_resolve_seq_;
@@ -19053,11 +19061,66 @@ index 46820e2bb..2f36c027d 100644
      uint32_t page_first = start_unscaled >> 12;
      uint32_t page_last = (start_unscaled + length_unscaled - 1) >> 12;
      uint32_t block_first = page_first >> 5;
-@@ -261,6 +291,28 @@ void TextureCache::MarkRangeAsResolved(uint32_t start_unscaled,
+@@ -261,6 +299,83 @@ void TextureCache::MarkRangeAsResolved(uint32_t start_unscaled,
    shared_memory().RangeWrittenByGpu(start_unscaled, length_unscaled);
  }
  
 +#if XE_WET_RUNTIME
++// Texture reloads per 10 s in xenia_gpu.log: how many and how much, how many
++// were of memory a resolve (render to texture) wrote, and the textures
++// reloaded most often - to see which reloads are avoidable.
++void TextureCache::WetCountReload(const TextureKey& key, uint32_t base_bytes,
++                                  uint32_t mip_bytes) {
++  std::lock_guard<std::mutex> lock(wet_reload_mutex_);
++  uint32_t base = key.base_page << 12;
++  uint32_t end = base + std::max(base_bytes, UINT32_C(1));
++  bool resolved = false;
++  for (const auto& r : wet_recent_resolves_) {
++    if (r.second > base && r.first < end) {
++      resolved = true;
++      break;
++    }
++  }
++  ++wet_reloads_;
++  wet_reload_bytes_ += uint64_t(base_bytes) + mip_bytes;
++  if (resolved) {
++    ++wet_reloads_resolved_;
++  }
++  auto& e = wet_reload_by_texture_[base];
++  ++e.count;
++  e.width = key.width_minus_1 + 1;
++  e.height = key.height_minus_1 + 1;
++  e.format = uint32_t(key.format);
++  e.resolved = e.resolved || resolved;
++  e.bytes = base_bytes + mip_bytes;
++  auto now = std::chrono::steady_clock::now();
++  if (wet_reload_period_start_ == std::chrono::steady_clock::time_point()) {
++    wet_reload_period_start_ = now;
++  }
++  if (now - wet_reload_period_start_ < std::chrono::seconds(10)) {
++    return;
++  }
++  double secs = std::chrono::duration<double>(now - wet_reload_period_start_).count();
++  XELOGW("WET texture reloads: {:.0f}/s, {:.1f} MB/s; {:.0f}/s of memory a resolve wrote; {} textures",
++         wet_reloads_ / secs, wet_reload_bytes_ / secs / 1048576.0,
++         wet_reloads_resolved_ / secs, wet_reload_by_texture_.size());
++  std::vector<std::pair<uint32_t, WetReloadEntry>> top(
++      wet_reload_by_texture_.begin(), wet_reload_by_texture_.end());
++  std::sort(top.begin(), top.end(), [](const auto& a, const auto& b) {
++    return a.second.count > b.second.count;
++  });
++  for (size_t i = 0; i < top.size() && i < 12; ++i) {
++    const auto& t = top[i];
++    XELOGW("  {:08X} {}x{} format {} {} KB: {:.1f}/s{}", t.first, t.second.width,
++           t.second.height, t.second.format, t.second.bytes / 1024,
++           t.second.count / secs, t.second.resolved ? " (resolved into)" : "");
++  }
++  wet_reloads_ = wet_reloads_resolved_ = 0;
++  wet_reload_bytes_ = 0;
++  wet_reload_by_texture_.clear();
++  wet_reload_period_start_ = now;
++}
++
 +bool TextureCache::WetResolvedSince(uint64_t since_seq, uint32_t base,
 +                                    uint32_t size, uint32_t& lo,
 +                                    uint32_t& hi) const {
@@ -19082,7 +19145,7 @@ index 46820e2bb..2f36c027d 100644
  uint32_t TextureCache::GuestToHostSwizzle(uint32_t guest_swizzle,
                                            uint32_t host_format_swizzle) {
    uint32_t host_swizzle = 0;
-@@ -558,6 +610,28 @@ TextureCache::Texture* TextureCache::FindOrCreateTexture(TextureKey key) {
+@@ -558,6 +673,28 @@ TextureCache::Texture* TextureCache::FindOrCreateTexture(TextureKey key) {
               scaled_resolve_guest_layout.mips_total_extent_bytes))) {
        key.scaled_resolve = 1;
      }
@@ -19111,7 +19174,18 @@ index 46820e2bb..2f36c027d 100644
    }
  
    uint32_t host_width = key.GetWidth();
-@@ -867,6 +941,34 @@ void TextureCache::ScaledResolveGlobalWatchCallback(
+@@ -674,6 +811,10 @@ bool TextureCache::LoadTextureData(Texture& texture) {
+   texture.MakeUpToDateAndWatch(global_critical_region_.Acquire());
+ 
+   texture.LogAction("Loaded");
++#if XE_WET_RUNTIME
++  WetCountReload(texture_key, base_outdated ? texture.GetGuestBaseSize() : 0,
++                 mips_outdated ? texture.GetGuestMipsSize() : 0);
++#endif
+ 
+   return true;
+ }
+@@ -867,6 +1008,34 @@ void TextureCache::ScaledResolveGlobalWatchCallback(
      // Resolves themselves do exactly the opposite of what this should do.
      return;
    }
@@ -19147,10 +19221,21 @@ index 46820e2bb..2f36c027d 100644
    // invalidated by their shared memory watches.
    uint32_t resolve_page_first = address_first >> 12;
 diff --git a/src/xenia/gpu/texture_cache.h b/src/xenia/gpu/texture_cache.h
-index c892eee32..7e5d9e0a8 100644
+index c892eee32..c2f232d00 100644
 --- a/src/xenia/gpu/texture_cache.h
 +++ b/src/xenia/gpu/texture_cache.h
-@@ -53,6 +53,13 @@ namespace gpu {
+@@ -10,6 +10,10 @@
+ #ifndef XENIA_GPU_TEXTURE_CACHE_H_
+ #define XENIA_GPU_TEXTURE_CACHE_H_
+ 
++#include <algorithm>
++#include <vector>
++#include <mutex>
++#include <chrono>
+ #include <array>
+ #include <atomic>
+ #include <cstdint>
+@@ -53,6 +57,13 @@ namespace gpu {
  // TODO(Triang3l): Attach the largest LOD to existing textures with a valid
  // mip_address but no base ever used yet (no base_address) to save memory
  // because textures are streamed this way anyway.
@@ -19164,7 +19249,7 @@ index c892eee32..7e5d9e0a8 100644
  class TextureCache {
   public:
    // Hard limit, originating from the half-pixel offset filling hack in the
-@@ -81,6 +88,18 @@ class TextureCache {
+@@ -81,6 +92,18 @@ class TextureCache {
    virtual void BeginFrame();
  
    void MarkRangeAsResolved(uint32_t start_unscaled, uint32_t length_unscaled);
@@ -19183,7 +19268,7 @@ index c892eee32..7e5d9e0a8 100644
    // Ensures the memory backing the range in the scaled resolve address space is
    // allocated and returns whether it is.
    virtual bool EnsureScaledResolveMemoryCommitted(
-@@ -122,6 +141,13 @@ class TextureCache {
+@@ -122,6 +145,13 @@ class TextureCache {
    }
  
   protected:
@@ -19197,7 +19282,7 @@ index c892eee32..7e5d9e0a8 100644
    struct TextureKey {
      // Dimensions minus 1 are stored similarly to how they're stored in fetch
      // constants so fewer bits can be used, while the maximum size (8192 for 2D)
-@@ -241,6 +267,13 @@ class TextureCache {
+@@ -241,6 +271,13 @@ class TextureCache {
  
      void LogAction(const char* action) const;
  
@@ -19211,7 +19296,7 @@ index c892eee32..7e5d9e0a8 100644
     protected:
      explicit Texture(TextureCache& texture_cache, const TextureKey& key);
  
-@@ -551,6 +584,17 @@ class TextureCache {
+@@ -551,6 +588,32 @@ class TextureCache {
    // implementation to update the internal dependencies of the binding.
    virtual void UpdateTextureBindingsImpl(uint32_t fetch_constant_mask) {}
  
@@ -19224,12 +19309,27 @@ index c892eee32..7e5d9e0a8 100644
 +  static constexpr uint32_t kWetResolveLogSize = 256;
 +  WetResolveRange wet_resolve_log_[kWetResolveLogSize] = {};
 +  uint64_t wet_resolve_seq_ = 0;
++  // WetCountReload's statistics.
++  void WetCountReload(const TextureKey& key, uint32_t base_bytes,
++                      uint32_t mip_bytes);
++  struct WetReloadEntry {
++    uint32_t count = 0, width = 0, height = 0, format = 0, bytes = 0;
++    bool resolved = false;
++  };
++  static constexpr size_t kWetRecentResolves = 256;
++  std::mutex wet_reload_mutex_;
++  std::array<std::pair<uint32_t, uint32_t>, kWetRecentResolves>
++      wet_recent_resolves_{};
++  uint64_t wet_recent_resolve_next_ = 0;
++  uint64_t wet_reloads_ = 0, wet_reloads_resolved_ = 0, wet_reload_bytes_ = 0;
++  std::unordered_map<uint32_t, WetReloadEntry> wet_reload_by_texture_;
++  std::chrono::steady_clock::time_point wet_reload_period_start_{};
 +#endif
 +
   private:
    void UpdateTexturesTotalHostMemoryUsage(uint64_t add, uint64_t subtract);
  
-@@ -594,6 +638,15 @@ class TextureCache {
+@@ -594,6 +657,15 @@ class TextureCache {
    uint64_t current_submission_index_ = 0;
    uint64_t current_submission_time_ = 0;
  
