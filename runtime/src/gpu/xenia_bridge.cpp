@@ -1078,6 +1078,15 @@ namespace
                     ApplyPostProcessing();
                 }
             }
+            {
+                int outfit = wet::options::OutfitColour();
+                static const char* kOutfits[] = { "Original", "Red", "Blue", "Black", "White", "Green", "Purple", "Pink" };
+                if (RowCombo("Rubi's jacket", &outfit, kOutfits, 8, "Recolours her jacket (skin and hair stay as they are)."))
+                {
+                    wet::options::SetOutfitColour(outfit);
+                    wet::renderer::RecheckTextures();
+                }
+            }
             bool aniso = wet::options::AnisotropicFiltering();
             if (RowCheck("16x texture filtering", &aniso, "Sharper floors and walls seen at an angle; costs very little."))
             {
@@ -1477,8 +1486,10 @@ namespace wet::renderer
     {
         // In-world button prompts (prompts.cpp) are redrawn as draws first read them.
         xe::gpu::wet_texture_seen = [](uint32_t phys, uint8_t* data, uint32_t format, uint32_t w, uint32_t h,
-                                       bool tiled, uint32_t endian, uint32_t pitch) {
-            wet::renderer_host::WorldTextureSeen(phys, data, format, w, h, tiled, endian, pitch);
+                                       bool tiled, uint32_t endian, uint32_t pitch, uint32_t mipPhys,
+                                       uint8_t* mipData, uint32_t mipSize, uint32_t baseSize) {
+            wet::renderer_host::WorldTextureSeen(phys, data, format, w, h, tiled, endian, pitch, mipPhys, mipData,
+                                                 mipSize, baseSize);
         };
         if (s_running)
             return true;
@@ -1904,6 +1915,11 @@ namespace wet::renderer
     void RequestDrawTrace(int frames)
     {
         xe::gpu::wet_draw_trace_frames = frames;
+    }
+
+    void RecheckTextures()
+    {
+        xe::gpu::wet_texture_recheck = true;
     }
 
     void RequestTextureDump()

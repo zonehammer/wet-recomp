@@ -113,7 +113,7 @@ namespace
         kFps = 100, kResolution, kFullscreen, kShowFps,
         kFilter, kSharpness, kSharpnessValue, kAntialiasing, kGrain, kGrainValue, kFov, kFovValue, kWidescreen,
         kMouseAim, kSensitivity, kSensitivityValue, kInvertY, kVibration,
-        kShaderCache, kVideoMode, kPopups, kSkipIntro, kAniso, kSaveBackups, kMusicMode, kMusicVolume, kMusicVolumeValue, kMusicShuffle, kMusicFolder, kMusicFolderText, kMusicOpen, kAsyncShaders, kShaderPreload, kMotionBlur, kDepthOfField, kCameraShake, kLanguage,
+        kShaderCache, kVideoMode, kPopups, kSkipIntro, kAniso, kSaveBackups, kMusicMode, kMusicVolume, kMusicVolumeValue, kMusicShuffle, kMusicFolder, kMusicFolderText, kMusicOpen, kOutfit, kAsyncShaders, kShaderPreload, kMotionBlur, kDepthOfField, kCameraShake, kLanguage,
         kStatus, kPlay, kSaves, kClearShaders, kKeyboard,
         kVsync, kHideBorders, kWideHud, kCheckUpdates, kReportBug, kUpdateText, kPrompts,
         kMonitor, kPadTest, kAchievements,
@@ -583,6 +583,7 @@ namespace
         s_ini.Set("mouse_aim", Checked(kMouseAim));
         s_ini.Set("mouse_sensitivity", Pos(kSensitivity));
         s_ini.Set("music_mode", int(SendMessageW(Item(kMusicMode), CB_GETCURSEL, 0, 0)));
+        s_ini.Set("outfit_colour", int(SendMessageW(Item(kOutfit), CB_GETCURSEL, 0, 0)));
         s_ini.Set("music_volume", Pos(kMusicVolume));
         s_ini.Set("music_shuffle", Checked(kMusicShuffle));
         s_ini.SetString("music_folder", s_musicFolder);
@@ -1467,7 +1468,10 @@ namespace
         Check(kInvertY, L"Invert Y", 230, 200, ini.Get("mouse_invert_y", 0) != 0, 100);
         Label(L"Mouse sensitivity", 22, 230);
         Slider(kSensitivity, kSensitivityValue, 136, 228, 150, 1, 200, ini.Get("mouse_sensitivity", 50), L"");
-        Check(kVibration, L"Controller vibration", 22, 256, ini.Get("vibration", 1) != 0, 180);
+        Check(kVibration, L"Controller vibration", 22, 256, ini.Get("vibration", 1) != 0, 150);
+        Label(L"Jacket", 180, 256, 46);
+        Combo(kOutfit, 228, 254, 98, { L"Original", L"Red", L"Blue", L"Black", L"White", L"Green", L"Purple", L"Pink" },
+              std::min(std::max(ini.Get("outfit_colour", 0), 0), 7));
         Label(L"Prompts", 22, 284, 56);
         Combo(kPrompts, 80, 282, 128, { L"Automatic", L"Xbox", L"PlayStation", L"Keyboard / mouse" },
               std::min(std::max(ini.Get("button_prompts", 0), 0), 3));

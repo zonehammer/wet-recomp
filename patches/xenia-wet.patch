@@ -107,7 +107,7 @@ index 8f6087b05..47c87eec0 100644
  
  static void set_name(HANDLE thread, const std::string_view name) {
 diff --git a/src/xenia/gpu/command_processor.cc b/src/xenia/gpu/command_processor.cc
-index ce08d19bd..86f8005fb 100644
+index ce08d19bd..962bd97c8 100644
 --- a/src/xenia/gpu/command_processor.cc
 +++ b/src/xenia/gpu/command_processor.cc
 @@ -9,6 +9,15 @@
@@ -126,7 +126,15 @@ index ce08d19bd..86f8005fb 100644
  #include <algorithm>
  #include <cinttypes>
  #include <cmath>
-@@ -32,6 +41,253 @@
+@@ -25,6 +34,7 @@
+ #include "xenia/gpu/graphics_system.h"
+ #include "xenia/gpu/sampler_info.h"
+ #include "xenia/gpu/texture_info.h"
++#include "xenia/gpu/texture_util.h"
+ #include "xenia/gpu/xenos.h"
+ #include "xenia/kernel/kernel_state.h"
+ #include "xenia/kernel/user_module.h"
+@@ -32,6 +42,266 @@
  namespace xe {
  namespace gpu {
  
@@ -314,21 +322,24 @@ index ce08d19bd..86f8005fb 100644
 +}
 +
 +void (*wet_texture_seen)(uint32_t, uint8_t*, uint32_t, uint32_t, uint32_t,
-+                         bool, uint32_t, uint32_t) = nullptr;
++                         bool, uint32_t, uint32_t, uint32_t, uint8_t*, uint32_t,
++                         uint32_t) = nullptr;
++std::atomic<bool> wet_texture_recheck{false};
 +
 +void WetCheckTextures(const RegisterFile& regs, Memory& memory,
 +                      const Shader* pixel_shader) {
 +  if (!pixel_shader || !wet_texture_seen) return;
 +  // Address -> the first 16 bytes when last looked at (cheap to compare per draw).
 +  static std::unordered_map<uint32_t, std::array<uint8_t, 16>> s_seen;
++  if (wet_texture_recheck.exchange(false)) s_seen.clear();
 +  for (const Shader::TextureBinding& tb : pixel_shader->texture_bindings()) {
 +    xenos::xe_gpu_texture_fetch_t f = regs.GetTextureFetch(tb.fetch_constant);
 +    if (f.type != xenos::FetchConstantType::kTexture ||
 +        f.dimension != xenos::DataDimension::k2DOrStacked)
 +      continue;
 +    uint32_t w = f.size_2d.width + 1, h = f.size_2d.height + 1;
-+    // Only what could be a button prompt.
-+    if (w > 128 || h > 128 || w < 16 || h < 16) continue;
++    // Button prompts (up to 128) and character textures (up to 1024).
++    if (w > 1024 || h > 1024 || w < 16 || h < 16) continue;
 +    if (f.format != xenos::TextureFormat::k_DXT1 &&
 +        f.format != xenos::TextureFormat::k_DXT4_5)
 +      continue;
@@ -342,8 +353,18 @@ index ce08d19bd..86f8005fb 100644
 +    uint32_t wb = (w + 3) / 4;
 +    uint32_t pitch_b = f.tiled ? (wb + 31) & ~31u
 +                               : std::max(wb, uint32_t(f.pitch) * 32 / 4);
++    texture_util::TextureGuestLayout layout = texture_util::GetGuestTextureLayout(
++        xenos::DataDimension::k2DOrStacked, f.pitch, w, h, 1, f.tiled != 0,
++        f.format, f.packed_mips != 0, true, f.mip_max_level);
++    uint32_t base_size = layout.base.level_data_extent_bytes;
++    uint32_t mip_size = layout.max_level ? layout.mips_total_extent_bytes : 0;
++    uint32_t mip_addr = f.mip_address << 12;
++    uint8_t* mip_data =
++        mip_addr && mip_size ? memory.TranslatePhysical<uint8_t*>(mip_addr)
++                             : nullptr;
 +    wet_texture_seen(addr, data, uint32_t(f.format), w, h, f.tiled != 0,
-+                     uint32_t(f.endianness), pitch_b);
++                     uint32_t(f.endianness), pitch_b, mip_data ? mip_addr : 0,
++                     mip_data, mip_data ? mip_size : 0, base_size);
 +    std::memcpy(first.data(), data, 16);
 +    s_seen[addr] = first;
 +  }
@@ -380,7 +401,7 @@ index ce08d19bd..86f8005fb 100644
  using namespace xe::gpu::xenos;
  
  CommandProcessor::CommandProcessor(GraphicsSystem* graphics_system,
-@@ -244,6 +500,7 @@ void CommandProcessor::WorkerThreadMain() {
+@@ -244,6 +514,7 @@ void CommandProcessor::WorkerThreadMain() {
        xe::store_and_swap<uint32_t>(
            memory_->TranslatePhysical(read_ptr_writeback_ptr_), read_ptr_index_);
      }
@@ -388,7 +409,7 @@ index ce08d19bd..86f8005fb 100644
  
      // FIXME: We're supposed to process the WAIT_UNTIL register at this point,
      // but no games seem to actually use it.
-@@ -349,6 +606,7 @@ void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
+@@ -349,6 +620,7 @@ void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
        uint32_t scratch_addr = regs.values[XE_GPU_REG_SCRATCH_ADDR];
        uint32_t mem_addr = scratch_addr + (scratch_reg * 4);
        xe::store_and_swap<uint32_t>(memory_->TranslatePhysical(mem_addr), value);
@@ -396,7 +417,7 @@ index ce08d19bd..86f8005fb 100644
      }
    } else {
      switch (index) {
-@@ -633,6 +891,26 @@ bool CommandProcessor::ExecutePacket(RingBuffer* reader) {
+@@ -633,6 +905,26 @@ bool CommandProcessor::ExecutePacket(RingBuffer* reader) {
    }
  }
  
@@ -423,7 +444,7 @@ index ce08d19bd..86f8005fb 100644
  bool CommandProcessor::ExecutePacketType0(RingBuffer* reader, uint32_t packet) {
    // Type-0 packet.
    // Write count registers in sequence to the registers starting at
-@@ -650,6 +928,13 @@ bool CommandProcessor::ExecutePacketType0(RingBuffer* reader, uint32_t packet) {
+@@ -650,6 +942,13 @@ bool CommandProcessor::ExecutePacketType0(RingBuffer* reader, uint32_t packet) {
  
    uint32_t base_index = (packet & 0x7FFF);
    uint32_t write_one_reg = (packet >> 15) & 0x1;
@@ -437,7 +458,7 @@ index ce08d19bd..86f8005fb 100644
    for (uint32_t m = 0; m < count; m++) {
      uint32_t reg_data = reader->ReadAndSwap<uint32_t>();
      uint32_t target_index = write_one_reg ? base_index : base_index + m;
-@@ -743,21 +1028,26 @@ bool CommandProcessor::ExecutePacketType3(RingBuffer* reader, uint32_t packet) {
+@@ -743,21 +1042,26 @@ bool CommandProcessor::ExecutePacketType3(RingBuffer* reader, uint32_t packet) {
        break;
      case PM4_MEM_WRITE:
        result = ExecutePacketType3_MEM_WRITE(reader, packet, count);
@@ -464,7 +485,7 @@ index ce08d19bd..86f8005fb 100644
        break;
      case PM4_DRAW_INDX:
        result = ExecutePacketType3_DRAW_INDX(reader, packet, count);
-@@ -932,11 +1222,46 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(RingBuffer* reader,
+@@ -932,11 +1236,46 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(RingBuffer* reader,
    uint32_t frontbuffer_ptr = reader->ReadAndSwap<uint32_t>();
    uint32_t frontbuffer_width = reader->ReadAndSwap<uint32_t>();
    uint32_t frontbuffer_height = reader->ReadAndSwap<uint32_t>();
@@ -512,7 +533,7 @@ index ce08d19bd..86f8005fb 100644
    return true;
  }
  
-@@ -974,7 +1299,24 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -974,7 +1313,24 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
                  : register_file_->values[poll_reg_addr];
  
    bool matched = false;
@@ -537,7 +558,7 @@ index ce08d19bd..86f8005fb 100644
      uint32_t value = value_ref;
      if (is_memory) {
        trace_writer_.WriteMemoryRead(CpuToGpu(poll_reg_addr & ~uint32_t(0x3)),
-@@ -1013,16 +1355,31 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -1013,16 +1369,31 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
          matched = true;
          break;
      }
@@ -569,7 +590,7 @@ index ce08d19bd..86f8005fb 100644
          xe::threading::SyncMemory();
          ReturnFromWait();
  
-@@ -1035,6 +1392,17 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -1035,6 +1406,17 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
        }
      }
    } while (!matched);
@@ -587,7 +608,7 @@ index ce08d19bd..86f8005fb 100644
  
    return true;
  }
-@@ -1455,10 +1823,14 @@ bool CommandProcessor::ExecutePacketType3_SET_CONSTANT(RingBuffer* reader,
+@@ -1455,10 +1837,14 @@ bool CommandProcessor::ExecutePacketType3_SET_CONSTANT(RingBuffer* reader,
        reader->AdvanceRead((count - 1) * sizeof(uint32_t));
        return true;
    }
@@ -602,7 +623,7 @@ index ce08d19bd..86f8005fb 100644
    return true;
  }
  
-@@ -1467,10 +1839,14 @@ bool CommandProcessor::ExecutePacketType3_SET_CONSTANT2(RingBuffer* reader,
+@@ -1467,10 +1853,14 @@ bool CommandProcessor::ExecutePacketType3_SET_CONSTANT2(RingBuffer* reader,
                                                          uint32_t count) {
    uint32_t offset_type = reader->ReadAndSwap<uint32_t>();
    uint32_t index = offset_type & 0xFFFF;
@@ -617,7 +638,7 @@ index ce08d19bd..86f8005fb 100644
    return true;
  }
  
-@@ -1506,11 +1882,20 @@ bool CommandProcessor::ExecutePacketType3_LOAD_ALU_CONSTANT(RingBuffer* reader,
+@@ -1506,11 +1896,20 @@ bool CommandProcessor::ExecutePacketType3_LOAD_ALU_CONSTANT(RingBuffer* reader,
        return true;
    }
    trace_writer_.WriteMemoryRead(CpuToGpu(address), size_dwords * 4);
@@ -638,7 +659,7 @@ index ce08d19bd..86f8005fb 100644
    return true;
  }
  
-@@ -1518,10 +1903,14 @@ bool CommandProcessor::ExecutePacketType3_SET_SHADER_CONSTANTS(
+@@ -1518,10 +1917,14 @@ bool CommandProcessor::ExecutePacketType3_SET_SHADER_CONSTANTS(
      RingBuffer* reader, uint32_t packet, uint32_t count) {
    uint32_t offset_type = reader->ReadAndSwap<uint32_t>();
    uint32_t index = offset_type & 0xFFFF;
@@ -654,10 +675,10 @@ index ce08d19bd..86f8005fb 100644
  }
  
 diff --git a/src/xenia/gpu/command_processor.h b/src/xenia/gpu/command_processor.h
-index ffc8eeffa..b2e9ebc98 100644
+index ffc8eeffa..e63747e04 100644
 --- a/src/xenia/gpu/command_processor.h
 +++ b/src/xenia/gpu/command_processor.h
-@@ -35,9 +35,87 @@ class ByteStream;
+@@ -35,9 +35,92 @@ class ByteStream;
  
  namespace gpu {
  
@@ -704,8 +725,13 @@ index ffc8eeffa..b2e9ebc98 100644
 +// the last call for that address: the runtime may rewrite them in guest memory
 +// (in-world button prompts). Arguments: physical address, host pointer to the
 +// data, format, width, height, tiled, endianness, pitch in blocks.
++// After those: the mip levels' physical address, host pointer and size (0 if
++// none), and the base level's size in bytes.
 +extern void (*wet_texture_seen)(uint32_t, uint8_t*, uint32_t, uint32_t,
-+                                uint32_t, bool, uint32_t, uint32_t);
++                                uint32_t, bool, uint32_t, uint32_t, uint32_t,
++                                uint8_t*, uint32_t, uint32_t);
++// Set to look at every texture again (an outfit colour changed).
++extern std::atomic<bool> wet_texture_recheck;
 +void WetCheckTextures(const RegisterFile& regs, Memory& memory,
 +                      const Shader* pixel_shader);
 +// WET: film grain strength (1 = the game's own). The final composite pixel
@@ -745,7 +771,7 @@ index ffc8eeffa..b2e9ebc98 100644
  struct SwapState {
    // Lock must be held when changing data in this structure.
    std::mutex mutex;
-@@ -71,6 +149,10 @@ class CommandProcessor {
+@@ -71,6 +154,10 @@ class CommandProcessor {
      kNone,
      kFxaa,
      kFxaaExtreme,
@@ -756,7 +782,7 @@ index ffc8eeffa..b2e9ebc98 100644
    };
  
    CommandProcessor(GraphicsSystem* graphics_system,
-@@ -78,6 +160,10 @@ class CommandProcessor {
+@@ -78,6 +165,10 @@ class CommandProcessor {
    virtual ~CommandProcessor();
  
    uint32_t counter() const { return counter_; }
@@ -767,7 +793,7 @@ index ffc8eeffa..b2e9ebc98 100644
    void increment_counter() { counter_++; }
  
    Shader* active_vertex_shader() const { return active_vertex_shader_; }
-@@ -152,6 +238,17 @@ class CommandProcessor {
+@@ -152,6 +243,17 @@ class CommandProcessor {
    virtual void ShutdownContext() = 0;
  
    virtual void WriteRegister(uint32_t index, uint32_t value);
@@ -785,7 +811,7 @@ index ffc8eeffa..b2e9ebc98 100644
  
    const reg::DC_LUT_30_COLOR* gamma_ramp_256_entry_table() const {
      return gamma_ramp_256_entry_table_;
-@@ -270,6 +367,9 @@ class CommandProcessor {
+@@ -270,6 +372,9 @@ class CommandProcessor {
    std::vector<uint32_t> me_bin_;
  
    uint32_t counter_ = 0;

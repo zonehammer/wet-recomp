@@ -12,6 +12,11 @@ namespace wet::prompts
     void WorldTextureSeen(uint32_t phys, uint8_t* data, uint32_t format, uint32_t w, uint32_t h, bool tiled,
                           uint32_t endian, uint32_t pitch);
 }
+namespace wet::outfit
+{
+    void TextureSeen(uint32_t phys, uint8_t* data, uint32_t format, uint32_t baseSize, uint32_t endian,
+                     uint32_t mipPhys, uint8_t* mipData, uint32_t mipSize);
+}
 
 namespace wet::renderer_host
 {
@@ -64,8 +69,10 @@ namespace wet::renderer_host
     void SetPhysicalWriteCallback(void (*callback)(uint32_t, uint32_t)) { wet::SetPhysicalWriteCallback(callback); }
     void UnwatchPhysical(uint32_t start, uint32_t length) { wet::UnwatchPhysical(start, length); }
     void WorldTextureSeen(uint32_t phys, uint8_t* data, uint32_t format, uint32_t w, uint32_t h, bool tiled,
-                          uint32_t endian, uint32_t pitch)
+                          uint32_t endian, uint32_t pitch, uint32_t mipPhys, uint8_t* mipData, uint32_t mipSize,
+                          uint32_t baseSize)
     {
         wet::prompts::WorldTextureSeen(phys, data, format, w, h, tiled, endian, pitch);
+        wet::outfit::TextureSeen(phys, data, format, baseSize, endian, mipPhys, mipData, mipSize);
     }
 }

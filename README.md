@@ -37,6 +37,8 @@ nothing derived from the game is ever committed.
   game's music, either a new song whenever the game's music starts or all the time; media keys
   skip. Set it up in the launcher (Your music) or F1 > General, and turn the game's own music
   volume down in its Options.
+- **Rubi's jacket colour**: Original, red, blue, black, white, green, purple or pink
+  (launcher Controls, F1 > Graphics; changes straight away).
 - **Skip intro movies**, **16x texture filtering** and an automatic **save backup** at each
   start (the last 10 are kept in `game\hdd\save-backups`), all on by default.
 - **Quit to desktop** from the pause menu (hold Back / Backspace) or the F1 overlay.

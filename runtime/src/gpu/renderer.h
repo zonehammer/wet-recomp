@@ -55,6 +55,8 @@ namespace wet::renderer
     float DisplayAspect();
     // F1 settings overlay; while it's open the keyboard doesn't drive the game.
     void ToggleOverlay();
+    // Looks at every texture again (the outfit colour changed).
+    void RecheckTextures();
     bool OverlayOpen();
     // Pause menu "hold Back to quit" hint: < 0 hidden (not paused), else how far
     // the hold has got (0..1). Any thread.
@@ -94,5 +96,6 @@ namespace wet::renderer_host
     void RequestRegisterSync();
     // A small texture a draw is about to read (prompts.cpp may redraw an in-world button).
     void WorldTextureSeen(uint32_t phys, uint8_t* data, uint32_t format, uint32_t w, uint32_t h, bool tiled,
-                          uint32_t endian, uint32_t pitch);
+                          uint32_t endian, uint32_t pitch, uint32_t mipPhys, uint8_t* mipData, uint32_t mipSize,
+                          uint32_t baseSize);
 }
