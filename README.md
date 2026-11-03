@@ -109,8 +109,12 @@ already have. On the Deck, use Desktop Mode and open Konsole:
 
 ```sh
 git clone https://github.com/zonehammer/wet-recomp.git ~/wet-setup
-python3 ~/wet-setup/tools/setup_linux.py --iso ~/path/to/WET.iso
+python3 ~/wet-setup/tools/setup_linux.py --iso "$HOME/path/to/WET.iso"
 ```
+
+Keep the quotes around the disc image's path: file names like `Wet (USA).iso` have spaces
+and brackets, which the terminal otherwise reads as part of the command ("syntax error near
+unexpected token"). Dragging the file into the Konsole window types its path for you.
 
 It downloads CMake, Ninja, llvm-mingw and (when there's no clang) zig into `~/WET-Recomp/tools`,
 builds the latest release into `~/WET-Recomp/wet-recomp`, and prints what to add to Steam:
