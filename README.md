@@ -125,6 +125,9 @@ run the same command again (without `--iso`) to update.
 By hand: `python3 tools/build.py --iso ... --llvm-mingw <llvm-mingw folder>` (needs clang,
 CMake and Ninja).
 
+Settings for handhelds, and what limits performance there:
+[docs/handheld-performance.md](docs/handheld-performance.md).
+
 ## Controls
 
 | Action | Controller | Keyboard / mouse |
