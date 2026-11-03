@@ -19,6 +19,7 @@ namespace wet::renderer
     void SetVsyncRate(uint32_t) {}
     uint32_t EarlyVblanks() { return 0; }
     uint64_t SubmitSplits() { return 0; }
+    void ResolveShortcutStats(uint64_t& c, uint64_t& h) { c = h = 0; }
     bool GpuTimes(uint64_t*, uint64_t& frames) { frames = 0; return false; }
     bool VideoMemory(uint64_t&, uint64_t&) { return false; }
     void SetResolutionScale(uint32_t) {}

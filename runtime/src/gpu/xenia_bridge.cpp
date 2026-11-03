@@ -57,6 +57,7 @@
 #if WET_HAVE_D3D12
 #include "xenia/gpu/d3d12/d3d12_graphics_system.h"
 #include "xenia/gpu/d3d12/pipeline_cache.h"
+#include "xenia/gpu/d3d12/d3d12_texture_cache.h"
 #endif
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/memory.h"
@@ -1576,6 +1577,12 @@ namespace wet::renderer
 #if WET_HAVE_D3D12
         xe::gpu::d3d12::wet_async_pipelines = options::AsyncShaders();
         xe::gpu::d3d12::wet_preload_pipelines = options::ShaderPreload();
+        // Experiment: WET_RESOLVE_SHORTCUT=1 (d3d12_texture_cache.h).
+        if (const char* v = std::getenv("WET_RESOLVE_SHORTCUT"); v && *v && *v != '0')
+        {
+            xe::gpu::d3d12::wet_resolve_shortcut = true;
+            renderer_host::Log("Renderer: resolve-to-texture shortcut on (WET_RESOLVE_SHORTCUT)");
+        }
 #endif
         xe::gpu::wet_gpu_progress = renderer_host::GpuProgress;
         // Experiment: WET_SUBMIT_SPLIT_US=<microseconds> hands the GPU each
@@ -1733,6 +1740,15 @@ namespace wet::renderer
 
     uint32_t EarlyVblanks() { return xe::gpu::wet_early_vblanks.load(std::memory_order_relaxed); }
     uint64_t SubmitSplits() { return xe::gpu::wet_submit_splits.load(std::memory_order_relaxed); }
+    void ResolveShortcutStats(uint64_t& captures, uint64_t& hits)
+    {
+#if WET_HAVE_D3D12
+        captures = xe::gpu::d3d12::wet_resolve_shortcut_captures.load(std::memory_order_relaxed);
+        hits = xe::gpu::d3d12::wet_resolve_shortcut_hits.load(std::memory_order_relaxed);
+#else
+        captures = hits = 0;
+#endif
+    }
 
     bool VideoMemory(uint64_t& usedMB, uint64_t& budgetMB)
     {
