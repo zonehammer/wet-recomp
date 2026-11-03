@@ -49,7 +49,7 @@ namespace wet::music
         std::atomic<int> s_skip{ 0 };      // +1 next, -1 previous (the player thread acts on it)
         std::atomic<bool> s_rescan{ false };
         std::atomic<int> s_gameOpen{ 0 };
-        std::atomic<int64_t> s_gameClosedAt{ 0 };   // ms since start
+        std::atomic<int64_t> s_gameClosedAt{ -1000000 };   // ms since start (never yet)
         const Clock::time_point s_start = Clock::now();
 
         // Paths as UTF-8 text (the folder in wet.ini, the overlay, the log).
