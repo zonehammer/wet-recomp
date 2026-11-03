@@ -224,10 +224,20 @@ def main_linux(args):
     if not host_recomp:
         step("Building the recompiler for this machine")
         host_build = os.path.join(BUILD, "host")
-        run(["cmake", "-S", REPO, "-B", host_build, "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release",
-             f"-DCMAKE_C_COMPILER={host_cc}", f"-DCMAKE_CXX_COMPILER={host_cxx}", "-DWET_HOST_TOOLS_ONLY=ON"]
-            + [f"-DCMAKE_{k}={os.environ[k]}" for k in ("AR", "RANLIB") if os.environ.get(k)])
-        run(["cmake", "--build", host_build, "--target", "XenonRecomp"] + jobs)
+        configure = (["cmake", "-S", REPO, "-B", host_build, "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release",
+                      f"-DCMAKE_C_COMPILER={host_cc}", f"-DCMAKE_CXX_COMPILER={host_cxx}", "-DWET_HOST_TOOLS_ONLY=ON"]
+                     + [f"-DCMAKE_{k}={os.environ[k]}" for k in ("AR", "RANLIB") if os.environ.get(k)])
+        build = ["cmake", "--build", host_build, "--target", "XenonRecomp"]
+        run(configure)
+        print("   $ " + " ".join(build + jobs), flush=True)
+        if subprocess.run(build + jobs, cwd=REPO).returncode != 0:
+            # Once more from a clean folder (a precompiled header left by an
+            # earlier attempt or another compiler breaks the build), one file
+            # at a time so any error is the last thing printed.
+            print("\n   Building the recompiler again from scratch, one file at a time:\n", flush=True)
+            shutil.rmtree(host_build, ignore_errors=True)
+            run(configure)
+            run(build + ["-j", "1"])
         host_recomp = os.path.join(host_build, "thirdparty", "XenonRecomp", "XenonRecomp", "XenonRecomp")
 
     build_type = "RelWithDebInfo" if args.debug else "Release"

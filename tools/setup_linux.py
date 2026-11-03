@@ -106,8 +106,15 @@ def tool(tools, label, rel, url_fn):
     return root
 
 
+# A zig release known to build the recompiler (newer ones can change how its
+# bundled clang behaves); the newest one only if this one is gone.
+ZIG_VERSION = "0.14.1"
+
+
 def zig_url():
     index = json.loads(fetch("https://ziglang.org/download/index.json"))
+    if ZIG_VERSION in index:
+        return index[ZIG_VERSION]["x86_64-linux"]["tarball"]
     versions = sorted((v for v in index if re.fullmatch(r"\d+\.\d+\.\d+", v)),
                       key=lambda v: tuple(map(int, v.split("."))))
     return index[versions[-1]]["x86_64-linux"]["tarball"]
@@ -162,7 +169,7 @@ def main():
     # A C++ compiler for this machine (the recompiler runs here): clang if it's
     # installed, otherwise zig's bundled clang (SteamOS and Bazzite have none).
     if not (shutil.which("clang++") and shutil.which("clang")) and not env.get("CXX"):
-        zig_dir = tool(tools, "zig", "zig", zig_url)
+        zig_dir = tool(tools, "zig-" + ZIG_VERSION, "zig", zig_url)
         zig = os.path.join(zig_dir, "zig")
         wrappers = os.path.join(tools, "zig-wrappers")
         os.makedirs(wrappers, exist_ok=True)
