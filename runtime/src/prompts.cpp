@@ -28,6 +28,8 @@
 #include "prompt_art.h"
 
 #include <cstring>
+#include <cstdio>
+#include <cstdlib>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -89,6 +91,7 @@ namespace
         case Symbol::L2: pad = "LT"; break;
         case Symbol::R2: pad = "RT"; break;
         case Symbol::Start: pad = "START"; break;
+        case Symbol::Back: pad = "BACK"; break;
         case Symbol::LPress: pad = "LTHUMB"; break;
         case Symbol::RPress: pad = "RTHUMB"; break;
         case Symbol::Up: pad = "DPAD_UP"; break;
@@ -112,7 +115,7 @@ namespace
         }
         if (wet::options::MouseAim())
             for (int b = 0; b < 5; b++)
-                if (wet::options::MouseBinding(b) == pad)
+                if (wet::options::MouseBinding(b) == (std::strncmp(pad, "DPAD_", 5) == 0 ? pad + 5 : pad))
                 {
                     if (b < 3)
                     {
@@ -164,6 +167,25 @@ namespace
         bool button = wet::prompt_art::ForName(name, orb, flatten) != wet::prompt_art::Symbol::None;
 
         std::lock_guard lock(s_lock);
+        // Every image this loader reads, once each, to textures.txt: finds the
+        // names of prompt images that aren't redrawn yet (e.g. in-world prompts).
+        {
+            static std::unordered_map<std::string, int> s_names;
+            static FILE* s_list = std::fopen("textures.txt", "w");
+            if (s_list && s_names.size() < 20000 && s_names.emplace(name, 1).second)
+            {
+                // WET_DUMP_HUD_IMAGES=<folder>: also the DDS files themselves.
+                static const char* s_dump = std::getenv("WET_DUMP_HUD_IMAGES");
+                if (s_dump && *s_dump)
+                    if (FILE* f = std::fopen((std::string(s_dump) + "/" + name).c_str(), "wb"))
+                    {
+                        std::fwrite(base + data, 1, size, f);
+                        std::fclose(f);
+                    }
+                std::fprintf(s_list, "%s\t%u bytes%s\n", name.c_str(), size, button ? "\tbutton" : "");
+                std::fflush(s_list);
+            }
+        }
         if (s_logged < 6 || (button && s_logged < 12))
         {
             s_logged++;

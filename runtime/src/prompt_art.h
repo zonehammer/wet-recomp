@@ -23,7 +23,7 @@ namespace wet::prompt_art
 {
     enum class Symbol { None, Cross, Circle, Square, Triangle, L1, R1, L2, R2,
                         // Only redrawn with keyboard / mouse art:
-                        Start, LPress, RPress, Up, Down, Left, Right, LStick, RStick };
+                        Start, LPress, RPress, Up, Down, Left, Right, LStick, RStick, Back };
 
     struct Rgba { uint8_t r, g, b, a; };
 
@@ -672,12 +672,22 @@ namespace wet::prompt_art
         if (slash != std::string::npos) n = n.substr(slash + 1);
         for (auto& c : n) c = char(std::tolower(static_cast<unsigned char>(c)));
         if (n.size() > 4 && n.compare(n.size() - 4, 4, ".dds") == 0) n.resize(n.size() - 4);
+        // The front end's "select" prompt (A); its _japan twin is only shown on
+        // Japanese consoles.
+        if (n == "selectcardbutton")
+        {
+            orb = true;   // a filled button like the a / b / x / y ones (the letter isn't cut out)
+            return Symbol::Cross;
+        }
         if (n.compare(0, 7, "button_") != 0)
             return Symbol::None;
         std::string k = n.substr(7);
         static const struct { const char* key; Symbol s; } numbered[] = {
             { "1", Symbol::Square }, { "2", Symbol::Cross }, { "3", Symbol::Circle }, { "4", Symbol::Triangle },
             { "5", Symbol::L1 }, { "6", Symbol::R1 }, { "7", Symbol::L2 }, { "8", Symbol::R2 },
+            // Keyboard / mouse art only:
+            { "9", Symbol::Back }, { "10", Symbol::Start }, { "11", Symbol::Down }, { "12", Symbol::Up },
+            { "13", Symbol::Left }, { "14", Symbol::Right }, { "15", Symbol::LPress }, { "16", Symbol::RPress },
         };
         for (auto& e : numbered)
             if (k == e.key) return e.s;
@@ -700,6 +710,7 @@ namespace wet::prompt_art
             { "start_", Symbol::Start }, { "lpress_", Symbol::LPress }, { "rpress_", Symbol::RPress },
             { "up_", Symbol::Up }, { "down_", Symbol::Down }, { "left_", Symbol::Left }, { "right_", Symbol::Right },
             { "lthumb_", Symbol::LStick }, { "rthumb_", Symbol::RStick },
+            { "select_", Symbol::Back }, { "updown_", Symbol::Up },
         };
         for (auto& e : keyboardOnly)
             if (k.compare(0, std::strlen(e.prefix), e.prefix) == 0)
