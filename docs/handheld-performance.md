@@ -18,6 +18,34 @@ with WET Recomp 0.2.78, November 2026. Figures are 10-second averages from
 With these, levels run at about **55-60 FPS**, dipping into the 40s in the
 heaviest fights. Cutscenes run at the game's own 30.
 
+## Why the frame rate is limited
+
+Only half of the game is recompiled. Its own code (gameplay, physics, AI) is
+translated to native PC code and runs fast. What it sends to the graphics chip
+is still emulated: the game writes raw command lists for the Xbox 360's Xenos
+GPU, not PC Direct3D calls, so every frame Xenia's GPU emulation has to:
+
+- decode those commands and translate render states and shaders;
+- emulate the 360's 10 MB of EDRAM, which is why every screen effect is copied
+  out and loaded back as a texture (the "resolves" and "texture loads" below);
+- untile and convert textures from the 360's memory layout.
+
+Nearly all of this runs on one CPU thread (Xenia's command processor), so a
+faster core helps and more cores don't. A desktop CPU is fast enough to reach
+240 FPS; a handheld's low-power cores make it the ceiling. Under Proton,
+Direct3D 12 is translated to Vulkan on top, which costs more CPU time.
+
+The game was also built for a console where the CPU and GPU share memory and
+the GPU answers in microseconds, so it often waits for the GPU (fences, swaps,
+the flip flag). In emulation the GPU side can be a frame behind, and the game
+thread sits waiting: the idle time in the logs.
+
+Recomps that run fastest on handhelds (Unleashed Recompiled, for example)
+don't emulate the GPU at all: they intercept the game's own graphics calls and
+render natively, with shaders translated ahead of time and render targets as
+ordinary PC textures. That removes this whole layer, but means rebuilding
+every rendering feature the game uses by hand.
+
 ## Where the time goes
 
 A typical level frame on the Ally at 720p:
