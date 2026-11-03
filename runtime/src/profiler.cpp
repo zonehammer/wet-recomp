@@ -256,6 +256,12 @@ namespace wet::profiler
 
     void Start(double seconds)
     {
+        // Suspending threads to sample them crashes under Wine / Proton.
+        if (GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "wine_get_version"))
+        {
+            Log("Profiler: not available under Wine / Proton");
+            return;
+        }
         std::lock_guard lock(s_lock);
         if (s_running.exchange(true))
             return;

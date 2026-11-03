@@ -1578,6 +1578,16 @@ namespace wet::renderer
         xe::gpu::d3d12::wet_preload_pipelines = options::ShaderPreload();
 #endif
         xe::gpu::wet_gpu_progress = renderer_host::GpuProgress;
+        // Experiment: WET_SUBMIT_SPLIT_US=<microseconds> hands the GPU each
+        // frame's work in parts (see d3d12_command_processor.cc).
+        if (const char* split = std::getenv("WET_SUBMIT_SPLIT_US"))
+        {
+            xe::gpu::wet_submit_split_us = uint32_t(std::max(0, std::atoi(split)));
+            char text[96];
+            std::snprintf(text, sizeof(text), "Renderer: splitting submissions after %u us of command processing",
+                          xe::gpu::wet_submit_split_us.load());
+            renderer_host::Log(text);
+        }
         xe::gpu::wet_register_sync_hook = [] { renderer_host::RequestRegisterSync(); };
         s_processor = std::make_unique<xe::cpu::Processor>(s_memory.get());
         s_kernel = std::make_unique<xe::kernel::KernelState>(titleId);
@@ -1722,6 +1732,7 @@ namespace wet::renderer
     }
 
     uint32_t EarlyVblanks() { return xe::gpu::wet_early_vblanks.load(std::memory_order_relaxed); }
+    uint64_t SubmitSplits() { return xe::gpu::wet_submit_splits.load(std::memory_order_relaxed); }
 
     bool VideoMemory(uint64_t& usedMB, uint64_t& budgetMB)
     {

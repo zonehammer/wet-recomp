@@ -158,7 +158,7 @@ index 8f6087b05..47c87eec0 100644
  
  static void set_name(HANDLE thread, const std::string_view name) {
 diff --git a/src/xenia/gpu/command_processor.cc b/src/xenia/gpu/command_processor.cc
-index ce08d19bd..271a887e9 100644
+index ce08d19bd..872d179ea 100644
 --- a/src/xenia/gpu/command_processor.cc
 +++ b/src/xenia/gpu/command_processor.cc
 @@ -9,6 +9,15 @@
@@ -185,12 +185,14 @@ index ce08d19bd..271a887e9 100644
  #include "xenia/gpu/xenos.h"
  #include "xenia/kernel/kernel_state.h"
  #include "xenia/kernel/user_module.h"
-@@ -32,6 +42,277 @@
+@@ -32,6 +42,279 @@
  namespace xe {
  namespace gpu {
  
 +#if XE_WET_RUNTIME
 +void (*wet_gpu_progress)() = nullptr;
++std::atomic<uint32_t> wet_submit_split_us{0};
++std::atomic<uint64_t> wet_submit_splits{0};
 +#endif
 +
 +#if XE_WET_RUNTIME
@@ -463,7 +465,7 @@ index ce08d19bd..271a887e9 100644
  using namespace xe::gpu::xenos;
  
  CommandProcessor::CommandProcessor(GraphicsSystem* graphics_system,
-@@ -244,6 +525,7 @@ void CommandProcessor::WorkerThreadMain() {
+@@ -244,6 +527,7 @@ void CommandProcessor::WorkerThreadMain() {
        xe::store_and_swap<uint32_t>(
            memory_->TranslatePhysical(read_ptr_writeback_ptr_), read_ptr_index_);
      }
@@ -471,7 +473,7 @@ index ce08d19bd..271a887e9 100644
  
      // FIXME: We're supposed to process the WAIT_UNTIL register at this point,
      // but no games seem to actually use it.
-@@ -349,6 +631,7 @@ void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
+@@ -349,6 +633,7 @@ void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
        uint32_t scratch_addr = regs.values[XE_GPU_REG_SCRATCH_ADDR];
        uint32_t mem_addr = scratch_addr + (scratch_reg * 4);
        xe::store_and_swap<uint32_t>(memory_->TranslatePhysical(mem_addr), value);
@@ -479,7 +481,7 @@ index ce08d19bd..271a887e9 100644
      }
    } else {
      switch (index) {
-@@ -633,6 +916,26 @@ bool CommandProcessor::ExecutePacket(RingBuffer* reader) {
+@@ -633,6 +918,26 @@ bool CommandProcessor::ExecutePacket(RingBuffer* reader) {
    }
  }
  
@@ -506,7 +508,7 @@ index ce08d19bd..271a887e9 100644
  bool CommandProcessor::ExecutePacketType0(RingBuffer* reader, uint32_t packet) {
    // Type-0 packet.
    // Write count registers in sequence to the registers starting at
-@@ -650,6 +953,13 @@ bool CommandProcessor::ExecutePacketType0(RingBuffer* reader, uint32_t packet) {
+@@ -650,6 +955,13 @@ bool CommandProcessor::ExecutePacketType0(RingBuffer* reader, uint32_t packet) {
  
    uint32_t base_index = (packet & 0x7FFF);
    uint32_t write_one_reg = (packet >> 15) & 0x1;
@@ -520,7 +522,7 @@ index ce08d19bd..271a887e9 100644
    for (uint32_t m = 0; m < count; m++) {
      uint32_t reg_data = reader->ReadAndSwap<uint32_t>();
      uint32_t target_index = write_one_reg ? base_index : base_index + m;
-@@ -743,21 +1053,26 @@ bool CommandProcessor::ExecutePacketType3(RingBuffer* reader, uint32_t packet) {
+@@ -743,21 +1055,26 @@ bool CommandProcessor::ExecutePacketType3(RingBuffer* reader, uint32_t packet) {
        break;
      case PM4_MEM_WRITE:
        result = ExecutePacketType3_MEM_WRITE(reader, packet, count);
@@ -547,7 +549,7 @@ index ce08d19bd..271a887e9 100644
        break;
      case PM4_DRAW_INDX:
        result = ExecutePacketType3_DRAW_INDX(reader, packet, count);
-@@ -932,11 +1247,46 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(RingBuffer* reader,
+@@ -932,11 +1249,46 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(RingBuffer* reader,
    uint32_t frontbuffer_ptr = reader->ReadAndSwap<uint32_t>();
    uint32_t frontbuffer_width = reader->ReadAndSwap<uint32_t>();
    uint32_t frontbuffer_height = reader->ReadAndSwap<uint32_t>();
@@ -595,7 +597,7 @@ index ce08d19bd..271a887e9 100644
    return true;
  }
  
-@@ -974,7 +1324,24 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -974,7 +1326,24 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
                  : register_file_->values[poll_reg_addr];
  
    bool matched = false;
@@ -620,7 +622,7 @@ index ce08d19bd..271a887e9 100644
      uint32_t value = value_ref;
      if (is_memory) {
        trace_writer_.WriteMemoryRead(CpuToGpu(poll_reg_addr & ~uint32_t(0x3)),
-@@ -1013,16 +1380,31 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -1013,16 +1382,31 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
          matched = true;
          break;
      }
@@ -652,7 +654,7 @@ index ce08d19bd..271a887e9 100644
          xe::threading::SyncMemory();
          ReturnFromWait();
  
-@@ -1035,6 +1417,17 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
+@@ -1035,6 +1419,17 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(RingBuffer* reader,
        }
      }
    } while (!matched);
@@ -670,7 +672,7 @@ index ce08d19bd..271a887e9 100644
  
    return true;
  }
-@@ -1455,10 +1848,14 @@ bool CommandProcessor::ExecutePacketType3_SET_CONSTANT(RingBuffer* reader,
+@@ -1455,10 +1850,14 @@ bool CommandProcessor::ExecutePacketType3_SET_CONSTANT(RingBuffer* reader,
        reader->AdvanceRead((count - 1) * sizeof(uint32_t));
        return true;
    }
@@ -685,7 +687,7 @@ index ce08d19bd..271a887e9 100644
    return true;
  }
  
-@@ -1467,10 +1864,14 @@ bool CommandProcessor::ExecutePacketType3_SET_CONSTANT2(RingBuffer* reader,
+@@ -1467,10 +1866,14 @@ bool CommandProcessor::ExecutePacketType3_SET_CONSTANT2(RingBuffer* reader,
                                                          uint32_t count) {
    uint32_t offset_type = reader->ReadAndSwap<uint32_t>();
    uint32_t index = offset_type & 0xFFFF;
@@ -700,7 +702,7 @@ index ce08d19bd..271a887e9 100644
    return true;
  }
  
-@@ -1506,11 +1907,20 @@ bool CommandProcessor::ExecutePacketType3_LOAD_ALU_CONSTANT(RingBuffer* reader,
+@@ -1506,11 +1909,20 @@ bool CommandProcessor::ExecutePacketType3_LOAD_ALU_CONSTANT(RingBuffer* reader,
        return true;
    }
    trace_writer_.WriteMemoryRead(CpuToGpu(address), size_dwords * 4);
@@ -721,7 +723,7 @@ index ce08d19bd..271a887e9 100644
    return true;
  }
  
-@@ -1518,10 +1928,14 @@ bool CommandProcessor::ExecutePacketType3_SET_SHADER_CONSTANTS(
+@@ -1518,10 +1930,14 @@ bool CommandProcessor::ExecutePacketType3_SET_SHADER_CONSTANTS(
      RingBuffer* reader, uint32_t packet, uint32_t count) {
    uint32_t offset_type = reader->ReadAndSwap<uint32_t>();
    uint32_t index = offset_type & 0xFFFF;
@@ -737,10 +739,10 @@ index ce08d19bd..271a887e9 100644
  }
  
 diff --git a/src/xenia/gpu/command_processor.h b/src/xenia/gpu/command_processor.h
-index ffc8eeffa..e63747e04 100644
+index ffc8eeffa..b2e8ff866 100644
 --- a/src/xenia/gpu/command_processor.h
 +++ b/src/xenia/gpu/command_processor.h
-@@ -35,9 +35,92 @@ class ByteStream;
+@@ -35,9 +35,97 @@ class ByteStream;
  
  namespace gpu {
  
@@ -771,6 +773,11 @@ index ffc8eeffa..e63747e04 100644
 +// WET: 16x anisotropic filtering for trilinear-filtered, mipmapped textures
 +// (the world's surfaces; UI, render targets and point-sampled lookups stay).
 +extern std::atomic<bool> wet_force_aniso;
++// Split a frame's GPU work into submissions after this many microseconds of
++// command processing (0 = only at the frame's end / when caught up), so the
++// GPU starts on a frame while the command processor is still translating it.
++extern std::atomic<uint32_t> wet_submit_split_us;
++extern std::atomic<uint64_t> wet_submit_splits;
 +inline bool WetForceAniso(const xenos::xe_gpu_texture_fetch_t& fetch,
 +                          xenos::TextureFilter min_filter,
 +                          xenos::TextureFilter mip_filter) {
@@ -833,7 +840,7 @@ index ffc8eeffa..e63747e04 100644
  struct SwapState {
    // Lock must be held when changing data in this structure.
    std::mutex mutex;
-@@ -71,6 +154,10 @@ class CommandProcessor {
+@@ -71,6 +159,10 @@ class CommandProcessor {
      kNone,
      kFxaa,
      kFxaaExtreme,
@@ -844,7 +851,7 @@ index ffc8eeffa..e63747e04 100644
    };
  
    CommandProcessor(GraphicsSystem* graphics_system,
-@@ -78,6 +165,10 @@ class CommandProcessor {
+@@ -78,6 +170,10 @@ class CommandProcessor {
    virtual ~CommandProcessor();
  
    uint32_t counter() const { return counter_; }
@@ -855,7 +862,7 @@ index ffc8eeffa..e63747e04 100644
    void increment_counter() { counter_++; }
  
    Shader* active_vertex_shader() const { return active_vertex_shader_; }
-@@ -152,6 +243,17 @@ class CommandProcessor {
+@@ -152,6 +248,17 @@ class CommandProcessor {
    virtual void ShutdownContext() = 0;
  
    virtual void WriteRegister(uint32_t index, uint32_t value);
@@ -873,7 +880,7 @@ index ffc8eeffa..e63747e04 100644
  
    const reg::DC_LUT_30_COLOR* gamma_ramp_256_entry_table() const {
      return gamma_ramp_256_entry_table_;
-@@ -270,6 +372,9 @@ class CommandProcessor {
+@@ -270,6 +377,9 @@ class CommandProcessor {
    std::vector<uint32_t> me_bin_;
  
    uint32_t counter_ = 0;
@@ -884,7 +891,7 @@ index ffc8eeffa..e63747e04 100644
    uint32_t primary_buffer_ptr_ = 0;
    uint32_t primary_buffer_size_ = 0;
 diff --git a/src/xenia/gpu/d3d12/d3d12_command_processor.cc b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
-index 0ec70a7d1..cdfc2be4d 100644
+index 0ec70a7d1..7f4e5f6ee 100644
 --- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
 +++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
 @@ -8,6 +8,7 @@
@@ -1387,19 +1394,32 @@ index 0ec70a7d1..cdfc2be4d 100644
    draw_util::Scissor scissor;
    draw_util::GetScissor(regs, scissor);
    scissor.offset[0] *= draw_resolution_scale_x;
-@@ -2467,6 +2859,11 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+@@ -2467,6 +2859,24 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
      }
    }
  
 +#if XE_WET_RUNTIME
 +  if (wet_draw_trace_frames > 0)
 +    WetTraceState(regs, primitive_processing_result.host_draw_vertex_count);
++  // Hand the GPU what's recorded so far once the submission has been open a
++  // while, so it works on the start of the frame while the rest is translated
++  // (on slower CPUs the command processor is the bottleneck and the GPU
++  // otherwise idles until the frame's end).
++  if (uint32_t split_us = wet_submit_split_us.load(std::memory_order_relaxed)) {
++    if (submission_open_ && ++wet_submission_draws_ >= 32 &&
++        std::chrono::steady_clock::now() - wet_submission_opened_ >=
++            std::chrono::microseconds(split_us) &&
++        CanEndSubmissionImmediately()) {
++      EndSubmission(false);
++      wet_submit_splits.fetch_add(1, std::memory_order_relaxed);
++    }
++  }
 +#endif
 +
    return true;
  }
  
-@@ -2663,6 +3060,21 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
+@@ -2663,15 +3073,40 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
        }
        frame_completed_ = frame;
      }
@@ -1421,7 +1441,13 @@ index 0ec70a7d1..cdfc2be4d 100644
    }
  
    if (!submission_open_) {
-@@ -2672,6 +3084,12 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
+     submission_open_ = true;
++#if XE_WET_RUNTIME
++    wet_submission_opened_ = std::chrono::steady_clock::now();
++    wet_submission_draws_ = 0;
++#endif
+ 
+     // Start a new deferred command list - will submit it to the real one in the
      // end of the submission (when async pipeline creation requests are
      // fulfilled).
      deferred_command_list_.Reset();
@@ -1434,7 +1460,7 @@ index 0ec70a7d1..cdfc2be4d 100644
  
      // Reset cached state of the command list.
      ff_viewport_update_needed_ = true;
-@@ -2790,6 +3208,23 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
+@@ -2790,6 +3225,23 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
      // destroyed between frames.
      SubmitBarriers();
  
@@ -1458,7 +1484,7 @@ index 0ec70a7d1..cdfc2be4d 100644
      // TODO(Triang3l): Error checking.
  
      ID3D12CommandQueue* direct_queue = provider.GetDirectQueue();
-@@ -2840,6 +3275,25 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
+@@ -2840,6 +3292,25 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
        pix_capturing_ = false;
      }
      frame_open_ = false;
@@ -1484,7 +1510,7 @@ index 0ec70a7d1..cdfc2be4d 100644
      // Submission already closed now, so minus 1.
      closed_frame_submissions_[(frame_current_++) % kQueueFrames] =
          GetCurrentSubmission() - 1;
-@@ -2882,6 +3336,145 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
+@@ -2882,6 +3353,145 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
    return true;
  }
  
@@ -1630,7 +1656,7 @@ index 0ec70a7d1..cdfc2be4d 100644
  bool D3D12CommandProcessor::CanEndSubmissionImmediately() const {
    return !submission_open_ || !pipeline_cache_->IsCreatingPipelines();
  }
-@@ -4359,6 +4952,304 @@ void D3D12CommandProcessor::WriteGammaRampSRV(
+@@ -4359,6 +4969,304 @@ void D3D12CommandProcessor::WriteGammaRampSRV(
    device->CreateShaderResourceView(gamma_ramp_buffer_.Get(), &desc, handle);
  }
  
@@ -1936,10 +1962,18 @@ index 0ec70a7d1..cdfc2be4d 100644
  }  // namespace gpu
  }  // namespace xe
 diff --git a/src/xenia/gpu/d3d12/d3d12_command_processor.h b/src/xenia/gpu/d3d12/d3d12_command_processor.h
-index 88bdcb438..1db8e3fa8 100644
+index 88bdcb438..f871f151e 100644
 --- a/src/xenia/gpu/d3d12/d3d12_command_processor.h
 +++ b/src/xenia/gpu/d3d12/d3d12_command_processor.h
-@@ -74,6 +74,47 @@ class D3D12CommandProcessor : public CommandProcessor {
+@@ -10,6 +10,7 @@
+ #ifndef XENIA_GPU_D3D12_D3D12_COMMAND_PROCESSOR_H_
+ #define XENIA_GPU_D3D12_D3D12_COMMAND_PROCESSOR_H_
+ 
++#include <chrono>
+ #include <algorithm>
+ #include <atomic>
+ #include <deque>
+@@ -74,6 +75,47 @@ class D3D12CommandProcessor : public CommandProcessor {
      return deferred_command_list_;
    }
  
@@ -1987,7 +2021,7 @@ index 88bdcb438..1db8e3fa8 100644
    uint64_t GetCurrentSubmission() const {
      return completion_timeline_->GetUpcomingSubmission();
    }
-@@ -207,6 +248,10 @@ class D3D12CommandProcessor : public CommandProcessor {
+@@ -207,6 +249,10 @@ class D3D12CommandProcessor : public CommandProcessor {
    void ShutdownContext() override;
  
    void WriteRegister(uint32_t index, uint32_t value) override;
@@ -1998,7 +2032,7 @@ index 88bdcb438..1db8e3fa8 100644
  
    void OnGammaRamp256EntryTableValueWritten() override;
    void OnGammaRampPWLValueWritten() override;
-@@ -400,6 +445,42 @@ class D3D12CommandProcessor : public CommandProcessor {
+@@ -400,6 +446,45 @@ class D3D12CommandProcessor : public CommandProcessor {
    // Submission indices of frames that have already been submitted.
    uint64_t closed_frame_submissions_[kQueueFrames] = {};
  
@@ -2013,6 +2047,9 @@ index 88bdcb438..1db8e3fa8 100644
 +  uint32_t wet_ts_slot_ = 0;
 +  uint32_t wet_ts_submission_first_ = 0;
 +  bool wet_ts_frame_ = false;
++  // When the open submission was opened, and its draws (wet_submit_split_us).
++  std::chrono::steady_clock::time_point wet_submission_opened_{};
++  uint32_t wet_submission_draws_ = 0;
 +  uint8_t wet_gpu_cat_ = kWetGpuDraw;
 +  struct WetWork {
 +    uint64_t count = 0;
@@ -2041,7 +2078,7 @@ index 88bdcb438..1db8e3fa8 100644
    struct CommandAllocator {
      ID3D12CommandAllocator* command_allocator;
      uint64_t last_usage_submission;
-@@ -554,6 +635,31 @@ class D3D12CommandProcessor : public CommandProcessor {
+@@ -554,6 +639,31 @@ class D3D12CommandProcessor : public CommandProcessor {
    Microsoft::WRL::ComPtr<ID3D12Resource> fxaa_source_texture_;
    uint64_t fxaa_source_texture_submission_ = 0;
  

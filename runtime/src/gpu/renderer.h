@@ -41,6 +41,8 @@ namespace wet::renderer
     void SetVsyncRate(uint32_t hz);
     // Vblanks released early for a late frame so far (adaptive vblank).
     uint32_t EarlyVblanks();
+    // Frames' GPU work handed over in parts so far (WET_SUBMIT_SPLIT_US).
+    uint64_t SubmitSplits();
     // GPU time so far in microseconds per kind of work (draws, render target
     // copies, resolves, texture loads, uploads, output, idle between
     // submissions, resolves' render target reads) and the number of frames measured; false if not measured.
