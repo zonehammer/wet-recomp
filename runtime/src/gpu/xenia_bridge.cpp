@@ -1081,7 +1081,7 @@ namespace
             {
                 int outfit = wet::options::OutfitColour();
                 static const char* kOutfits[] = { "Original", "Red", "Blue", "Black", "White", "Green", "Purple", "Pink" };
-                if (RowCombo("Rubi's jacket", &outfit, kOutfits, 8, "Recolours her jacket (skin and hair stay as they are)."))
+                if (RowCombo("Rubi's outfit", &outfit, kOutfits, 8, "Recolours her top and leather trousers (her skin, tattoos and hair stay as they are)."))
                 {
                     wet::options::SetOutfitColour(outfit);
                     wet::renderer::RecheckTextures();

@@ -71,7 +71,7 @@ namespace wet::options
     void SetMouseDirect(bool v);
     // Native mouse look (mouselook.cpp): the mouse turns the third-person camera directly.
     bool MouseNative();
-    // Rubi's jacket colour (outfit.h): 0 original, 1 red, 2 blue, 3 black, 4 white, 5 green, 6 purple, 7 pink.
+    // Rubi's outfit colour, her top and trousers (outfit.h): 0 original, 1 red, 2 blue, 3 black, 4 white, 5 green, 6 purple, 7 pink.
     int OutfitColour();
     void SetOutfitColour(int v);
     // Your own music (music.cpp): mode 0 off, 1 following the game's music, 2 always.

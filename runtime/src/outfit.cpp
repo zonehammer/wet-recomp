@@ -15,11 +15,23 @@ namespace wet::outfit
 {
     namespace
     {
-        // Her jacket / top (512x512 DXT1, the base level as stored in memory).
-        constexpr uint64_t kJacket = 0x8b20549c098b197full;
+        // Her textures (1024x1024, the base level as stored in memory).
+        struct Target
+        {
+            const char* what;
+            uint64_t hash;
+            uint32_t format;   // 18 DXT1, 20 DXT5
+            uint32_t size;
+            Pick pick;
+        };
+        const Target kTargets[] = {
+            { "top", 0x7e3ef1552e320708ull, 18, 524288, Pick::kRed },        // with her skin and tattoos
+            { "trousers", 0xe10a6dbb59e40b74ull, 20, 1048576, Pick::kAll },  // brown leather
+        };
 
         struct Entry
         {
+            const Target* target = nullptr;
             std::vector<uint8_t> base, mips;   // as the game loaded them
             uint64_t written = 0;              // hash of what's in memory now
             int colour = 0;
@@ -35,12 +47,12 @@ namespace wet::outfit
             return h;
         }
 
-        void Recolour(std::vector<uint8_t>& data, int colour)
+        void Recolour(std::vector<uint8_t>& data, const Target& t, int colour)
         {
             // 8-in-16 byte order in memory.
             for (size_t i = 0; i + 1 < data.size(); i += 2)
                 std::swap(data[i], data[i + 1]);
-            RecolourDxt1(data.data(), data.size() / 8, Colour(colour));
+            RecolourDxt(data.data(), data.size(), t.format == 20, Colour(colour), t.pick);
             for (size_t i = 0; i + 1 < data.size(); i += 2)
                 std::swap(data[i], data[i + 1]);
         }
@@ -58,15 +70,22 @@ namespace wet::outfit
     void TextureSeen(uint32_t phys, uint8_t* data, uint32_t format, uint32_t baseSize, uint32_t endian,
                      uint32_t mipPhys, uint8_t* mipData, uint32_t mipSize)
     {
-        constexpr uint32_t kDxt1 = 18;
-        constexpr uint32_t kSize = 131072;   // 512x512 DXT1
-        if (format != kDxt1 || endian != 1 || baseSize < kSize || !data)
+        if (endian != 1 || !data)
             return;
-        baseSize = kSize;
-        int colour = options::OutfitColour();
-        uint64_t now = Hash(data, baseSize);
+        const Target* sized = nullptr;
+        for (const Target& t : kTargets)
+            if (t.format == format && t.size == baseSize)
+                sized = &t;
         std::lock_guard lock(s_lock);
         auto it = s_entries.find(phys);
+        if (!sized)
+        {
+            if (it != s_entries.end())
+                s_entries.erase(it);
+            return;
+        }
+        int colour = options::OutfitColour();
+        uint64_t now = Hash(data, baseSize);
         if (it != s_entries.end() && it->second.written == now)
         {
             if (it->second.colour == colour)
@@ -74,13 +93,18 @@ namespace wet::outfit
         }
         else
         {
-            if (now != kJacket)
+            const Target* target = nullptr;
+            for (const Target& t : kTargets)
+                if (t.format == format && t.size == baseSize && t.hash == now)
+                    target = &t;
+            if (!target)
             {
                 if (it != s_entries.end())
                     s_entries.erase(it);   // something else is there now
                 return;
             }
             Entry e;
+            e.target = target;
             e.base.assign(data, data + baseSize);
             if (mipData && mipSize)
                 e.mips.assign(mipData, mipData + mipSize);
@@ -89,7 +113,7 @@ namespace wet::outfit
             it = s_entries.insert_or_assign(phys, std::move(e)).first;
             if (colour == 0)
             {
-                Log("Outfit: Rubi's jacket at %08X (left as it is: Original)", phys);
+                Log("Outfit: Rubi's %s at %08X (left as it is: Original)", target->what, phys);
                 return;
             }
         }
@@ -97,14 +121,14 @@ namespace wet::outfit
         std::vector<uint8_t> base = e.base, mips = e.mips;
         if (colour != 0)
         {
-            Recolour(base, colour);
-            Recolour(mips, colour);
+            Recolour(base, *e.target, colour);
+            Recolour(mips, *e.target, colour);
         }
         Write(phys, data, base);
         if (mipData && mips.size() == mipSize)
             Write(mipPhys, mipData, mips);
         e.written = Hash(data, baseSize);
         e.colour = colour;
-        Log("Outfit: Rubi's jacket at %08X now %s", phys, kNames[std::clamp(colour, 0, int(kCount) - 1)]);
+        Log("Outfit: Rubi's %s at %08X now %s", e.target->what, phys, kNames[std::clamp(colour, 0, int(kCount) - 1)]);
     }
 }

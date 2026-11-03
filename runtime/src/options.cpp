@@ -137,7 +137,7 @@ namespace wet::options
             std::fprintf(f, "mouse_direct = %d\n", s_mouseDirect.load());
             std::fprintf(f, "# mouse_native: 1 = the mouse turns the third-person camera directly (native mouse look); 0 = through the right stick\n");
             std::fprintf(f, "mouse_native = %d\n", s_mouseNative.load());
-            std::fprintf(f, "# outfit_colour: Rubi's jacket - 0 original, 1 red, 2 blue, 3 black, 4 white, 5 green, 6 purple, 7 pink\n");
+            std::fprintf(f, "# outfit_colour: Rubi's top and trousers - 0 original, 1 red, 2 blue, 3 black, 4 white, 5 green, 6 purple, 7 pink\n");
             std::fprintf(f, "outfit_colour = %d\n", s_outfit.load());
             std::fprintf(f, "# skip_intro: 1 = straight to the title screen (no logo / legal movies at startup)\n");
             std::fprintf(f, "skip_intro = %d\n", s_skipIntro.load());

@@ -1469,7 +1469,7 @@ namespace
         Label(L"Mouse sensitivity", 22, 230);
         Slider(kSensitivity, kSensitivityValue, 136, 228, 150, 1, 200, ini.Get("mouse_sensitivity", 50), L"");
         Check(kVibration, L"Controller vibration", 22, 256, ini.Get("vibration", 1) != 0, 150);
-        Label(L"Jacket", 180, 256, 46);
+        Label(L"Outfit", 180, 256, 46);
         Combo(kOutfit, 228, 254, 98, { L"Original", L"Red", L"Blue", L"Black", L"White", L"Green", L"Purple", L"Pink" },
               std::min(std::max(ini.Get("outfit_colour", 0), 0), 7));
         Label(L"Prompts", 22, 284, 56);
