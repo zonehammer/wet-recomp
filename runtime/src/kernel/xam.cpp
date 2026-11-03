@@ -1,4 +1,5 @@
 // XAM: users, input, notifications, loader, title/module info, console settings.
+#include <cstdlib>
 #include <vector>
 #include <mutex>
 #include "kernel.h"
@@ -290,6 +291,23 @@ GUEST_IMPORT(XexGetModuleSection)
                 if (Arg(ctx, 2)) St32(Arg(ctx, 2), Ld32(e + 8));
                 if (Arg(ctx, 3)) St32(Arg(ctx, 3), Ld32(e + 12));
                 Log("XexGetModuleSection(\"%s\") -> 0x%08X, 0x%X bytes", name.c_str(), Ld32(e + 8), Ld32(e + 12));
+                // Experiment (WET_NO_GAME_AA=1): the game's own anti-aliasing
+                // setting in its built-in engine settings, switched off in
+                // place (same length, so nothing else moves).
+                static bool s_patched = false;
+                if (name == "A2M_INI" && !s_patched && std::getenv("WET_NO_GAME_AA"))
+                {
+                    s_patched = true;
+                    uint32_t at = Ld32(e + 8), size = Ld32(e + 12);
+                    std::string text((const char*)HostPtr(at), size);
+                    const std::string from = "x360-antialiasing = true;", to = "x360-antialiasing =false;";
+                    size_t pos = text.find(from);
+                    if (pos != std::string::npos)
+                    {
+                        std::memcpy(HostPtr(at + uint32_t(pos)), to.data(), to.size());
+                        Log("Engine settings: x360-antialiasing switched off (WET_NO_GAME_AA)");
+                    }
+                }
                 return Ret(ctx, STATUS_SUCCESS);
             }
         }
