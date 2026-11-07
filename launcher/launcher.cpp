@@ -113,7 +113,7 @@ namespace
         kFps = 100, kResolution, kFullscreen, kShowFps,
         kFilter, kSharpness, kSharpnessValue, kAntialiasing, kGrain, kGrainValue, kFov, kFovValue, kWidescreen,
         kMouseAim, kSensitivity, kSensitivityValue, kInvertY, kVibration,
-        kShaderCache, kVideoMode, kPopups, kSkipIntro, kAniso, kSaveBackups, kMusicMode, kMusicVolume, kMusicVolumeValue, kMusicShuffle, kMusicFolder, kMusicFolderText, kMusicOpen, kOutfit, kHair, kAsyncShaders, kShaderPreload, kMotionBlur, kDepthOfField, kCameraShake, kLanguage,
+        kShaderCache, kVideoMode, kPopups, kSkipIntro, kAniso, kSaveBackups, kMusicMode, kMusicVolume, kMusicVolumeValue, kMusicShuffle, kMusicFolder, kMusicFolderText, kMusicOpen, kOutfit, kHair, kBrightness, kBrightnessValue, kContrast, kContrastValue, kGamma, kGammaValue, kSaturation, kSaturationValue, kAsyncShaders, kShaderPreload, kMotionBlur, kDepthOfField, kCameraShake, kLanguage,
         kStatus, kPlay, kSaves, kClearShaders, kKeyboard,
         kVsync, kHideBorders, kWideHud, kCheckUpdates, kReportBug, kUpdateText, kPrompts,
         kMonitor, kPadTest, kAchievements,
@@ -586,6 +586,10 @@ namespace
         s_ini.Set("outfit_colour", int(SendMessageW(Item(kOutfit), CB_GETCURSEL, 0, 0)));
         s_ini.Set("hair_colour", int(SendMessageW(Item(kHair), CB_GETCURSEL, 0, 0)));
         s_ini.Set("music_volume", Pos(kMusicVolume));
+        s_ini.Set("brightness", Pos(kBrightness));
+        s_ini.Set("contrast", Pos(kContrast));
+        s_ini.Set("gamma", Pos(kGamma));
+        s_ini.Set("saturation", Pos(kSaturation));
         s_ini.Set("music_shuffle", Checked(kMusicShuffle));
         s_ini.SetString("music_folder", s_musicFolder);
         s_ini.Set("mouse_invert_y", Checked(kInvertY));
@@ -1522,8 +1526,22 @@ namespace
         Make(L"BUTTON", L"Open folder", BS_PUSHBUTTON | WS_TABSTOP, 517, 492, 150, 24, kMusicOpen);
         UpdateMusicFolder();
 
-        Make(L"STATIC", L"", SS_LEFT | SS_PATHELLIPSIS, 12, 530, 540, 18, kStatus);
-        Make(L"BUTTON", L"Play", BS_DEFPUSHBUTTON | WS_TABSTOP, 570, 524, 110, 32, kPlay);
+        // Picture (applied with the game's gamma ramp; 0 / 100% = as the game has it)
+        Group(L"Picture", 10, 524, 670, 64);
+        auto clampIni = [&](const char* key, int def, int lo, int hi) {
+            return std::min(std::max(ini.Get(key, def), lo), hi);
+        };
+        Label(L"Brightness", 22, 542, 72);
+        Slider(kBrightness, kBrightnessValue, 96, 540, 190, -50, 50, clampIni("brightness", 0, -50, 50), L"");
+        Label(L"Contrast", 22, 566, 72);
+        Slider(kContrast, kContrastValue, 96, 564, 190, 50, 150, clampIni("contrast", 100, 50, 150), L"%");
+        Label(L"Gamma", 362, 542, 56);
+        Slider(kGamma, kGammaValue, 420, 540, 200, 50, 200, clampIni("gamma", 100, 50, 200), L"%");
+        Label(L"Colour", 362, 566, 56);
+        Slider(kSaturation, kSaturationValue, 420, 564, 200, 0, 200, clampIni("saturation", 100, 0, 200), L"%");
+
+        Make(L"STATIC", L"", SS_LEFT | SS_PATHELLIPSIS, 12, 602, 540, 18, kStatus);
+        Make(L"BUTTON", L"Play", BS_DEFPUSHBUTTON | WS_TABSTOP, 570, 596, 110, 32, kPlay);
         UpdateStatus();
     }
 
@@ -1537,6 +1555,10 @@ namespace
             else if (HWND(lp) == Item(kFov)) UpdateValueLabel(kFov, kFovValue, L"\u00B0");
             else if (HWND(lp) == Item(kSensitivity)) UpdateValueLabel(kSensitivity, kSensitivityValue, L"");
             else if (HWND(lp) == Item(kMusicVolume)) UpdateValueLabel(kMusicVolume, kMusicVolumeValue, L"%");
+            else if (HWND(lp) == Item(kBrightness)) UpdateValueLabel(kBrightness, kBrightnessValue, L"");
+            else if (HWND(lp) == Item(kContrast)) UpdateValueLabel(kContrast, kContrastValue, L"%");
+            else if (HWND(lp) == Item(kGamma)) UpdateValueLabel(kGamma, kGammaValue, L"%");
+            else if (HWND(lp) == Item(kSaturation)) UpdateValueLabel(kSaturation, kSaturationValue, L"%");
             return 0;
         case WM_COMMAND:
             switch (LOWORD(wp))
@@ -1661,7 +1683,19 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show)
 
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     LoadBanner();
-    RECT rc{ 0, 0, S(690), S(566 + kEffectsRow + s_bannerHeight) };
+    {
+        // Leave the banner out on screens too short for the whole window
+        // (1366x768, or 1080p laptops at 125% and up).
+        RECT work{};
+        SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+        if (s_banner && S(638 + kEffectsRow + kBannerHeight + 40) > work.bottom - work.top)
+        {
+            DeleteObject(s_banner);
+            s_banner = nullptr;
+            s_bannerHeight = 0;
+        }
+    }
+    RECT rc{ 0, 0, S(690), S(638 + kEffectsRow + s_bannerHeight) };
     DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
     AdjustWindowRect(&rc, style, FALSE);
     int w = rc.right - rc.left, h = rc.bottom - rc.top;

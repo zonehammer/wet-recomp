@@ -19,6 +19,8 @@ nothing derived from the game is ever committed.
 - **Any frame rate from 30 to 360 FPS** (or match the monitor) at the correct game speed; G-Sync / FreeSync work.
 - **Resolution scaling** to 1440p or 4K, **AMD FSR / CAS** and **NVIDIA Image Scaling**,
   FXAA, and a **film grain** slider.
+- **Picture settings**: brightness, contrast, gamma and colour (saturation), in the launcher
+  (Picture) and F1 > Graphics.
 - **Controllers**: Xbox, PlayStation 4/5 (USB or Bluetooth), Switch Pro and others, up
   to four, with rumble.
 - **Keyboard and mouse**: WASD movement and mouse aim, with on-screen button prompts
@@ -35,8 +37,8 @@ nothing derived from the game is ever committed.
 - **Photo mode** (F5): freeze the game, hide the HUD and fly a free camera; **F12** screenshots.
 - **Your own music**: a playlist from a folder (MP3, M4A, FLAC, WAV, WMA) instead of the
   game's music, either a new song whenever the game's music starts or all the time; media keys
-  skip. Set it up in the launcher (Your music) or F1 > General, and turn the game's own music
-  volume down in its Options.
+  skip. Set it up in the launcher (Your music) or F1 > General; the game's own music is
+  muted while your songs play.
 - **Rubi's outfit colour** (her top and trousers): Original, red, blue, black, white, green, purple or pink
 - **Rubi's hair colour**: Original, blonde, platinum, red, pink, blue, purple, green or brown
   (launcher Controls, F1 > Graphics; changes straight away).
@@ -101,6 +103,10 @@ licence notices. It contains code translated from your copy of the game, so it i
 **your own machines only**: don't upload or share it.
 
 ## Steam Deck, Bazzite and other Linux (experimental)
+
+> **Linux support is experimental and not actively worked on.** It's provided as is: it
+> builds and runs under Proton (tested on a ROG Ally with Bazzite), but Linux-specific
+> problems may not get fixed. Windows is the supported platform.
 
 The game is built as the Windows program and runs with Proton. Everything is built on the
 Deck / PC itself from your disc image; no root and nothing installed system-wide (the

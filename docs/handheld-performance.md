@@ -1,5 +1,8 @@
 # Performance on handhelds (ROG Ally / Steam Deck class)
 
+> Linux / Proton support is experimental and not actively worked on; these are
+> the results as measured, provided as is.
+
 Measured on an ASUS ROG Ally X (Ryzen Z1 Extreme, Bazzite, Proton, Direct3D 12)
 with WET Recomp 0.2.78, November 2026. Figures are 10-second averages from
 `wet.log`, in the same levels on each run.
