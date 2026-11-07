@@ -884,7 +884,7 @@ index ffc8eeffa..e63747e04 100644
    uint32_t primary_buffer_ptr_ = 0;
    uint32_t primary_buffer_size_ = 0;
 diff --git a/src/xenia/gpu/d3d12/d3d12_command_processor.cc b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
-index 0ec70a7d1..cdfc2be4d 100644
+index 0ec70a7d1..e202bdf5f 100644
 --- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
 +++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
 @@ -8,6 +8,7 @@
@@ -895,11 +895,12 @@ index 0ec70a7d1..cdfc2be4d 100644
  #include <cstring>
  #include <sstream>
  #include <utility>
-@@ -51,6 +52,11 @@ DEFINE_bool(d3d12_submit_on_primary_buffer_end, true,
+@@ -51,10 +52,38 @@ DEFINE_bool(d3d12_submit_on_primary_buffer_end, true,
              "possible to submit immediately to try to reduce frame latency.",
              "D3D12");
  
 +#if XE_WET_RUNTIME
++#include "xenia/gpu/d3d12/wet_colour.h"
 +#include "xenia/gpu/d3d12/wet_smaa.h"
 +#include "xenia/gpu/d3d12/wet_smaa_tex.h"
 +#endif
@@ -907,7 +908,33 @@ index 0ec70a7d1..cdfc2be4d 100644
  namespace xe {
  namespace gpu {
  namespace d3d12 {
-@@ -754,6 +760,35 @@ bool D3D12CommandProcessor::SetupContext() {
+ 
++#if XE_WET_RUNTIME
++std::atomic<int> wet_brightness{0}, wet_contrast{100}, wet_gamma{100},
++    wet_saturation{100};
++
++ID3D12PipelineState* D3D12CommandProcessor::WetColourPipeline(int variant) {
++  if (!wet_colour_pipelines_tried_[variant]) {
++    wet_colour_pipelines_tried_[variant] = true;
++    std::vector<uint8_t> code = wet_colour::Compile(variant);
++    if (!code.empty()) {
++      *(wet_colour_pipelines_[variant].ReleaseAndGetAddressOf()) =
++          ui::d3d12::util::CreateComputePipeline(
++              GetD3D12Provider().GetDevice(), code.data(), code.size(),
++              apply_gamma_root_signature_.Get());
++    }
++    XELOGW("Colour adjustment: pass {} {}", variant,
++           wet_colour_pipelines_[variant] ? "ready" : "unavailable");
++  }
++  return wet_colour_pipelines_[variant].Get();
++}
++#endif
++
++
+ // Generated with `xb buildshaders`.
+ namespace shaders {
+ #include "xenia/gpu/shaders/bytecode/d3d12_5_1/apply_gamma_pwl_cs.h"
+@@ -754,6 +783,35 @@ bool D3D12CommandProcessor::SetupContext() {
      return false;
    }
  
@@ -943,7 +970,7 @@ index 0ec70a7d1..cdfc2be4d 100644
    // Create the command list and one allocator because it's needed for a command
    // list.
    ID3D12CommandAllocator* command_allocator;
-@@ -1502,6 +1537,12 @@ bool D3D12CommandProcessor::SetupContext() {
+@@ -1502,6 +1560,12 @@ bool D3D12CommandProcessor::SetupContext() {
  void D3D12CommandProcessor::ShutdownContext() {
    AwaitAllQueueOperationsCompletion();
  
@@ -956,7 +983,7 @@ index 0ec70a7d1..cdfc2be4d 100644
    ui::d3d12::util::ReleaseAndNull(readback_buffer_);
    readback_buffer_size_ = 0;
  
-@@ -1516,6 +1557,9 @@ void D3D12CommandProcessor::ShutdownContext() {
+@@ -1516,6 +1580,9 @@ void D3D12CommandProcessor::ShutdownContext() {
  
    fxaa_source_texture_submission_ = 0;
    fxaa_source_texture_.Reset();
@@ -966,7 +993,20 @@ index 0ec70a7d1..cdfc2be4d 100644
  
    fxaa_extreme_pipeline_.Reset();
    fxaa_pipeline_.Reset();
-@@ -1625,6 +1669,64 @@ void D3D12CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
+@@ -1525,6 +1592,12 @@ void D3D12CommandProcessor::ShutdownContext() {
+   apply_gamma_pwl_pipeline_.Reset();
+   apply_gamma_table_fxaa_luma_pipeline_.Reset();
+   apply_gamma_table_pipeline_.Reset();
++#if XE_WET_RUNTIME
++  for (int i = 0; i < 4; ++i) {
++    wet_colour_pipelines_[i].Reset();
++    wet_colour_pipelines_tried_[i] = false;
++  }
++#endif
+   apply_gamma_root_signature_.Reset();
+ 
+   // Unmapping will be done implicitly by the destruction.
+@@ -1625,6 +1698,64 @@ void D3D12CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
    }
  }
  
@@ -1031,7 +1071,7 @@ index 0ec70a7d1..cdfc2be4d 100644
  void D3D12CommandProcessor::OnGammaRamp256EntryTableValueWritten() {
    gamma_ramp_256_entry_table_up_to_date_ = false;
  }
-@@ -1636,6 +1738,9 @@ void D3D12CommandProcessor::OnGammaRampPWLValueWritten() {
+@@ -1636,6 +1767,9 @@ void D3D12CommandProcessor::OnGammaRampPWLValueWritten() {
  void D3D12CommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
                                        uint32_t frontbuffer_width,
                                        uint32_t frontbuffer_height) {
@@ -1041,7 +1081,7 @@ index 0ec70a7d1..cdfc2be4d 100644
    SCOPE_profile_cpu_f("gpu");
  
    ui::Presenter* presenter = graphics_system_->presenter();
-@@ -1661,7 +1766,12 @@ void D3D12CommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
+@@ -1661,7 +1795,12 @@ void D3D12CommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
  
    presenter->RefreshGuestOutput(
        uint32_t(swap_texture_desc.Width), uint32_t(swap_texture_desc.Height),
@@ -1054,7 +1094,7 @@ index 0ec70a7d1..cdfc2be4d 100644
        [this, &swap_texture_srv_desc, frontbuffer_format, swap_texture_resource,
         &swap_texture_desc](
            ui::Presenter::GuestOutputRefreshContext& context) -> bool {
-@@ -1671,6 +1781,14 @@ void D3D12CommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
+@@ -1671,6 +1810,14 @@ void D3D12CommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
          SwapPostEffect swap_post_effect = GetActualSwapPostEffect();
          bool use_fxaa = swap_post_effect == SwapPostEffect::kFxaa ||
                          swap_post_effect == SwapPostEffect::kFxaaExtreme;
@@ -1069,7 +1109,40 @@ index 0ec70a7d1..cdfc2be4d 100644
          if (use_fxaa) {
            // Make sure the texture of the correct size is available for FXAA.
            if (fxaa_source_texture_) {
-@@ -1916,6 +2034,20 @@ void D3D12CommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
+@@ -1850,6 +1997,17 @@ void D3D12CommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
+         ApplyGammaConstants apply_gamma_constants;
+         apply_gamma_constants.size[0] = uint32_t(swap_texture_desc.Width);
+         apply_gamma_constants.size[1] = uint32_t(swap_texture_desc.Height);
++#if XE_WET_RUNTIME
++        apply_gamma_constants.brightness =
++            float(wet_brightness.load(std::memory_order_relaxed)) / 200.0f;
++        apply_gamma_constants.contrast =
++            float(wet_contrast.load(std::memory_order_relaxed)) / 100.0f;
++        apply_gamma_constants.gamma_inv =
++            100.0f /
++            float(std::max(10, wet_gamma.load(std::memory_order_relaxed)));
++        apply_gamma_constants.saturation =
++            float(wet_saturation.load(std::memory_order_relaxed)) / 100.0f;
++#endif
+         deferred_command_list_.D3DSetComputeRoot32BitConstants(
+             UINT(ApplyGammaRootParameter::kConstants),
+             sizeof(apply_gamma_constants) / sizeof(uint32_t),
+@@ -1873,6 +2031,14 @@ void D3D12CommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
+               use_fxaa ? apply_gamma_table_fxaa_luma_pipeline_.Get()
+                        : apply_gamma_table_pipeline_.Get();
+         }
++#if XE_WET_RUNTIME
++        if (WetColourAdjusted()) {
++          if (ID3D12PipelineState* adjusted = WetColourPipeline(
++                  (use_pwl_gamma_ramp ? 2 : 0) | (use_fxaa ? 1 : 0))) {
++            apply_gamma_pipeline = adjusted;
++          }
++        }
++#endif
+         SetExternalPipeline(apply_gamma_pipeline);
+         SubmitBarriers();
+         uint32_t group_count_x = (uint32_t(swap_texture_desc.Width) + 15) / 16;
+@@ -1916,6 +2082,20 @@ void D3D12CommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
                  D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
              // From now on, even in case of failure, guest_output_resource must
              // be transitioned back to kGuestOutputInternalState!
@@ -1090,7 +1163,7 @@ index 0ec70a7d1..cdfc2be4d 100644
              deferred_command_list_.D3DSetComputeRootSignature(
                  fxaa_root_signature_.Get());
              FxaaConstants fxaa_constants;
-@@ -1996,6 +2128,143 @@ Shader* D3D12CommandProcessor::LoadShader(xenos::ShaderType shader_type,
+@@ -1996,6 +2176,143 @@ Shader* D3D12CommandProcessor::LoadShader(xenos::ShaderType shader_type,
    return pipeline_cache_->LoadShader(shader_type, host_address, dword_count);
  }
  
@@ -1234,7 +1307,7 @@ index 0ec70a7d1..cdfc2be4d 100644
  bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
                                        uint32_t index_count,
                                        IndexBufferInfo* index_buffer_info,
-@@ -2052,6 +2321,10 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+@@ -2052,6 +2369,10 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
      // cache.
      if (!memexport_used_vertex) {
        // This draw has no effect.
@@ -1245,7 +1318,7 @@ index 0ec70a7d1..cdfc2be4d 100644
        return true;
      }
    }
-@@ -2070,8 +2343,85 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+@@ -2070,8 +2391,85 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
    }
    if (!primitive_processing_result.host_draw_vertex_count) {
      // Nothing to draw.
@@ -1331,7 +1404,7 @@ index 0ec70a7d1..cdfc2be4d 100644
  
    reg::RB_DEPTHCONTROL normalized_depth_control =
        draw_util::GetNormalizedDepthControl(regs);
-@@ -2104,6 +2454,41 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+@@ -2104,6 +2502,41 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
                                      normalized_color_mask, *vertex_shader)) {
      return false;
    }
@@ -1373,7 +1446,7 @@ index 0ec70a7d1..cdfc2be4d 100644
  
    // Create the pipeline (for this, need the actually used render target formats
    // from the render target cache), translating the shaders - doing this now to
-@@ -2169,6 +2554,13 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+@@ -2169,6 +2602,13 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
            render_target_cache_->depth_float24_convert_in_pixel_shader(),
        host_render_targets_used, pixel_shader && pixel_shader->writes_depth(),
        viewport_info);
@@ -1387,7 +1460,7 @@ index 0ec70a7d1..cdfc2be4d 100644
    draw_util::Scissor scissor;
    draw_util::GetScissor(regs, scissor);
    scissor.offset[0] *= draw_resolution_scale_x;
-@@ -2467,6 +2859,11 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+@@ -2467,6 +2907,11 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
      }
    }
  
@@ -1399,7 +1472,7 @@ index 0ec70a7d1..cdfc2be4d 100644
    return true;
  }
  
-@@ -2663,6 +3060,21 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
+@@ -2663,6 +3108,21 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
        }
        frame_completed_ = frame;
      }
@@ -1421,7 +1494,7 @@ index 0ec70a7d1..cdfc2be4d 100644
    }
  
    if (!submission_open_) {
-@@ -2672,6 +3084,12 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
+@@ -2672,6 +3132,12 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
      // end of the submission (when async pipeline creation requests are
      // fulfilled).
      deferred_command_list_.Reset();
@@ -1434,7 +1507,7 @@ index 0ec70a7d1..cdfc2be4d 100644
  
      // Reset cached state of the command list.
      ff_viewport_update_needed_ = true;
-@@ -2790,6 +3208,23 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
+@@ -2790,6 +3256,23 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
      // destroyed between frames.
      SubmitBarriers();
  
@@ -1458,7 +1531,7 @@ index 0ec70a7d1..cdfc2be4d 100644
      // TODO(Triang3l): Error checking.
  
      ID3D12CommandQueue* direct_queue = provider.GetDirectQueue();
-@@ -2840,6 +3275,25 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
+@@ -2840,6 +3323,25 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
        pix_capturing_ = false;
      }
      frame_open_ = false;
@@ -1484,7 +1557,7 @@ index 0ec70a7d1..cdfc2be4d 100644
      // Submission already closed now, so minus 1.
      closed_frame_submissions_[(frame_current_++) % kQueueFrames] =
          GetCurrentSubmission() - 1;
-@@ -2882,6 +3336,145 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
+@@ -2882,6 +3384,145 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
    return true;
  }
  
@@ -1630,7 +1703,7 @@ index 0ec70a7d1..cdfc2be4d 100644
  bool D3D12CommandProcessor::CanEndSubmissionImmediately() const {
    return !submission_open_ || !pipeline_cache_->IsCreatingPipelines();
  }
-@@ -4359,6 +4952,304 @@ void D3D12CommandProcessor::WriteGammaRampSRV(
+@@ -4359,6 +5000,304 @@ void D3D12CommandProcessor::WriteGammaRampSRV(
    device->CreateShaderResourceView(gamma_ramp_buffer_.Get(), &desc, handle);
  }
  
@@ -1936,7 +2009,7 @@ index 0ec70a7d1..cdfc2be4d 100644
  }  // namespace gpu
  }  // namespace xe
 diff --git a/src/xenia/gpu/d3d12/d3d12_command_processor.h b/src/xenia/gpu/d3d12/d3d12_command_processor.h
-index 88bdcb438..1db8e3fa8 100644
+index 88bdcb438..25ba48504 100644
 --- a/src/xenia/gpu/d3d12/d3d12_command_processor.h
 +++ b/src/xenia/gpu/d3d12/d3d12_command_processor.h
 @@ -74,6 +74,47 @@ class D3D12CommandProcessor : public CommandProcessor {
@@ -2041,7 +2114,32 @@ index 88bdcb438..1db8e3fa8 100644
    struct CommandAllocator {
      ID3D12CommandAllocator* command_allocator;
      uint64_t last_usage_submission;
-@@ -554,6 +635,31 @@ class D3D12CommandProcessor : public CommandProcessor {
+@@ -506,6 +587,10 @@ class D3D12CommandProcessor : public CommandProcessor {
+ 
+   struct ApplyGammaConstants {
+     uint32_t size[2];
++#if XE_WET_RUNTIME
++    // wet_colour.h (ignored by the original shaders).
++    float brightness, contrast, gamma_inv, saturation;
++#endif
+   };
+   enum class ApplyGammaRootParameter : UINT {
+     kConstants,
+@@ -516,6 +601,13 @@ class D3D12CommandProcessor : public CommandProcessor {
+     kCount,
+   };
+   Microsoft::WRL::ComPtr<ID3D12RootSignature> apply_gamma_root_signature_;
++#if XE_WET_RUNTIME
++  // wet_colour.h: the gamma ramp passes with the colour adjustment (table,
++  // table + FXAA luma, PWL, PWL + FXAA luma), compiled when first needed.
++  Microsoft::WRL::ComPtr<ID3D12PipelineState> wet_colour_pipelines_[4];
++  bool wet_colour_pipelines_tried_[4] = {};
++  ID3D12PipelineState* WetColourPipeline(int variant);
++#endif
+   Microsoft::WRL::ComPtr<ID3D12PipelineState> apply_gamma_table_pipeline_;
+   Microsoft::WRL::ComPtr<ID3D12PipelineState>
+       apply_gamma_table_fxaa_luma_pipeline_;
+@@ -554,6 +646,31 @@ class D3D12CommandProcessor : public CommandProcessor {
    Microsoft::WRL::ComPtr<ID3D12Resource> fxaa_source_texture_;
    uint64_t fxaa_source_texture_submission_ = 0;
  
@@ -2660,6 +2758,153 @@ index d1ede5ffa..a07e7ad5f 100644
    void CreationThread(size_t thread_index);
    void CreateQueuedPipelinesOnProcessorThread();
    std::mutex creation_request_lock_;
+diff --git a/src/xenia/gpu/d3d12/wet_colour.h b/src/xenia/gpu/d3d12/wet_colour.h
+new file mode 100644
+index 000000000..23a66c698
+--- /dev/null
++++ b/src/xenia/gpu/d3d12/wet_colour.h
+@@ -0,0 +1,141 @@
++/**
++ * WET recomp: brightness / contrast / gamma / saturation (wet.ini, F1).
++ * Applied in the pass that already applies the game's gamma ramp to the front
++ * buffer: the same compute shaders with the adjustment added, compiled at run
++ * time with the system's D3DCompiler_47.dll (as NIS is).
++ */
++#ifndef XENIA_GPU_D3D12_WET_COLOUR_H_
++#define XENIA_GPU_D3D12_WET_COLOUR_H_
++
++#include <atomic>
++#include <cstring>
++#include <string>
++#include <vector>
++
++#include "xenia/base/logging.h"
++#include "xenia/ui/d3d12/d3d12_api.h"
++
++namespace xe {
++namespace gpu {
++namespace d3d12 {
++
++// Percentages: brightness -50...50 (0 = as is), contrast, gamma and saturation
++// 100 = as is.
++extern std::atomic<int> wet_brightness, wet_contrast, wet_gamma,
++    wet_saturation;
++
++inline bool WetColourAdjusted() {
++  return wet_brightness.load(std::memory_order_relaxed) != 0 ||
++         wet_contrast.load(std::memory_order_relaxed) != 100 ||
++         wet_gamma.load(std::memory_order_relaxed) != 100 ||
++         wet_saturation.load(std::memory_order_relaxed) != 100;
++}
++
++namespace wet_colour {
++
++inline const char* Source() {
++  return R"HLSL(
++cbuffer Constants : register(b0) {
++  uint2 xe_size;
++  float xe_brightness;
++  float xe_contrast;
++  float xe_gamma_inv;
++  float xe_saturation;
++};
++#ifdef PWL
++Buffer<uint2> xe_ramp : register(t0);
++#else
++Buffer<float4> xe_ramp : register(t0);
++#endif
++Texture2D<float4> xe_source : register(t1);
++RWTexture2D<float4> xe_dest : register(u0);
++
++#ifdef PWL
++float ApplyPWL(uint v, uint2 r) {
++  return saturate((float(r.x) + float((v & 7u) * r.y) * (1.0f / 8.0f)) *
++                  (1.0f / (64.0f * 1023.0f)));
++}
++#endif
++
++[numthreads(16, 8, 1)]
++void main(uint3 id : SV_DispatchThreadID) {
++  if (any(id.xy >= xe_size)) {
++    return;
++  }
++  float3 c = xe_source.Load(int3(id.xy, 0)).rgb;
++  float3 o;
++#ifdef PWL
++  uint3 i = uint3(c * 1023.0f + 0.5f);
++  o.r = ApplyPWL(i.r, xe_ramp[(i.r >> 3u) * 3u]);
++  o.g = ApplyPWL(i.g, xe_ramp[(i.g >> 3u) * 3u + 1u]);
++  o.b = ApplyPWL(i.b, xe_ramp[(i.b >> 3u) * 3u + 2u]);
++#else
++  uint3 i = uint3(c * 255.0f + 0.5f);
++  o.r = xe_ramp[i.r].b;
++  o.g = xe_ramp[i.g].g;
++  o.b = xe_ramp[i.b].r;
++#endif
++  o = pow(saturate(o), xe_gamma_inv);
++  float luma = dot(o, float3(0.299f, 0.587f, 0.114f));
++  o = lerp(luma.xxx, o, xe_saturation);
++  o = saturate((o - 0.5f) * xe_contrast + 0.5f + xe_brightness);
++  float a = 1.0f;
++#ifdef FXAA_LUMA
++  a = dot(o, float3(0.299f, 0.587f, 0.114f));
++#endif
++  xe_dest[id.xy] = float4(o, a);
++}
++)HLSL";
++}
++
++// Variant 0 table, 1 table + FXAA luma, 2 PWL, 3 PWL + FXAA luma.
++inline std::vector<uint8_t> Compile(int variant) {
++  std::vector<uint8_t> result;
++  static HMODULE module = LoadLibraryW(L"D3DCompiler_47.dll");
++  if (!module) {
++    XELOGW("Colour adjustment: D3DCompiler_47.dll not found");
++    return result;
++  }
++  auto compile = reinterpret_cast<pD3DCompile>(
++      reinterpret_cast<void*>(GetProcAddress(module, "D3DCompile")));
++  if (!compile) {
++    return result;
++  }
++  D3D_SHADER_MACRO macros[3] = {};
++  int n = 0;
++  if (variant & 2) {
++    macros[n++] = {"PWL", "1"};
++  }
++  if (variant & 1) {
++    macros[n++] = {"FXAA_LUMA", "1"};
++  }
++  const char* source = Source();
++  ID3DBlob* code = nullptr;
++  ID3DBlob* errors = nullptr;
++  HRESULT hr = compile(source, std::strlen(source), "wet_colour.hlsl", macros,
++                       nullptr, "main", "cs_5_1",
++                       D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &code, &errors);
++  if (errors) {
++    XELOGW("Colour adjustment shader compiler output: {}",
++           static_cast<const char*>(errors->GetBufferPointer()));
++    errors->Release();
++  }
++  if (SUCCEEDED(hr) && code) {
++    const uint8_t* data = static_cast<const uint8_t*>(code->GetBufferPointer());
++    result.assign(data, data + code->GetBufferSize());
++  } else {
++    XELOGW("Colour adjustment: shader compilation failed (0x{:08X})",
++           uint32_t(hr));
++  }
++  if (code) {
++    code->Release();
++  }
++  return result;
++}
++
++}  // namespace wet_colour
++}  // namespace d3d12
++}  // namespace gpu
++}  // namespace xe
++
++#endif  // XENIA_GPU_D3D12_WET_COLOUR_H_
 diff --git a/src/xenia/gpu/d3d12/wet_smaa.h b/src/xenia/gpu/d3d12/wet_smaa.h
 new file mode 100644
 index 000000000..69ee09c8c

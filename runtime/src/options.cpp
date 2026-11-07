@@ -30,7 +30,7 @@ namespace wet::options
         std::atomic<bool> s_inCutscene{ false };
         std::atomic<int> s_videoMode{ 1 };
         int s_scale = 1, s_scaleRunning = 1;
-        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_fov{ 90 }, s_widescreen{ 0 }, s_widescreenHud{ 1 }, s_hideBorders{ 0 }, s_vsync{ 0 }, s_buttonPrompts{ 0 }, s_mouseAim{ 1 }, s_mouseSens{ 50 }, s_mouseInvert{ 0 }, s_mouseDirect{ 1 }, s_mouseNative{ 1 }, s_skipIntro{ 1 }, s_musicMode{ 0 }, s_musicVolume{ 80 }, s_musicShuffle{ 1 }, s_outfit{ 0 }, s_hair{ 0 }, s_aniso{ 1 }, s_autoBackup{ 1 }, s_shaderCache{ 1 }, s_asyncShaders{ 1 }, s_shaderPreload{ 0 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 }, s_motionBlur{ 1 }, s_depthOfField{ 1 }, s_cameraShake{ 1 }, s_language{ 0 };
+        std::atomic<int> s_aa{ 0 }, s_filter{ 0 }, s_fullscreen{ 0 }, s_showFps{ 0 }, s_sharpness{ 50 }, s_filmGrain{ 100 }, s_fov{ 90 }, s_widescreen{ 0 }, s_widescreenHud{ 1 }, s_hideBorders{ 0 }, s_vsync{ 0 }, s_buttonPrompts{ 0 }, s_mouseAim{ 1 }, s_mouseSens{ 50 }, s_mouseInvert{ 0 }, s_mouseDirect{ 1 }, s_mouseNative{ 1 }, s_skipIntro{ 1 }, s_musicMode{ 0 }, s_musicVolume{ 80 }, s_musicShuffle{ 1 }, s_outfit{ 0 }, s_hair{ 0 }, s_brightness{ 0 }, s_contrast{ 100 }, s_gamma{ 100 }, s_saturation{ 100 }, s_aniso{ 1 }, s_autoBackup{ 1 }, s_shaderCache{ 1 }, s_asyncShaders{ 1 }, s_shaderPreload{ 0 }, s_adaptiveWatch{ 1 }, s_gpuWait{ 1 }, s_vibration{ 1 }, s_achievementPopups{ 1 }, s_motionBlur{ 1 }, s_depthOfField{ 1 }, s_cameraShake{ 1 }, s_language{ 0 };
         constexpr const char* kFile = "wet.ini";
         // Mouse button bindings: left, right, middle, back (X1), forward (X2).
         constexpr const char* kMouseKeys[5] = { "mouse_left", "mouse_right", "mouse_middle", "mouse_back", "mouse_forward" };
@@ -114,6 +114,11 @@ namespace wet::options
             std::fprintf(f, "video_mode = %d\n", s_videoMode.load());
             std::fprintf(f, "# cutscene_30fps: 1 = in-game cutscenes run at 30 FPS, as on the console (keeps speech in sync)\n");
             std::fprintf(f, "cutscene_30fps = %d\n", s_cutsceneFps.load());
+            std::fprintf(f, "# brightness: -50 to 50 (0 = as the game has it); contrast, gamma and saturation (colour): percent, 100 = as the game has it\n");
+            std::fprintf(f, "brightness = %d\n", s_brightness.load());
+            std::fprintf(f, "contrast = %d\n", s_contrast.load());
+            std::fprintf(f, "gamma = %d\n", s_gamma.load());
+            std::fprintf(f, "saturation = %d\n", s_saturation.load());
             std::fprintf(f, "# film_grain: the game's film grain, 0 (off) to 100 (as designed)\n");
             std::fprintf(f, "film_grain = %d\n", s_filmGrain.load());
             std::fprintf(f, "# fov: horizontal field of view in degrees at 16:9, 60-130 (90 = the game's own)\n");
@@ -280,6 +285,10 @@ namespace wet::options
                 else if (!std::strcmp(key, "anisotropic_filtering")) s_aniso = value != 0;
                 else if (!std::strcmp(key, "save_backups")) s_autoBackup = value != 0;
                 else if (!std::strcmp(key, "film_grain")) s_filmGrain = Clamp(value, 0, 100);
+                else if (!std::strcmp(key, "brightness")) s_brightness = Clamp(value, -50, 50);
+                else if (!std::strcmp(key, "contrast")) s_contrast = Clamp(value, 50, 150);
+                else if (!std::strcmp(key, "gamma")) s_gamma = Clamp(value, 50, 200);
+                else if (!std::strcmp(key, "saturation")) s_saturation = Clamp(value, 0, 200);
                 else if (!std::strcmp(key, "fov")) s_fov = Clamp(value, 60, 130);
                 else if (!std::strcmp(key, "widescreen")) s_widescreen = value != 0;
                 else if (!std::strcmp(key, "widescreen_hud")) s_widescreenHud = value != 0;
@@ -452,6 +461,18 @@ namespace wet::options
         Save();
     }
     void SetFilmGrain(int v) { s_filmGrain = Clamp(v, 0, 100); Save(); }
+    int Brightness() { return s_brightness.load(std::memory_order_relaxed); }
+    int Contrast() { return s_contrast.load(std::memory_order_relaxed); }
+    int Gamma() { return s_gamma.load(std::memory_order_relaxed); }
+    int Saturation() { return s_saturation.load(std::memory_order_relaxed); }
+    void SetColour(int brightness, int contrast, int gamma, int saturation)
+    {
+        s_brightness = Clamp(brightness, -50, 50);
+        s_contrast = Clamp(contrast, 50, 150);
+        s_gamma = Clamp(gamma, 50, 200);
+        s_saturation = Clamp(saturation, 0, 200);
+        Save();
+    }
     int Fov() { return s_fov.load(std::memory_order_relaxed); }
     bool Widescreen() { return s_widescreen.load(std::memory_order_relaxed) != 0; }
     void SetWidescreen(bool v) { s_widescreen = v; Save(); }

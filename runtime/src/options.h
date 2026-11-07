@@ -105,6 +105,13 @@ namespace wet::options
     int KeyBindingsVersion();   // changes whenever a binding does
     int FilmGrain();
     void SetFilmGrain(int v);
+    // Picture: brightness -50...50 (0 = as is); contrast 50...150, gamma 50...200,
+    // saturation 0...200 (percent, 100 = as is). Applied with the game's gamma ramp.
+    int Brightness();
+    int Contrast();
+    int Gamma();
+    int Saturation();
+    void SetColour(int brightness, int contrast, int gamma, int saturation);
     // Horizontal field of view at 16:9 in degrees (90 = the game's own; fov.cpp).
     int Fov();
     void SetFov(int v);

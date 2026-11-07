@@ -57,6 +57,7 @@
 #if WET_HAVE_D3D12
 #include "xenia/gpu/d3d12/d3d12_graphics_system.h"
 #include "xenia/gpu/d3d12/pipeline_cache.h"
+#include "xenia/gpu/d3d12/wet_colour.h"
 #endif
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/memory.h"
@@ -404,6 +405,10 @@ namespace
         xe::gpu::wet_force_aniso = wet::options::AnisotropicFiltering();
 #if WET_HAVE_D3D12
         xe::gpu::d3d12::wet_async_pipelines = wet::options::AsyncShaders();
+        xe::gpu::d3d12::wet_brightness = wet::options::Brightness();
+        xe::gpu::d3d12::wet_contrast = wet::options::Contrast();
+        xe::gpu::d3d12::wet_gamma = wet::options::Gamma();
+        xe::gpu::d3d12::wet_saturation = wet::options::Saturation();
 #endif
         if (!s_graphics)
             return;
@@ -1069,6 +1074,32 @@ namespace
                 ApplyPostProcessing();
             }
             {
+                int b = wet::options::Brightness(), c = wet::options::Contrast(), g = wet::options::Gamma(),
+                    sat = wet::options::Saturation();
+                int nb = b, nc = c, ng = g, ns = sat;
+                Row("Brightness");
+                ImGui::SliderInt("##brightness", &nb, -50, 50, "%d");
+                Row("Contrast");
+                ImGui::SliderInt("##contrast", &nc, 50, 150, "%d%%");
+                Row("Gamma");
+                ImGui::SliderInt("##gamma", &ng, 50, 200, "%d%%");
+                Row("Colour");
+                ImGui::SliderInt("##saturation", &ns, 0, 200, "%d%%");
+                if (nb != b || nc != c || ng != g || ns != sat)
+                {
+                    wet::options::SetColour(nb, nc, ng, ns);
+                    ApplyPostProcessing();
+                }
+                if (nb != 0 || nc != 100 || ng != 100 || ns != 100)
+                {
+                    if (ImGui::SmallButton("Reset picture"))
+                    {
+                        wet::options::SetColour(0, 100, 100, 100);
+                        ApplyPostProcessing();
+                    }
+                }
+            }
+            {
                 int grain = wet::options::FilmGrain(), pick = grain;
                 Row("Film grain");
                 ImGui::SliderInt("##grain", &pick, 0, 100, "%d%%");
@@ -1575,6 +1606,10 @@ namespace wet::renderer
         xe::gpu::wet_force_aniso = options::AnisotropicFiltering();
 #if WET_HAVE_D3D12
         xe::gpu::d3d12::wet_async_pipelines = options::AsyncShaders();
+        xe::gpu::d3d12::wet_brightness = options::Brightness();
+        xe::gpu::d3d12::wet_contrast = options::Contrast();
+        xe::gpu::d3d12::wet_gamma = options::Gamma();
+        xe::gpu::d3d12::wet_saturation = options::Saturation();
         xe::gpu::d3d12::wet_preload_pipelines = options::ShaderPreload();
 #endif
         xe::gpu::wet_gpu_progress = renderer_host::GpuProgress;
